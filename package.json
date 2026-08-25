@@ -1,0 +1,24 @@
+{
+  "name": "wumpus-services",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@10.9.3",
+  "workspaces": [
+    "packages/core",
+    "packages/database",
+    "apps/wumpus"
+  ],
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:bot": "NODE_OPTIONS=--max-old-space-size=176 npm run build",
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:migrate": "npm run db:migrate --workspace @huborder/database",
+    "start:bot": "npm run start --workspace @huborder/wumpus",
+    "build:dashboard": "npm run build --prefix packages/core && npm run build --prefix packages/database && npm run build --prefix apps/dashboard"
+  }
+}

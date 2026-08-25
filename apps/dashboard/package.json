@@ -1,0 +1,24 @@
+{
+  "name": "@huborder/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "check": "tsc --noEmit",
+    "start": "next start -p ${PORT:-3000}",
+    "dev": "next dev"
+  },
+  "dependencies": {
+    "@huborder/core": "file:../../packages/core",
+    "@huborder/database": "file:../../packages/database",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.8.3"
+  }
+}

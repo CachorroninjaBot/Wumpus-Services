@@ -1,0 +1,7 @@
+DISPLAY_NAME=Wumpus
+DESCRIPTION=Bot de gestao de comunidades Wumpus.
+MAIN=apps/wumpus/dist/index.js
+LANGUAGE=node
+MEMORY=256
+VERSION=latest
+CUSTOM_COMMAND=npm run build:bot && npm run db:migrate && npm run start:bot
