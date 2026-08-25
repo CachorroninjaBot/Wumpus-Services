@@ -1,6 +1,6 @@
 DISPLAY_NAME=Wumpus
 DESCRIPTION=Bot de gestao de comunidades Wumpus.
-MAIN=apps/wumpus/dist/index.js
+MAIN=apps/wumpus/src/index.js
 LANGUAGE=node
 MEMORY=256
 VERSION=latest
