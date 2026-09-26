@@ -97,7 +97,7 @@ await app.register(fastifyCookie, {
 });
 await app.register(fastifyStatic, {
   root: webRoot,
-  wildcard: false,
+  wildcard: true,
   index: false
 });
 
