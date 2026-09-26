@@ -181,38 +181,53 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   /* -------------------- Login por senha (admin) ---------------------- */
 
   app.post("/auth/admin", async (request, reply) => {
-    const body = request.body as { username?: string; password?: string };
-    const envUser = process.env.DASHBOARD_USERNAME?.trim();
-    const envPass = process.env.DASHBOARD_PASSWORD?.trim();
+    try {
+      const body = (request.body ?? {}) as { username?: string; password?: string };
+      const envUser = process.env.DASHBOARD_USERNAME?.trim();
+      const envPass = process.env.DASHBOARD_PASSWORD?.trim();
 
-    if (!envUser || !envPass) {
-      return reply.code(503).send({ error: "admin_login_not_configured" });
+      if (!envUser || !envPass) {
+        return reply.code(503).send({ error: "admin_login_not_configured" });
+      }
+
+      if ((body.username ?? "").trim() !== envUser || (body.password ?? "") !== envPass) {
+        app.log.info("login por senha recusado: credenciais invalidas");
+        return reply.code(401).send({ error: "invalid_credentials" });
+      }
+
+      const ownerId = ownerIdFromEnv();
+      if (!ownerId) {
+        return reply.code(503).send({ error: "owner_not_configured" });
+      }
+
+      await ensureOwnerSeeded().catch(() => undefined);
+
+      // A tabela sessions exige que o user_id exista em users (foreign key).
+      // No fluxo OAuth isso acontece no upsertUser; aqui precisamos garantir.
+      await upsertUser({
+        id: ownerId,
+        username: envUser,
+        globalName: envUser,
+        avatar: null,
+        avatarUrl: null
+      });
+
+      const { sessionId, expiresAt } = await createSession({
+        userId: ownerId,
+        userAgent: request.headers["user-agent"] ?? null,
+        guilds: []
+      });
+
+      reply.setCookie(
+        SESSION_COOKIE,
+        issueSessionCookie(sessionId),
+        cookieOptions(Math.floor((expiresAt.getTime() - Date.now()) / 1000))
+      );
+      return { ok: true, method: "password" };
+    } catch (error) {
+      app.log.error({ err: error }, "falha no login por senha");
+      return reply.code(500).send({ error: "internal_error" });
     }
-
-    if ((body.username ?? "").trim() !== envUser || (body.password ?? "") !== envPass) {
-      app.log.info("login por senha recusado: credenciais invalidas");
-      return reply.code(401).send({ error: "invalid_credentials" });
-    }
-
-    const ownerId = ownerIdFromEnv();
-    if (!ownerId) {
-      return reply.code(503).send({ error: "owner_not_configured" });
-    }
-
-    await ensureOwnerSeeded().catch(() => undefined);
-
-    const { sessionId, expiresAt } = await createSession({
-      userId: ownerId,
-      userAgent: request.headers["user-agent"] ?? null,
-      guilds: []
-    });
-
-    reply.setCookie(
-      SESSION_COOKIE,
-      issueSessionCookie(sessionId),
-      cookieOptions(Math.floor((expiresAt.getTime() - Date.now()) / 1000))
-    );
-    return { ok: true, method: "password" };
   });
 
   /* ------------------------------ Sessao ----------------------------- */
