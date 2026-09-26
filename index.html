@@ -3,11 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
     <title>Wumpus · Central de comando da sua comunidade</title>
     <meta name="description" content="Wumpus: proteção, atendimento, equipe e automações para comunidades Discord, com configuração por grupo e exceções por servidor." />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="display:grid;min-height:100vh;place-items:center;font-family:system-ui,sans-serif;text-align:center;padding:40px">
+        <div>
+          <h1 style="font-size:24px;margin-bottom:8px">Wumpus</h1>
+          <p style="color:#666">Este site precisa de JavaScript habilite nas configurações do navegador.</p>
+        </div>
+      </div>
+    </noscript>
     <script type="module" src="/src/web/main.tsx"></script>
   </body>
 </html>

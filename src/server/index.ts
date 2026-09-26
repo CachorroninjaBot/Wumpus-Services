@@ -98,7 +98,17 @@ await app.register(fastifyCookie, {
 await app.register(fastifyStatic, {
   root: webRoot,
   wildcard: true,
-  index: false
+  index: false,
+  setHeaders(res, filePath) {
+    // Assets com hash no nome: cache longo
+    if (filePath.includes("/assets/")) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    }
+    // HTML: sempre revalidar
+    else if (filePath.endsWith(".html")) {
+      res.setHeader("Cache-Control", "no-cache, must-revalidate");
+    }
+  }
 });
 
 await registerRoutes(app);
