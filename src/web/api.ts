@@ -359,6 +359,49 @@ export const addDashboardMember = (userId: string, role: string, note?: string) 
 export const removeDashboardMember = (userId: string) =>
   api<{ ok: boolean }>(`/api/admin/members/${userId}`, { method: "DELETE" });
 
+/* ---------------------------- Licenças ----------------------------- */
+
+export type License = {
+  id: number;
+  discordUserId: string;
+  plan: "starter" | "standard" | "professional" | "enterprise";
+  status: "active" | "suspended" | "expired";
+  maxServers: number;
+  expiresAt: string | null;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PlanLimits = {
+  plan: string;
+  maxServers: number;
+  aiEnabled: boolean;
+  ocrMonthlyLimit: number;
+  features: Record<string, boolean>;
+};
+
+export const getLicenses = () =>
+  api<{ licenses: License[] }>("/api/admin/licenses");
+
+export const createLicense = (body: {
+  discordUserId: string;
+  plan: string;
+  maxServers?: number;
+  expiresAt?: string;
+  notes?: string;
+}) =>
+  api<{ ok: boolean }>("/api/admin/licenses", {
+    method: "POST",
+    body: JSON.stringify(body)
+  });
+
+export const deleteLicense = (licenseId: number) =>
+  api<{ ok: boolean }>(`/api/admin/licenses/${licenseId}`, { method: "DELETE" });
+
+export const getMyLimits = () =>
+  api<{ plan: string; license: License | null; limits: PlanLimits }>("/api/limits");
+
 /* -------------------- Assistente de configuração IA ---------------- */
 
 export type AiConfigSuggestion = {

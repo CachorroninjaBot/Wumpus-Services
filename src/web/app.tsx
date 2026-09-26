@@ -7,10 +7,13 @@ import {
   closeIncident,
   createArticle,
   createGroup,
+  createLicense,
   deleteArticle,
+  deleteLicense,
   getAccess,
   getArticles,
   getIncidents,
+  getLicenses,
   getMe,
   getMembers,
   getMetrics,
@@ -25,6 +28,7 @@ import {
   type GuildOverview,
   type Incident,
   type KnowledgeArticle,
+  type License,
   type Me,
   type MetricsSnapshot,
   type Route,
@@ -1310,19 +1314,25 @@ function AdminPage() {
   const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
   const [access, setAccess] = useState<AccessInfo | null>(null);
   const [members, setMembers] = useState<Array<{ userId: string; role: string; note: string | null; createdAt: string; lastSeenAt: string | null }>>([]);
+  const [licenses, setLicenses] = useState<License[]>([]);
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [newUserId, setNewUserId] = useState("");
   const [newRole, setNewRole] = useState("member");
   const [busy, setBusy] = useState(false);
+  const [licUserId, setLicUserId] = useState("");
+  const [licPlan, setLicPlan] = useState("standard");
+  const [licMaxServers, setLicMaxServers] = useState(2);
+  const [licNotes, setLicNotes] = useState("");
 
   const reload = useCallback(async () => {
     try {
-      const [metricsData, accessData, membersData] = await Promise.all([
+      const [metricsData, accessData, membersData, licensesData] = await Promise.all([
         getMetrics(60).catch(() => null),
         getAccess().catch(() => null),
-        getMembers().catch(() => null)
+        getMembers().catch(() => null),
+        getLicenses().catch(() => null)
       ]);
       setMetrics(metricsData);
       setAccess(accessData);
@@ -1330,6 +1340,7 @@ function AdminPage() {
         setMembers(membersData.members);
         setOwnerId(membersData.ownerId);
       }
+      if (licensesData) setLicenses(licensesData.licenses);
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) setError("Acesso restrito a administradores.");
       else setError("Não foi possível carregar o painel de administração.");
@@ -1368,6 +1379,44 @@ function AdminPage() {
       await reload();
     } catch {
       setError("Não foi possível remover o membro.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAddLicense(event: React.FormEvent) {
+    event.preventDefault();
+    if (!/^\d{17,20}$/.test(licUserId.trim())) {
+      setError("ID do Discord inválido. Deve ter 17-20 dígitos.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const planLimits: Record<string, number> = { starter: 1, standard: 2, professional: 5, enterprise: 999 };
+      await createLicense({
+        discordUserId: licUserId.trim(),
+        plan: licPlan,
+        maxServers: planLimits[licPlan] ?? licMaxServers,
+        notes: licNotes.trim() || undefined
+      });
+      setLicUserId("");
+      setLicNotes("");
+      await reload();
+    } catch {
+      setError("Não foi possível criar a licença.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteLicense(licenseId: number) {
+    setBusy(true);
+    try {
+      await deleteLicense(licenseId);
+      await reload();
+    } catch {
+      setError("Não foi possível remover a licença.");
     } finally {
       setBusy(false);
     }
@@ -1517,6 +1566,7 @@ function AdminPage() {
 
       {/* Gerenciamento de membros */}
       {access?.isAdmin ? (
+        <>
         <div className="columns" style={{ marginTop: 20 }}>
           <Panel
             title="Membros da dashboard"
@@ -1593,6 +1643,109 @@ function AdminPage() {
             </Panel>
           </aside>
         </div>
+
+        {/* Licenças e planos */}
+        <div className="columns" style={{ marginTop: 20 }}>
+          <Panel
+            title="Licenças e planos"
+            subtitle="Gerencie os planos dos usuários. O plano define limites de servidores, IA e features."
+            action={<span className="panel-count">{licenses.length} licença(s)</span>}
+          >
+            <div style={{ padding: "12px 16px" }}>
+              {licenses.length ? licenses.map((lic) => {
+                const planColors: Record<string, string> = { starter: "inherit", standard: "active", professional: "override", enterprise: "active" };
+                const planLabels: Record<string, string> = { starter: "Starter", standard: "Essencial", professional: "Pro", enterprise: "Escala" };
+                const statusColors: Record<string, string> = { active: "active", suspended: "disabled", expired: "disabled" };
+                return (
+                  <div key={lic.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid var(--line-soft)" }}>
+                    <span className={`chip chip-${planColors[lic.plan] ?? "inherit"}`}>
+                      {planLabels[lic.plan] ?? lic.plan}
+                    </span>
+                    <span className={`chip chip-${statusColors[lic.status] ?? "inherit"}`}>
+                      {lic.status === "active" ? "Ativo" : lic.status === "suspended" ? "Suspenso" : "Expirado"}
+                    </span>
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, flex: 1 }}>{lic.discordUserId}</span>
+                    <span style={{ color: "var(--text-3)", fontSize: 10 }}>
+                      {lic.maxServers} servidor(es) · {lic.notes?.slice(0, 40) || "sem nota"}
+                    </span>
+                    <button
+                      type="button"
+                      className="icon-button icon-button-danger"
+                      disabled={busy}
+                      onClick={() => handleDeleteLicense(lic.id)}
+                      title="Remover licença"
+                    >
+                      <Icon name="close" size={14} />
+                    </button>
+                  </div>
+                );
+              }) : (
+                <div style={{ padding: "20px 0", textAlign: "center", color: "var(--text-3)", fontSize: 12 }}>
+                  Nenhuma licença registrada. Adicione abaixo.
+                </div>
+              )}
+            </div>
+          </Panel>
+
+          <aside className="side-col">
+            <Panel title="Nova licença" subtitle="Atribua um plano a um usuário.">
+              <form onSubmit={handleAddLicense} style={{ padding: "16px", display: "grid", gap: 12 }}>
+                <input
+                  value={licUserId}
+                  onChange={(e) => setLicUserId(e.target.value)}
+                  placeholder="ID do Discord (17-20 dígitos)"
+                  pattern="\d{17,20}"
+                  required
+                  style={{ width: "100%", padding: "10px 11px", border: "1px solid var(--line)", borderRadius: 9, background: "var(--bg-elev)", color: "var(--text)", font: "inherit", fontSize: 12 }}
+                />
+                <select
+                  value={licPlan}
+                  onChange={(e) => {
+                    setLicPlan(e.target.value);
+                    const limits: Record<string, number> = { starter: 1, standard: 2, professional: 5, enterprise: 999 };
+                    setLicMaxServers(limits[e.target.value] ?? 2);
+                  }}
+                  style={{ width: "100%", padding: "10px 11px", border: "1px solid var(--line)", borderRadius: 9, background: "var(--bg-elev)", color: "var(--text)", font: "inherit", fontSize: 12 }}
+                >
+                  <option value="starter">Starter (1 servidor, sem IA)</option>
+                  <option value="standard">Essencial (2 servidores, sem IA)</option>
+                  <option value="professional">Pro (5 servidores, Knowledge IA + OCR)</option>
+                  <option value="enterprise">Escala (ilimitado, tudo liberado)</option>
+                </select>
+                <input
+                  value={licNotes}
+                  onChange={(e) => setLicNotes(e.target.value)}
+                  placeholder="Nota (opcional)"
+                  maxLength={200}
+                  style={{ width: "100%", padding: "10px 11px", border: "1px solid var(--line)", borderRadius: 9, background: "var(--bg-elev)", color: "var(--text)", font: "inherit", fontSize: 12 }}
+                />
+                <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
+                  {busy ? "Criando…" : "Criar licença"}
+                </button>
+              </form>
+            </Panel>
+
+            <Panel title="Limites do plano" subtitle="O que cada plano permite.">
+              <div style={{ padding: "16px", fontSize: 11, display: "grid", gap: 10 }}>
+                {[
+                  { plan: "Starter", servers: "1", ai: "Não", ocr: "0", features: "automod, security, tickets, servers" },
+                  { plan: "Essencial", servers: "2", ai: "Não", ocr: "0", features: "+ moderação, logs, forms, automações" },
+                  { plan: "Pro", servers: "5", ai: "Knowledge", ocr: "500/mês", features: "+ Knowledge IA, OCR, roles, transcripts" },
+                  { plan: "Escala", servers: "∞", ai: "∞", ocr: "∞", features: "tudo ilimitado" }
+                ].map((p) => (
+                  <div key={p.plan} style={{ padding: "8px 0", borderBottom: "1px solid var(--line-soft)" }}>
+                    <strong style={{ fontSize: 12 }}>{p.plan}</strong>
+                    <div style={{ color: "var(--text-3)", marginTop: 4 }}>
+                      {p.servers} servidor(s) · IA: {p.ai} · OCR: {p.ocr}
+                    </div>
+                    <div style={{ color: "var(--text-3)", fontSize: 10 }}>{p.features}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </aside>
+        </div>
+        </>
       ) : null}
     </div>
   );

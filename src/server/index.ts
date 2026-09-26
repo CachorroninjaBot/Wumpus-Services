@@ -37,6 +37,15 @@ const app = Fastify({
   trustProxy: true
 });
 
+// Impede o Cloudflare de injetar/modificar respostas (Rocket Loader, Auto Minify, beacon)
+app.addHook("onSend", (_request, reply, _payload, done) => {
+  const existing = String(reply.getHeader("Cache-Control") ?? "");
+  if (!existing.includes("no-transform")) {
+    reply.header("Cache-Control", existing ? `${existing}, no-transform` : "no-transform");
+  }
+  done();
+});
+
 /** Logger do bot — formato limpo com prefixo */
 const botLog = {
   info: (message: string, extra?: Record<string, unknown>) => {
@@ -103,10 +112,14 @@ await app.register(fastifyStatic, {
     // Assets com hash no nome: cache longo
     if (filePath.includes("/assets/")) {
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("X-Content-Type-Options", "nosniff");
     }
-    // HTML: sempre revalidar
+    // HTML: sempre revalidar, sem transformação do Cloudflare
     else if (filePath.endsWith(".html")) {
-      res.setHeader("Cache-Control", "no-cache, must-revalidate");
+      res.setHeader("Cache-Control", "no-cache, no-transform, must-revalidate");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("X-Frame-Options", "SAMEORIGIN");
+      res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     }
   }
 });
@@ -154,7 +167,9 @@ app.setNotFoundHandler((request, reply) => {
     return reply.code(405).send({ error: "method_not_allowed" });
   }
 
-  // SPA fallback
+  // SPA fallback — com headers anti-transformação pro Cloudflare não injetar scripts
+  reply.header("Cache-Control", "no-cache, no-transform, must-revalidate");
+  reply.header("X-Content-Type-Options", "nosniff");
   return reply.type("text/html; charset=utf-8").sendFile("index.html");
 });
 
