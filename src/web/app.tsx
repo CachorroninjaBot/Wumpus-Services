@@ -171,7 +171,15 @@ function LoginScreen({ mode, onToggleMode }: { mode: "dark" | "light"; onToggleM
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginError, setLoginError] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get("error");
+    if (error === "not_authorized") return "Seu ID do Discord não está na lista de autorizados. Peça ao dono para adicioná-lo.";
+    if (error === "access_denied") return "Acesso negado pelo Discord.";
+    if (error === "invalid_state") return "Sessão de login expirada. Tente novamente.";
+    if (error === "oauth_failed") return "Falha na autenticação pelo Discord. Tente novamente.";
+    return null;
+  });
 
   async function handlePasswordLogin(event: React.FormEvent) {
     event.preventDefault();
@@ -204,6 +212,11 @@ function LoginScreen({ mode, onToggleMode }: { mode: "dark" | "light"; onToggleM
         <p className="kicker">WUMPUS PARA DISCORD</p>
         <h1>Gerenciar uma comunidade pode ser simples.</h1>
         <p className="lede">{brand.description}</p>
+        {loginError ? (
+          <div className="notice notice-error" style={{ marginBottom: 14 }}>
+            <Icon name="alert" size={14} /> {loginError}
+          </div>
+        ) : null}
         <a className="btn btn-primary btn-lg" href="/auth/discord">
           <Icon name="discord" />
           Entrar com Discord
@@ -749,13 +762,13 @@ function GuildOverviewPage({ guildId }: { guildId: string }) {
     };
   }, [guildId]);
 
-  if (error) return <Notice tone="error">{error}</Notice>;
-  if (!overview) return <Spinner label="Carregando o servidor…" />;
-
   const byModule = useMemo(
-    () => new Map(overview.modules.map((entry) => [entry.module, entry])),
+    () => (overview ? new Map(overview.modules.map((entry) => [entry.module, entry])) : new Map()),
     [overview]
   );
+
+  if (error) return <Notice tone="error">{error}</Notice>;
+  if (!overview) return <Spinner label="Carregando o servidor…" />;
 
   return (
     <div className="page">
