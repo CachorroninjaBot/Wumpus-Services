@@ -127,12 +127,24 @@ app.get("/api/status", async () => {
 });
 
 app.setNotFoundHandler((request, reply) => {
-  if (request.raw.url?.startsWith("/api") || request.raw.url?.startsWith("/auth")) {
+  const url = request.raw.url ?? "";
+
+  // API e auth: 404 limpo
+  if (url.startsWith("/api") || url.startsWith("/auth")) {
     return reply.code(404).send({ error: "not_found" });
   }
+
+  // Assets estáticos que não existem: 404 puro (não devolver index.html)
+  if (url.startsWith("/assets/") || /\.(js|css|png|jpg|svg|woff2?|ico)$/.test(url)) {
+    return reply.code(404).send("Not Found");
+  }
+
+  // POST/PUT/etc em rotas desconhecidas
   if (request.method !== "GET" && request.method !== "HEAD") {
     return reply.code(405).send({ error: "method_not_allowed" });
   }
+
+  // SPA fallback
   return reply.type("text/html; charset=utf-8").sendFile("index.html");
 });
 
