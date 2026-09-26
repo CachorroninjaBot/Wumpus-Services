@@ -4,6 +4,7 @@ import { defaultsFor } from "../core/module-defaults.js";
 import {
   verifyWebhookSecret,
   isShardPayEvent,
+  getPlanLimits,
   getPlanLimitsFromProductId,
   type ShardPayEvent,
   type InvoiceData,
@@ -327,11 +328,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const license = result.rows[0];
 
     if (!license || license.status !== "active") {
-      const { getPlanLimits } = await import("./shardpay.js");
       return { plan: "starter", license: null, limits: getPlanLimits("starter") };
     }
 
-    const { getPlanLimits } = await import("./shardpay.js");
     return { plan: license.plan, license, limits: getPlanLimits(license.plan) };
   });
 

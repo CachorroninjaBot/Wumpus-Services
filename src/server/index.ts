@@ -18,7 +18,7 @@ const host = "0.0.0.0";
 
 const app = Fastify({
   logger: {
-    level: process.env.LOG_LEVEL ?? "warn",
+    level: process.env.LOG_LEVEL ?? "info",
     serializers: {
       req(request) {
         return { method: request.method, url: request.url };
@@ -29,29 +29,6 @@ const app = Fastify({
     }
   },
   trustProxy: true
-});
-
-// Loga apenas requests relevantes (erros, rotas de auth, mudanças de estado)
-app.addHook("onResponse", (request, reply, done) => {
-  const url = request.url ?? "";
-  const status = reply.statusCode;
-
-  // Assets e health checks: silencioso
-  if (url.startsWith("/assets/") || url === "/healthz" || url === "/favicon.ico") {
-    done();
-    return;
-  }
-
-  // Erros: sempre loga
-  if (status >= 400) {
-    app.log.warn({ method: request.method, url, status, ms: Math.round(reply.elapsedTime) }, `${request.method} ${url} → ${status}`);
-  }
-  // Auth e mudanças: loga em info
-  else if (url.startsWith("/auth/") || request.method !== "GET") {
-    app.log.info({ method: request.method, url, status, ms: Math.round(reply.elapsedTime) }, `${request.method} ${url} → ${status}`);
-  }
-
-  done();
 });
 
 /** Adapta o log do Fastify para a interface que o bot espera. */
