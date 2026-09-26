@@ -518,17 +518,33 @@ export function createBot(token: string, log: BotLogger): BotHandle {
       return;
     }
 
+    const reviewerRoleIds = Array.isArray(config.config.reviewerRoleIds) ? config.config.reviewerRoleIds as string[] : [];
+
+    // Busca ou cria o formulário padrão do servidor
+    const formResult = await getPool().query<{ id: number }>(
+      `select id from forms where guild_id = $1 and is_active = true order by created_at limit 1`,
+      [guildId]
+    );
+    let formId = formResult.rows[0]?.id;
+    if (!formId) {
+      const created = await getPool().query<{ id: number }>(
+        `insert into forms (guild_id, name, description, reviewer_role_ids)
+         values ($1, 'Candidaturas', 'Formulário padrão', $2) returning id`,
+        [guildId, reviewerRoleIds]
+      );
+      formId = created.rows[0].id;
+    }
+
     // Insere a submissão pendente
     const result = await getPool().query<{ id: number }>(
       `insert into form_submissions (form_id, guild_id, user_id, answers, status)
-       values (0, $1, $2, $3::jsonb, 'pending') returning id`,
-      [guildId, interaction.user.id, JSON.stringify({ submittedAt: new Date().toISOString(), channelId: interaction.channelId })]
+       values ($1, $2, $3, $4::jsonb, 'pending') returning id`,
+      [formId, guildId, interaction.user.id, JSON.stringify({ submittedAt: new Date().toISOString(), channelId: interaction.channelId })]
     );
     const submissionId = result.rows[0].id;
 
     // Notifica revisores
     const reviewChannelId = typeof config.config.reviewChannelId === "string" ? config.config.reviewChannelId : "";
-    const reviewerRoleIds = Array.isArray(config.config.reviewerRoleIds) ? config.config.reviewerRoleIds as string[] : [];
     if (reviewChannelId) {
       const roleMentions = reviewerRoleIds.length ? reviewerRoleIds.map((id) => `<@&${id}>`).join(" ") : "";
       const currentClient = client;
