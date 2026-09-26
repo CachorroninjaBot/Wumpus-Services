@@ -71,6 +71,14 @@ export type GuildOverview = {
     knowledgeArticles: number;
   };
   events: Array<{ id: number; module: string; eventType: string; severity: string; occurredAt: string }>;
+  plan?: {
+    plan: string;
+    maxServers: number;
+    aiEnabled: boolean;
+    ocrMonthlyLimit: number;
+    modules: string[];
+  };
+  lockedModules?: string[];
 };
 
 export type GroupDetails = {

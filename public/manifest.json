@@ -1,0 +1,27 @@
+{
+  "name": "Wumpus · Central de comando",
+  "short_name": "Wumpus",
+  "description": "Proteção, atendimento e automações para comunidades Discord.",
+  "start_url": "/wumpus",
+  "display": "standalone",
+  "background_color": "#08090d",
+  "theme_color": "#7c5cff",
+  "orientation": "portrait-primary",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Admin",
+      "url": "/wumpus/admin",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    }
+  ]
+}

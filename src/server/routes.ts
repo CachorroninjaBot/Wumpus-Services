@@ -10,6 +10,7 @@ import {
   type InvoiceData,
   type SubscriptionCreatedData
 } from "./shardpay.js";
+import { canUseModule } from "./plan-enforcement.js";
 import {
   authorizeUrl,
   avatarUrl,
@@ -546,7 +547,14 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
     const overview = await getGuildOverview(guildId);
     if (!overview) return reply.code(404).send({ error: "guild_not_found" });
-    return overview;
+
+    // Adiciona info do plano
+    const { getFullPlanLimits, PLAN_MODULES } = await import("./plan-enforcement.js");
+    const planLimits = await getFullPlanLimits(session.userId);
+    const lockedModules = [...PLAN_MODULES.starter].filter(
+      (m) => !PLAN_MODULES[planLimits.plan]?.has(m)
+    );
+    return { ...overview, plan: planLimits, lockedModules };
   });
 
   /** Config efetiva de um modulo, ja com heranca resolvida. */
@@ -585,6 +593,12 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
     const module = parseModule(rawModule);
     if (!module) return reply.code(404).send({ error: "unknown_module" });
+
+    // Verificação de plano: o módulo está disponível?
+    const planCheck = await canUseModule(session.userId, module);
+    if (!planCheck.allowed) {
+      return reply.code(403).send({ error: "plan_limit", reason: planCheck.reason, plan: planCheck.plan });
+    }
 
     const body = request.body as { mode?: string; enabled?: boolean; config?: Record<string, unknown> };
     const group = await getGroupForGuild(guildId);
@@ -1043,6 +1057,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!session) return;
     const { guildId } = request.params as { guildId: string };
     if (!hasGuildAccess(session, guildId)) return reply.code(403).send({ error: "access_denied" });
+
+    // Verificação de plano: IA disponível?
+    const { canUseAI } = await import("./plan-enforcement.js");
+    const aiCheck = await canUseAI(session.userId);
+    if (!aiCheck.allowed) {
+      return reply.code(403).send({ error: "plan_limit", reason: aiCheck.reason, plan: aiCheck.plan });
+    }
 
     const body = request.body as { prompt?: string };
     const prompt = (body.prompt ?? "").trim();

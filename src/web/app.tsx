@@ -876,6 +876,32 @@ function GuildOverviewPage({ guildId }: { guildId: string }) {
         </article>
       </section>
 
+      {overview.plan ? (
+        <section className="banner" style={{ borderColor: "var(--brand-line)", background: "var(--brand-soft)" }}>
+          <span className="banner-bar" style={{ background: "var(--brand)" }} />
+          <div>
+            <small>SEU PLANO</small>
+            <strong style={{ textTransform: "capitalize" }}>
+              {overview.plan.plan === "starter" ? "Starter (Grátis)" :
+               overview.plan.plan === "standard" ? "Essencial" :
+               overview.plan.plan === "professional" ? "Pro" :
+               overview.plan.plan === "enterprise" ? "Escala" : overview.plan.plan}
+            </strong>
+            <p>
+              {overview.plan.maxServers === 999 ? "Servidores ilimitados" : `${overview.plan.maxServers} servidor(es)`} ·
+              {overview.plan.aiEnabled ? " IA ativa" : " Sem IA"} ·
+              {overview.plan.ocrMonthlyLimit >= 999999 ? " OCR ilimitado" : overview.plan.ocrMonthlyLimit > 0 ? ` ${overview.plan.ocrMonthlyLimit} OCR/mês` : " Sem OCR"}
+              {(overview.lockedModules?.length ?? 0) > 0 ? ` · ${overview.lockedModules!.length} módulo(s) bloqueado(s)` : ""}
+            </p>
+          </div>
+          {(overview.lockedModules?.length ?? 0) > 0 ? (
+            <button type="button" className="btn btn-primary" style={{ fontSize: 11, padding: "6px 12px" }}>
+              Fazer upgrade
+            </button>
+          ) : null}
+        </section>
+      ) : null}
+
       <div className="columns">
         <Panel
           title="Recursos do Wumpus"
@@ -888,22 +914,26 @@ function GuildOverviewPage({ guildId }: { guildId: string }) {
               <div className="module-list">
                 {modulesOf(group.id).map((descriptor) => {
                   const state = byModule.get(descriptor.id);
+                  const isLocked = overview.lockedModules?.includes(descriptor.id) ?? false;
                   return (
                     <button
                       key={descriptor.id}
                       type="button"
-                      className="module-row"
-                      onClick={() => navigate(`/wumpus/${guildId}/${descriptor.id}`)}
+                      className={`module-row${isLocked ? " is-locked" : ""}`}
+                      onClick={() => isLocked ? undefined : navigate(`/wumpus/${guildId}/${descriptor.id}`)}
+                      style={isLocked ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
                     >
                       <span className={`module-icon group-${group.id}`}>
-                        <Icon name={descriptor.icon} />
+                        <Icon name={isLocked ? "key" : descriptor.icon} />
                       </span>
                       <div>
                         <strong>{descriptor.label}</strong>
-                        <small>{descriptor.description}</small>
+                        <small>{isLocked ? "Faça upgrade para acessar" : descriptor.description}</small>
                       </div>
-                      {state ? <StateChip module={state} /> : null}
-                      <Icon name="chevron" size={15} />
+                      {isLocked ? (
+                        <em className="chip chip-disabled">Plano</em>
+                      ) : state ? <StateChip module={state} /> : null}
+                      {isLocked ? null : <Icon name="chevron" size={15} />}
                     </button>
                   );
                 })}
