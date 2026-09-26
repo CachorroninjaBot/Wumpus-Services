@@ -1,5 +1,6 @@
 import { Routes, type Client, type Message } from "discord.js";
 import { getPool, recordAuditEvent } from "../server/db/index.js";
+import { groqChat, qualityModel, fastModel } from "./llm.js";
 
 /**
  * Base de conhecimento: respostas assistidas a partir de conteudo APROVADO.
@@ -35,7 +36,6 @@ type Article = {
 const MIN_QUERY_CHARS = 12;
 const MIN_SCORE = 3;
 const MAX_ARTICLES = 25;
-const AI_TIMEOUT_MS = 15_000;
 const REPLY_COOLDOWN_MS = 20_000;
 
 /** Evita responder duas vezes a mesma pergunta seguida. */
@@ -103,40 +103,30 @@ export function bestMatch(articles: Article[], question: string): { article: Art
 
 /** Reescreve o artigo de forma natural — usando SOMENTE o que o artigo diz. */
 async function composeWithAi(article: Article, question: string): Promise<string | null> {
-  const apiKey = process.env.WUMPUS_GROQ_API_KEY;
-  if (!apiKey) return null;
-
-  const model = process.env.WUMPUS_GROQ_MODEL ?? "openai/gpt-oss-120b";
-
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        temperature: 0.3,
-        max_tokens: 500,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Voce responde duvidas de membros usando SOMENTE o artigo fornecido. " +
-              "Nunca acrescente informacao que nao esteja nele. Se o artigo nao responder " +
-              "a pergunta, diga que a equipe vai ajudar. Seja breve e cordial, em portugues do Brasil."
-          },
-          {
-            role: "user",
-            content: `Pergunta do membro: ${question}\n\nArtigo aprovado "${article.title}":\n${article.body}`
-          }
-        ]
-      }),
-      signal: AbortSignal.timeout(AI_TIMEOUT_MS)
+    const result = await groqChat({
+      model: fastModel(),
+      fallbackModel: qualityModel(),
+      temperature: 0.3,
+      maxTokens: 500,
+      timeoutMs: 15_000,
+      maxRetries: 1,
+      purpose: "knowledge_rewrite",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Voce responde duvidas de membros usando SOMENTE o artigo fornecido. " +
+            "Nunca acrescente informacao que nao esteja nele. Se o artigo nao responder " +
+            "a pergunta, diga que a equipe vai ajudar. Seja breve e cordial, em portugues do Brasil."
+        },
+        {
+          role: "user",
+          content: `Pergunta do membro: ${question}\n\nArtigo aprovado "${article.title}":\n${article.body}`
+        }
+      ]
     });
-
-    if (!response.ok) return null;
-    const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const answer = payload.choices?.[0]?.message?.content?.trim();
-    return answer || null;
+    return result.text || null;
   } catch {
     return null;
   }

@@ -2,25 +2,33 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { brand, moduleGroups, modules, modulesOf, type ModuleId } from "../core/brand";
 import {
   ApiError,
+  addDashboardMember,
+  adminLogin,
   closeIncident,
   createArticle,
   createGroup,
   deleteArticle,
+  getAccess,
   getArticles,
   getIncidents,
   getMe,
+  getMembers,
+  getMetrics,
   getOverview,
   logout,
   navigate,
   parseRoute,
+  removeDashboardMember,
   updateArticle,
   type Group,
   type GuildOverview,
   type Incident,
   type KnowledgeArticle,
   type Me,
+  type MetricsSnapshot,
   type Route,
-  type SessionGuild
+  type SessionGuild,
+  type AccessInfo
 } from "./api";
 import { GroupPage } from "./group-page";
 import { ModulePage } from "./module-page";
@@ -159,6 +167,32 @@ export function App() {
  * ------------------------------------------------------------------ */
 
 function LoginScreen({ mode, onToggleMode }: { mode: "dark" | "light"; onToggleMode: () => void }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  async function handlePasswordLogin(event: React.FormEvent) {
+    event.preventDefault();
+    setLoginBusy(true);
+    setLoginError(null);
+    try {
+      await adminLogin(username, password);
+      window.location.href = "/wumpus";
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setLoginError("Usuário ou senha incorretos.");
+      } else if (err instanceof ApiError && err.status === 503) {
+        setLoginError("Login por senha não configurado no servidor.");
+      } else {
+        setLoginError("Não foi possível entrar. Tente novamente.");
+      }
+    } finally {
+      setLoginBusy(false);
+    }
+  }
+
   return (
     <main className="login">
       <div className="login-glow" />
@@ -175,6 +209,39 @@ function LoginScreen({ mode, onToggleMode }: { mode: "dark" | "light"; onToggleM
           Entrar com Discord
           <Icon name="chevron" size={16} />
         </a>
+        <button
+          type="button"
+          className="btn btn-ghost btn-lg"
+          style={{ marginTop: 10 }}
+          onClick={() => setShowPassword(!showPassword)}
+        >
+          <Icon name="key" size={16} />
+          {showPassword ? "Ocultar login por senha" : "Entrar com senha de admin"}
+        </button>
+        {showPassword ? (
+          <form className="login-password-form" onSubmit={handlePasswordLogin} style={{ marginTop: 14 }}>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Usuário"
+              autoComplete="username"
+              required
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Senha"
+              autoComplete="current-password"
+              required
+            />
+            {loginError ? <p className="form-error">{loginError}</p> : null}
+            <button className="btn btn-primary btn-block" type="submit" disabled={loginBusy}>
+              {loginBusy ? "Entrando…" : "Entrar"}
+            </button>
+          </form>
+        ) : null}
         <ul className="login-points">
           <li>
             <Icon name="check" size={15} /> Você vê apenas os servidores que pode gerenciar
@@ -321,6 +388,9 @@ function Sidebar({
         <button type="button" className="nav-item" onClick={() => navigate("/wumpus")}>
           <Icon name="layers" /> Grupos e servidores
         </button>
+        <button type="button" className="nav-item" onClick={() => navigate("/wumpus/admin")}>
+          <Icon name="shield" /> Admin
+        </button>
       </footer>
     </aside>
   );
@@ -371,6 +441,9 @@ function Content({
   session: Me;
   onGroupsChanged: () => Promise<void>;
 }) {
+  if (route.name === "admin") {
+    return <AdminPage />;
+  }
   if (route.name === "module") {
     return <ModulePage guildId={route.guildId} module={route.module} />;
   }
@@ -1162,6 +1235,302 @@ function KnowledgePanel({ guildId }: { guildId: string }) {
         />
       )}
     </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Admin: painel de métricas e membros
+ * ------------------------------------------------------------------ */
+
+function AdminPage() {
+  const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
+  const [access, setAccess] = useState<AccessInfo | null>(null);
+  const [members, setMembers] = useState<Array<{ userId: string; role: string; note: string | null; createdAt: string; lastSeenAt: string | null }>>([]);
+  const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [newUserId, setNewUserId] = useState("");
+  const [newRole, setNewRole] = useState("member");
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(async () => {
+    try {
+      const [metricsData, accessData, membersData] = await Promise.all([
+        getMetrics(60).catch(() => null),
+        getAccess().catch(() => null),
+        getMembers().catch(() => null)
+      ]);
+      setMetrics(metricsData);
+      setAccess(accessData);
+      if (membersData) {
+        setMembers(membersData.members);
+        setOwnerId(membersData.ownerId);
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) setError("Acesso restrito a administradores.");
+      else setError("Não foi possível carregar o painel de administração.");
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  async function handleAddMember(event: React.FormEvent) {
+    event.preventDefault();
+    if (!/^\d{17,20}$/.test(newUserId.trim())) {
+      setError("ID do Discord inválido. Deve ter 17-20 dígitos.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await addDashboardMember(newUserId.trim(), newRole);
+      setNewUserId("");
+      await reload();
+    } catch {
+      setError("Não foi possível adicionar o membro.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRemoveMember(userId: string) {
+    setBusy(true);
+    try {
+      await removeDashboardMember(userId);
+      await reload();
+    } catch {
+      setError("Não foi possível remover o membro.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!loaded) return <Spinner label="Carregando admin…" />;
+  if (error && !metrics && !access) return <Notice tone="error">{error}</Notice>;
+
+  const httpRoutes = metrics?.routes.filter((r) => r.kind === "http") ?? [];
+  const aiRoutes = metrics?.routes.filter((r) => r.kind === "ai") ?? [];
+
+  return (
+    <div className="page">
+      <header className="page-head">
+        <div className="page-title">
+          <span className="module-title-icon group-protect">
+            <Icon name="shield" size={22} />
+          </span>
+          <div>
+            <p className="kicker">ADMINISTRAÇÃO</p>
+            <h1>Painel de controle</h1>
+            <p>Métricas, membros e saúde do sistema.</p>
+          </div>
+        </div>
+        <div className="page-actions">
+          <button className="btn btn-ghost" onClick={() => reload()}>
+            <Icon name="refresh" size={15} /> Atualizar
+          </button>
+        </div>
+      </header>
+
+      {error ? <Notice tone="error">{error}</Notice> : null}
+
+      {/* Métricas de performance */}
+      {metrics ? (
+        <>
+          <section className="stat-grid">
+            <article className="stat">
+              <span className="stat-icon tone-info">
+                <Icon name="chart" />
+              </span>
+              <div>
+                <small>Requisições ({metrics.windowMinutes} min)</small>
+                <strong>{metrics.totals.requests}</strong>
+                <em>{metrics.totals.requestErrors} erro(s)</em>
+              </div>
+            </article>
+            <article className="stat">
+              <span className="stat-icon tone-ok">
+                <Icon name="bolt" />
+              </span>
+              <div>
+                <small>Latência média</small>
+                <strong>{metrics.totals.avgRequestMs}ms</strong>
+                <em>respostas HTTP</em>
+              </div>
+            </article>
+            <article className="stat">
+              <span className="stat-icon tone-brand">
+                <Icon name="spark" />
+              </span>
+              <div>
+                <small>Chamadas à IA</small>
+                <strong>{metrics.totals.aiCalls}</strong>
+                <em>{metrics.totals.aiErrors} erro(s) · {metrics.totals.avgAiMs}ms média</em>
+              </div>
+            </article>
+            <article className="stat">
+              <span className={`stat-icon ${metrics.totals.requestErrors > 0 ? "tone-danger" : "tone-ok"}`}>
+                <Icon name="shield" />
+              </span>
+              <div>
+                <small>Taxa de erro</small>
+                <strong>
+                  {metrics.totals.requests ? Math.round((metrics.totals.requestErrors / metrics.totals.requests) * 100) : 0}%
+                </strong>
+                <em>últimos {metrics.windowMinutes} minutos</em>
+              </div>
+            </article>
+          </section>
+
+          {/* Rotas mais usadas */}
+          {httpRoutes.length ? (
+            <Panel title="Rotas HTTP" subtitle="Performance por endpoint.">
+              <div style={{ padding: "12px 16px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ color: "var(--text-3)", textAlign: "left" }}>
+                      <th style={{ padding: "6px 0", fontWeight: 700 }}>Rota</th>
+                      <th style={{ padding: "6px 0", fontWeight: 700 }}>Req</th>
+                      <th style={{ padding: "6px 0", fontWeight: 700 }}>Média</th>
+                      <th style={{ padding: "6px 0", fontWeight: 700 }}>Erros</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {httpRoutes.slice(0, 12).map((route) => (
+                      <tr key={`${route.kind}:${route.name}`} style={{ borderBottom: "1px solid var(--line-soft)" }}>
+                        <td style={{ padding: "8px 0", fontFamily: "ui-monospace, monospace", fontSize: 11 }}>{route.name}</td>
+                        <td style={{ padding: "8px 0" }}>{route.count}</td>
+                        <td style={{ padding: "8px 0" }}>{route.avgMs}ms</td>
+                        <td style={{ padding: "8px 0", color: route.errors ? "var(--danger)" : "var(--text-3)" }}>
+                          {route.errors}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          ) : null}
+
+          {/* Chamadas à IA */}
+          {aiRoutes.length ? (
+            <Panel title="Chamadas à IA" subtitle="Performance do provedor de IA.">
+              <div style={{ padding: "12px 16px" }}>
+                {aiRoutes.map((route) => (
+                  <div key={`${route.kind}:${route.name}`} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--line-soft)", fontSize: 12 }}>
+                    <span>{route.name}</span>
+                    <span>{route.count} chamadas · {route.avgMs}ms média · {route.errors} erro(s)</span>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          ) : null}
+
+          {/* Eventos recentes */}
+          {metrics.recent.length ? (
+            <Panel title="Eventos recentes" subtitle="Últimas operações registradas.">
+              <div style={{ padding: "12px 16px" }}>
+                {metrics.recent.slice(0, 20).map((sample, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", fontSize: 11, borderBottom: "1px solid var(--line-soft)" }}>
+                    <span className={`chip chip-${sample.ok ? "active" : "disabled"}`}>
+                      {sample.ok ? "OK" : "ERRO"}
+                    </span>
+                    <span style={{ fontFamily: "ui-monospace, monospace", flex: 1 }}>{sample.name}</span>
+                    <span style={{ color: "var(--text-3)" }}>{sample.durationMs}ms</span>
+                    <span style={{ color: "var(--text-3)" }}>{new Date(sample.at).toLocaleTimeString("pt-BR")}</span>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          ) : null}
+        </>
+      ) : (
+        <Notice tone="info">Métricas indisponíveis. O sistema pode estar iniciando.</Notice>
+      )}
+
+      {/* Gerenciamento de membros */}
+      {access?.isAdmin ? (
+        <div className="columns" style={{ marginTop: 20 }}>
+          <Panel
+            title="Membros da dashboard"
+            subtitle="Quem pode acessar esta interface."
+            action={<span className="panel-count">{members.length} membro(s)</span>}
+          >
+            <div style={{ padding: "12px 16px" }}>
+              {members.map((member) => (
+                <div key={member.userId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--line-soft)" }}>
+                  <span className={`chip chip-${member.role === "owner" ? "active" : member.role === "admin" ? "override" : "inherit"}`}>
+                    {member.role}
+                  </span>
+                  <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, flex: 1 }}>{member.userId}</span>
+                  <span style={{ color: "var(--text-3)", fontSize: 10 }}>
+                    {member.lastSeenAt ? `visto ${formatRelative(member.lastSeenAt)}` : "nunca entrou"}
+                  </span>
+                  {member.userId !== ownerId ? (
+                    <button
+                      type="button"
+                      className="icon-button icon-button-danger"
+                      disabled={busy}
+                      onClick={() => handleRemoveMember(member.userId)}
+                    >
+                      <Icon name="close" size={14} />
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          <aside className="side-col">
+            <Panel title="Adicionar membro" subtitle="O ID do Discord permite o acesso.">
+              <form onSubmit={handleAddMember} style={{ padding: "16px", display: "grid", gap: 12 }}>
+                <input
+                  value={newUserId}
+                  onChange={(e) => setNewUserId(e.target.value)}
+                  placeholder="ID do Discord (17-20 dígitos)"
+                  pattern="\d{17,20}"
+                  required
+                  style={{ width: "100%", padding: "10px 11px", border: "1px solid var(--line)", borderRadius: 9, background: "var(--bg-elev)", color: "var(--text)", font: "inherit", fontSize: 12 }}
+                />
+                <select
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value)}
+                  style={{ width: "100%", padding: "10px 11px", border: "1px solid var(--line)", borderRadius: 9, background: "var(--bg-elev)", color: "var(--text)", font: "inherit", fontSize: 12 }}
+                >
+                  <option value="member">Membro</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
+                  {busy ? "Adicionando…" : "Adicionar membro"}
+                </button>
+              </form>
+            </Panel>
+
+            <Panel title="Informações do sistema" subtitle="Estado atual do Wumpus.">
+              <div style={{ padding: "16px", fontSize: 12, display: "grid", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--text-3)" }}>Seu ID</span>
+                  <span style={{ fontFamily: "ui-monospace, monospace" }}>{access?.userId ?? "—"}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--text-3)" }}>Owner ID</span>
+                  <span style={{ fontFamily: "ui-monospace, monospace" }}>{ownerId ?? "—"}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--text-3)" }}>Admin</span>
+                  <span className={`chip chip-${access?.isAdmin ? "active" : "disabled"}`}>
+                    {access?.isAdmin ? "Sim" : "Não"}
+                  </span>
+                </div>
+              </div>
+            </Panel>
+          </aside>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

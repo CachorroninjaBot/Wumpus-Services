@@ -432,7 +432,7 @@ export function createBot(token: string, log: BotLogger): BotHandle {
         "**Sugestões**",
         suggestions,
         "",
-        `-# Fontes: ${sources} · modelo ${result.model}`
+        `-# Fontes: ${sources} · modelo ${result.model}${result.retries > 0 ? ` · ${result.retries} retry(s)` : ""}`
       ].join("\n");
 
       await interaction.editReply({ content: body.slice(0, 1990) });

@@ -293,6 +293,72 @@ export const publishPanel = (
 
 export const logout = () => api<void>("/auth/logout", { method: "POST" });
 
+export const adminLogin = (username: string, password: string) =>
+  api<{ ok: boolean; method: string }>("/auth/admin", {
+    method: "POST",
+    body: JSON.stringify({ username, password })
+  });
+
+/* ---------------------------- Admin: metricas ----------------------- */
+
+export type MetricRoute = {
+  kind: string;
+  name: string;
+  count: number;
+  errors: number;
+  totalMs: number;
+  lastMs: number;
+  lastOk: boolean;
+  avgMs: number;
+  errorRate: number;
+};
+
+export type MetricSample = {
+  kind: string;
+  name: string;
+  durationMs: number;
+  ok: boolean;
+  status: number | null;
+  at: string;
+};
+
+export type MetricsSnapshot = {
+  windowMinutes: number;
+  totals: {
+    requests: number;
+    requestErrors: number;
+    avgRequestMs: number;
+    aiCalls: number;
+    aiErrors: number;
+    avgAiMs: number;
+  };
+  routes: MetricRoute[];
+  recent: MetricSample[];
+};
+
+export type AccessInfo = {
+  userId: string;
+  isAdmin: boolean;
+  ownerId: string | null;
+};
+
+export const getAccess = () => api<AccessInfo>("/api/access");
+
+export const getMetrics = (minutes = 15) =>
+  api<MetricsSnapshot>(`/api/admin/metrics?minutes=${minutes}`);
+
+export const getMembers = () =>
+  api<{ members: Array<{ userId: string; role: string; note: string | null; addedBy: string | null; createdAt: string; lastSeenAt: string | null }>; ownerId: string | null }>("/api/admin/members");
+
+export const addDashboardMember = (userId: string, role: string, note?: string) =>
+  api<{ ok: boolean }>(`/api/admin/members`, {
+    method: "POST",
+    body: JSON.stringify({ userId, role, note })
+  });
+
+export const removeDashboardMember = (userId: string) =>
+  api<{ ok: boolean }>(`/api/admin/members/${userId}`, { method: "DELETE" });
+
 /* ------------------------------------------------------------------ *
  * Roteamento simples por pathname
  * ------------------------------------------------------------------ */
@@ -301,11 +367,16 @@ export type Route =
   | { name: "home" }
   | { name: "guild"; guildId: string }
   | { name: "module"; guildId: string; module: string }
-  | { name: "group"; groupId: number };
+  | { name: "group"; groupId: number }
+  | { name: "admin" };
 
 export function parseRoute(pathname: string): Route {
   const parts = pathname.split("/").filter(Boolean);
 
+  // /wumpus/admin
+  if (parts[0] === "wumpus" && parts[1] === "admin") {
+    return { name: "admin" };
+  }
   // /wumpus/groups/:groupId
   if (parts[0] === "wumpus" && parts[1] === "groups" && parts[2]) {
     const groupId = Number(parts[2]);

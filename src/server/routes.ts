@@ -40,6 +40,7 @@ import {
   touchMember,
   type DashboardRole
 } from "./db/members.js";
+import { snapshotMetrics, flushMetrics } from "./metrics.js";
 
 const SESSION_COOKIE = "wumpus_session";
 const STATE_COOKIE = "wumpus_oauth_state";
@@ -175,6 +176,43 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (sessionId) await deleteSession(sessionId);
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return reply.code(204).send();
+  });
+
+  /* -------------------- Login por senha (admin) ---------------------- */
+
+  app.post("/auth/admin", async (request, reply) => {
+    const body = request.body as { username?: string; password?: string };
+    const envUser = process.env.DASHBOARD_USERNAME?.trim();
+    const envPass = process.env.DASHBOARD_PASSWORD?.trim();
+
+    if (!envUser || !envPass) {
+      return reply.code(503).send({ error: "admin_login_not_configured" });
+    }
+
+    if ((body.username ?? "").trim() !== envUser || (body.password ?? "") !== envPass) {
+      app.log.info("login por senha recusado: credenciais invalidas");
+      return reply.code(401).send({ error: "invalid_credentials" });
+    }
+
+    const ownerId = ownerIdFromEnv();
+    if (!ownerId) {
+      return reply.code(503).send({ error: "owner_not_configured" });
+    }
+
+    await ensureOwnerSeeded().catch(() => undefined);
+
+    const { sessionId, expiresAt } = await createSession({
+      userId: ownerId,
+      userAgent: request.headers["user-agent"] ?? null,
+      guilds: []
+    });
+
+    reply.setCookie(
+      SESSION_COOKIE,
+      issueSessionCookie(sessionId),
+      cookieOptions(Math.floor((expiresAt.getTime() - Date.now()) / 1000))
+    );
+    return { ok: true, method: "password" };
   });
 
   /* ------------------------------ Sessao ----------------------------- */
@@ -758,6 +796,22 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       data: { userId }
     }).catch(() => undefined);
 
+    return { ok: true };
+  });
+
+  /* ---------------------------- Admin: metricas ----------------------- */
+
+  app.get("/api/admin/metrics", async (request, reply) => {
+    const session = await requireAdmin(request, reply);
+    if (!session) return;
+    const minutes = Number((request.query as { minutes?: string }).minutes ?? 15);
+    return snapshotMetrics(Math.max(1, Math.min(minutes, 1440)) * 60_000);
+  });
+
+  app.post("/api/admin/metrics/flush", async (request, reply) => {
+    const session = await requireAdmin(request, reply);
+    if (!session) return;
+    await flushMetrics();
     return { ok: true };
   });
 

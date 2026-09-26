@@ -1,4 +1,5 @@
 import { getPool } from "../server/db/index.js";
+import { groqChat, qualityModel, fastModel } from "./llm.js";
 
 /**
  * IA de apoio interno da equipe.
@@ -7,10 +8,13 @@ import { getPool } from "../server/db/index.js";
  * a IA NUNCA responde no canal nem executa acao no Discord. Ela produz uma
  * analise e sugestoes que aparecem apenas para quem pediu (resposta efemera).
  * A decisao e sempre humana.
+ *
+ * Melhorias:
+ *  - Retry automatico com backoff (via llm.ts).
+ *  - Fallback de modelo: se o 120B falhar, tenta o modelo rapido.
+ *  - Prompt mais estruturado com contexto enriquecido.
  */
 
-const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
-const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_MESSAGES = 30;
 
 export type InternalSource = { name: string; url: string; hint?: string };
@@ -33,6 +37,7 @@ export type AnalysisResult = {
   suggestions: string[];
   model: string;
   sources: Array<{ name: string; ok: boolean; summary: string }>;
+  retries: number;
 };
 
 /** Plataformas internas autorizadas, lidas de WUMPUS_INTERNAL_APIS (JSON). */
@@ -118,7 +123,6 @@ export async function loadTicketContext(ticketId: number, guildId: string): Prom
     priority: row.priority,
     openerId: row.openerId,
     createdAt: row.createdAt.toISOString(),
-    // A consulta veio em ordem decrescente; devolvemos em ordem cronologica.
     messages: messages.rows.reverse().map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
     events: events.rows.map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() }))
   };
@@ -135,32 +139,51 @@ function buildPrompt(context: TicketContext, sources: Array<{ name: string; ok: 
     ? sources.map((entry) => `- ${entry.name}: ${entry.ok ? entry.summary : `INDISPONIVEL (${entry.summary})`}`).join("\n")
     : "(nenhuma plataforma interna configurada)";
 
+  const eventBlock = context.events.length
+    ? context.events.map((entry) => `- ${entry.eventType} por ${entry.actorId ?? "sistema"} em ${entry.createdAt}`).join("\n")
+    : "(sem eventos registrados)";
+
+  // Calcula ha quanto tempo o ticket esta aberto
+  const openMinutes = Math.round((Date.now() - new Date(context.createdAt).getTime()) / 60_000);
+  const openDuration = openMinutes < 60
+    ? `${openMinutes} minutos`
+    : openMinutes < 1440
+      ? `${Math.round(openMinutes / 60)} horas`
+      : `${Math.round(openMinutes / 1440)} dias`;
+
   return [
     "Voce e o assistente interno de uma equipe de suporte no Discord.",
     "Sua funcao e ajudar a EQUIPE a entender e resolver um atendimento.",
     "Voce NAO fala com o cliente e NAO executa acoes. Apenas orienta quem pediu.",
     "",
-    `Atendimento #${context.ticketId} · status ${context.status} · prioridade ${context.priority}`,
+    `Atendimento #${context.ticketId}`,
+    `Status: ${context.status} | Prioridade: ${context.priority} | Aberto ha: ${openDuration}`,
     `Departamento: ${context.department ?? "nao informado"}`,
     `Assunto: ${context.subject || "nao informado"}`,
     "",
-    "Historico do atendimento:",
+    "--- Historico do atendimento ---",
     transcript,
     "",
-    "Dados das plataformas internas:",
+    "--- Eventos do atendimento ---",
+    eventBlock,
+    "",
+    "--- Dados das plataformas internas ---",
     sourceBlock,
     "",
     "Responda EXATAMENTE neste formato, em portugues do Brasil:",
-    "ANALISE: um paragrafo objetivo explicando o problema provavel e o que verificar.",
-    "SUGESTOES: ate 3 linhas, cada uma comecando por '- ', com a melhor resposta ou proximo passo.",
+    "ANALISE: um paragrafo objetivo explicando o problema provavel, o historico de interacoes e o que verificar.",
+    "SUGESTOES: ate 3 linhas, cada uma comecando por '- ', com a melhor resposta ou proximo passo concreto.",
+    "PRIORIDADE: uma palavra (baixa, media, alta, urgente) baseada no conteudo e tempo aberto.",
     "",
-    "Se a informacao for insuficiente, diga o que falta saber em vez de inventar."
+    "Seja direto e pratico. Se a informacao for insuficiente, diga o que falta saber em vez de inventar.",
+    "Considere o tempo que o ticket esta aberto: quanto mais tempo, maior a urgencia de uma resposta."
   ].join("\n");
 }
 
-function parseModelOutput(text: string): { analysis: string; suggestions: string[] } {
+function parseModelOutput(text: string): { analysis: string; suggestions: string[]; priority: string } {
   const analysisMatch = /ANALISE:\s*([\s\S]*?)(?=\nSUGESTOES:|$)/i.exec(text);
-  const suggestionsMatch = /SUGESTOES:\s*([\s\S]*)$/i.exec(text);
+  const suggestionsMatch = /SUGESTOES:\s*([\s\S]*?)(?=\nPRIORIDADE:|$)/i.exec(text);
+  const priorityMatch = /PRIORIDADE:\s*(\w+)/i.exec(text);
 
   const analysis = (analysisMatch?.[1] ?? text).trim();
   const suggestions = (suggestionsMatch?.[1] ?? "")
@@ -168,8 +191,9 @@ function parseModelOutput(text: string): { analysis: string; suggestions: string
     .map((line) => line.replace(/^\s*-\s*/, "").trim())
     .filter(Boolean)
     .slice(0, 3);
+  const priority = (priorityMatch?.[1] ?? "media").toLowerCase();
 
-  return { analysis, suggestions };
+  return { analysis, suggestions, priority };
 }
 
 export async function analyzeTicket(input: {
@@ -177,40 +201,26 @@ export async function analyzeTicket(input: {
   guildId: string;
   requestedBy: string;
 }): Promise<AnalysisResult> {
-  const apiKey = process.env.WUMPUS_GROQ_API_KEY;
-  const model = process.env.WUMPUS_GROQ_MODEL ?? "openai/gpt-oss-120b";
-  if (!apiKey) throw new Error("WUMPUS_GROQ_API_KEY nao esta configurada.");
-
   const context = await loadTicketContext(input.ticketId, input.guildId);
   if (!context) throw new Error("Atendimento nao encontrado.");
 
   const sources = await Promise.all(internalSources().map(consultSource));
 
-  const response = await fetch(GROQ_ENDPOINT, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      max_tokens: 900,
-      messages: [
-        { role: "system", content: "Voce apoia uma equipe de suporte. Nunca fale como se fosse o atendente." },
-        { role: "user", content: buildPrompt(context, sources) }
-      ]
-    }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  const result = await groqChat({
+    model: qualityModel(),
+    fallbackModel: fastModel(),
+    temperature: 0.2,
+    maxTokens: 1000,
+    timeoutMs: 25_000,
+    maxRetries: 2,
+    purpose: "ticket_analysis",
+    messages: [
+      { role: "system", content: "Voce apoia uma equipe de suporte. Nunca fale como se fosse o atendente. Responda sempre em portugues do Brasil." },
+      { role: "user", content: buildPrompt(context, sources) }
+    ]
   });
 
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Provedor de IA respondeu ${response.status}: ${detail.slice(0, 200)}`);
-  }
-
-  const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const raw = payload.choices?.[0]?.message?.content;
-  if (!raw) throw new Error("Resposta da IA sem conteudo.");
-
-  const { analysis, suggestions } = parseModelOutput(raw);
+  const { analysis, suggestions, priority } = parseModelOutput(result.text);
 
   await getPool().query(
     `insert into ai_analyses (guild_id, ticket_id, requested_by, model, context, analysis, suggestions)
@@ -219,16 +229,18 @@ export async function analyzeTicket(input: {
       input.guildId,
       input.ticketId,
       input.requestedBy,
-      model,
+      result.model,
       JSON.stringify({
         messageCount: context.messages.length,
         department: context.department,
-        sources: sources.map((entry) => ({ name: entry.name, ok: entry.ok }))
+        sources: sources.map((entry) => ({ name: entry.name, ok: entry.ok })),
+        priority,
+        retries: result.retries
       }),
       analysis,
       JSON.stringify(suggestions)
     ]
   );
 
-  return { analysis, suggestions, model, sources };
+  return { analysis, suggestions, model: result.model, sources, retries: result.retries };
 }

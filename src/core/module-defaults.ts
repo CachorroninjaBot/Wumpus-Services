@@ -14,7 +14,11 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     syncChannels: true,
     announceJoinChannelId: "",
     announceLeaveChannelId: "",
-    nicknameOnJoin: false
+    nicknameOnJoin: false,
+    joinMessage: "Bem-vindo(a) ao servidor, {user}!",
+    leaveMessage: "{user} saiu do servidor.",
+    maintenanceMode: false,
+    maintenanceMessage: "O servidor está em manutenção. Volte mais tarde."
   },
   statistics: {
     retentionDays: 180,
@@ -24,7 +28,11 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     trackTickets: true,
     anonymizeUsers: true,
     digestChannelId: "",
-    digestHourUtc: 12
+    digestHourUtc: 12,
+    exportFormat: "json",
+    highlightTopMembers: 5,
+    trackReactions: false,
+    trackCommands: true
   },
   staff: {
     staffRoleIds: [],
@@ -33,7 +41,11 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     requireReason: true,
     inactivityDays: 14,
     pingOnClaim: true,
-    shiftLogChannelId: ""
+    shiftLogChannelId: "",
+    autoArchiveDays: 7,
+    escalationRoleId: "",
+    maxConcurrentTickets: 5,
+    responseTimeGoalMinutes: 30
   },
   roles: {
     allowAiDrafts: true,
@@ -42,7 +54,10 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     autoRemoveOnLeave: false,
     mentionableByDefault: false,
     hoistNewRoles: false,
-    maxRolesPerMember: 25
+    maxRolesPerMember: 25,
+    autoSyncIntervalHours: 24,
+    hierarchyLimit: 10,
+    defaultRoleIds: []
   },
   automations: {
     requireApprovalForDestructiveActions: true,
@@ -51,7 +66,12 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     maxActionsPerHour: 30,
     allowChannelCreate: false,
     allowRoleAssign: true,
-    notifyChannelId: ""
+    notifyChannelId: "",
+    retryOnFailure: true,
+    maxRetries: 3,
+    cooldownSeconds: 5,
+    allowSendMessage: true,
+    allowNicknameChange: false
   },
   integrations: {
     webhookAllowlist: [],
@@ -59,7 +79,11 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     allowIncoming: false,
     timeoutMs: 4000,
     retryCount: 2,
-    includeGuildId: true
+    includeGuildId: true,
+    rateLimitPerMinute: 60,
+    healthCheckIntervalMinutes: 5,
+    logPayloads: false,
+    customHeaders: []
   },
   moderation: {
     logChannelId: "",
@@ -69,7 +93,12 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     banDeleteDays: 1,
     dmOnPunish: true,
     requireEvidence: false,
-    appealChannelId: ""
+    appealChannelId: "",
+    autoUnmuteAfterTimeout: true,
+    strikeExpiryDays: 30,
+    publicLogging: false,
+    pardonsEnabled: true,
+    maxStrikesBeforeBan: 5
   },
   automod: {
     logChannelId: "",
@@ -85,7 +114,13 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     ignoredRoleIds: [],
     mentionLimit: 8,
     scanImages: true,
-    warnMessage: "Sua mensagem foi removida pelo filtro automático."
+    warnMessage: "Sua mensagem foi removida pelo filtro automático.",
+    blockLinks: false,
+    allowedDomains: [],
+    capsThresholdPercent: 70,
+    minLength: 0,
+    maxLength: 0,
+    antiGhostPing: true
   },
   security: {
     alertChannelId: "",
@@ -98,7 +133,13 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     trustedRoleIds: [],
     minAccountAgeHours: 24,
     quarantineNewMembers: false,
-    alertStaffRoleIds: []
+    alertStaffRoleIds: [],
+    raidMode: "smart",
+    autoBanRepeatOffenders: false,
+    whitelistRoleIds: [],
+    alertOnMassBan: true,
+    alertOnMassChannelDelete: true,
+    lockdownMessage: "O servidor está em modo de proteção. Aguarde a equipe resolver."
   },
   logs: {
     channelId: "",
@@ -111,7 +152,15 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     logChannels: true,
     logBans: true,
     ignoreBotMessages: true,
-    ignoreChannelIds: []
+    ignoreChannelIds: [],
+    logThreadEvents: true,
+    logStageEvents: true,
+    logScheduledEvents: true,
+    logAutoMod: true,
+    compactMode: false,
+    includeTimestamp: true,
+    mentionOnCritical: false,
+    mentionRoleId: ""
   },
   tickets: {
     panelChannelId: "",
@@ -129,7 +178,14 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     maxOpenPerUser: 1,
     pingStaffOnOpen: true,
     namingPattern: "atendimento-{user}",
-    welcomeMessage: "Olá! Descreva o que você precisa. A equipe já foi notificada."
+    welcomeMessage: "Olá! Descreva o que você precisa. A equipe já foi notificada.",
+    autoCloseInactiveHours: 24,
+    reopenEnabled: true,
+    satisfactionSurvey: true,
+    priorityEnabled: true,
+    tags: [],
+    slaWarningMinutes: 60,
+    escalationRoleId: ""
   },
   forms: {
     reviewerRoleIds: [],
@@ -141,7 +197,12 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     panelAccentColor: "#7c5cff",
     cooldownHours: 24,
     minAccountAgeDays: 0,
-    notifyReviewers: true
+    notifyReviewers: true,
+    autoRejectAfterDays: 14,
+    requireReasonOnReject: true,
+    anonymousSubmissions: false,
+    maxSubmissionsPerUser: 3,
+    archiveApprovedAfterDays: 90
   },
   knowledge: {
     answerChannelId: "",
@@ -151,7 +212,14 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     minQuestionLength: 12,
     cooldownSeconds: 20,
     preferFastModel: true,
-    fallbackMessage: ""
+    fallbackMessage: "",
+    maxArticlesPerSearch: 5,
+    similarityThreshold: 0.6,
+    autoSuggest: true,
+    suggestInAllChannels: false,
+    includeArticleLink: true,
+    logSearches: false,
+    logChannelId: ""
   },
   ocr: {
     provider: "hybrid",
@@ -159,7 +227,12 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     model: "qwen/qwen3.8-27b",
     retainExtractedText: false,
     maxImageMb: 8,
-    reviewChannelId: ""
+    reviewChannelId: "",
+    confidenceThreshold: 0.7,
+    cacheResults: true,
+    cacheTtlMinutes: 60,
+    autoDeleteSuspicious: false,
+    logChannelId: ""
   }
 };
 
