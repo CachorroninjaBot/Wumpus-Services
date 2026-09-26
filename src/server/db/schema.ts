@@ -325,6 +325,19 @@ create table if not exists service_health (
   last_heartbeat_at timestamptz not null default now()
 );
 
+create table if not exists operational_metrics (
+  id           bigserial primary key,
+  kind         text not null check (kind in ('http', 'ai', 'bot')),
+  name         text not null,
+  duration_ms  integer not null default 0,
+  ok           boolean not null default true,
+  status       integer,
+  data         jsonb not null default '{}'::jsonb,
+  occurred_at  timestamptz not null default now()
+);
+create index if not exists operational_metrics_time_idx on operational_metrics (occurred_at desc);
+create index if not exists operational_metrics_kind_idx on operational_metrics (kind, occurred_at desc);
+
 -- ---------------------------------------------------------------- licencas
 create table if not exists licenses (
   id               bigserial primary key,

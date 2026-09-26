@@ -33,16 +33,7 @@ import {
   addMember,
   ensureOwnerSeeded,
   isAdmin,
-  listMembers,
-  ownerIdFromEnv,
-  removeMember,
-  touchMember,
-  type DashboardRole
-} from "./db/members.js";
-import {
-  addMember,
-  ensureOwnerSeeded,
-  isAdmin,
+  isAllowed,
   listMembers,
   ownerIdFromEnv,
   removeMember,
@@ -111,6 +102,8 @@ function parseModule(value: string): ModuleId | null {
 }
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
+  await ensureOwnerSeeded().catch(() => undefined);
+
   /* ------------------------------ OAuth ------------------------------ */
 
   app.get("/auth/discord", async (_request, reply) => {
@@ -415,19 +408,19 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       config: body.config ?? {},
       updatedBy: session.userId
     });
-      await recordAuditEvent({
-        guildId,
-        module,
-        eventType: "module_config_updated",
-        actorId: session.userId,
-        data: { enabled: body.enabled ?? true }
-      });
+    await recordAuditEvent({
+      guildId,
+      module,
+      eventType: "module_config_updated",
+      actorId: session.userId,
+      data: { enabled: body.enabled ?? true }
+    });
 
-      // A regra nativa do Discord precisa acompanhar: sem isto, um termo novo
-      // so valeria no proximo reinicio do bot.
-      if (module === "automod") {
-        await resyncAutomod().catch(() => undefined);
-      }
+    // A regra nativa do Discord precisa acompanhar: sem isto, um termo novo
+    // so valeria no proximo reinicio do bot.
+    if (module === "automod") {
+      await resyncAutomod().catch(() => undefined);
+    }
 
     return { ok: true, scope: "server" };
   });
@@ -679,91 +672,6 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       actorId: session.userId,
       data: { articleId: id }
     });
-
-    return { ok: true };
-  });
-
-  /* ----------------------- Administracao de acesso -------------------- */
-
-  /** Helper: exige que a sessao seja do dono ou de um admin. */
-  async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<SessionRecord | null> {
-    const session = await currentSession(request, reply);
-    if (!session) return null;
-    if (!(await isAdmin(session.userId))) {
-      reply.code(403).send({ error: "admin_only" });
-      return null;
-    }
-    return session;
-  }
-
-  /**
-   * O que a propria dashboard precisa saber sobre quem entrou: se e admin e
-   * qual o id do dono. Sem isto a interface nao sabe se mostra o painel.
-   */
-  app.get("/api/access", async (request, reply) => {
-    const session = await currentSession(request, reply);
-    if (!session) return;
-    return {
-      userId: session.userId,
-      isAdmin: await isAdmin(session.userId),
-      ownerId: ownerIdFromEnv()
-    };
-  });
-
-  app.get("/api/admin/members", async (request, reply) => {
-    const session = await requireAdmin(request, reply);
-    if (!session) return;
-    return { members: await listMembers(), ownerId: ownerIdFromEnv() };
-  });
-
-  app.post("/api/admin/members", async (request, reply) => {
-    const session = await requireAdmin(request, reply);
-    if (!session) return;
-
-    const body = request.body as { userId?: string; role?: string; note?: string };
-    // O ID precisa ser um snowflake do Discord: um valor malformado nunca
-    // bateria na verificacao do login, entao aceitar seria criar uma entrada
-    // que nao funciona e confunde quem adicionou.
-    const userId = (body.userId ?? "").trim();
-    if (!/^\d{17,20}$/.test(userId)) return reply.code(400).send({ error: "invalid_user_id" });
-
-    const role: DashboardRole = body.role === "admin" ? "admin" : body.role === "owner" ? "owner" : "member";
-    // Promover a dono e uma decisao que so o dono pode tomar.
-    if (role === "owner" && session.userId !== ownerIdFromEnv()) {
-      return reply.code(403).send({ error: "owner_only" });
-    }
-
-    await addMember({ userId, role, note: body.note ?? null, addedBy: session.userId });
-    await recordAuditEvent({
-      guildId: "global",
-      module: "servers",
-      eventType: "access_granted",
-      actorId: session.userId,
-      data: { userId, role }
-    }).catch(() => undefined);
-
-    return reply.code(201).send({ ok: true, userId, role });
-  });
-
-  app.delete("/api/admin/members/:userId", async (request, reply) => {
-    const session = await requireAdmin(request, reply);
-    if (!session) return;
-
-    const { userId } = request.params as { userId: string };
-    if (userId === ownerIdFromEnv()) {
-      return reply.code(400).send({ error: "cannot_remove_owner" });
-    }
-
-    const removed = await removeMember(userId);
-    if (!removed) return reply.code(404).send({ error: "member_not_found" });
-
-    await recordAuditEvent({
-      guildId: "global",
-      module: "servers",
-      eventType: "access_revoked",
-      actorId: session.userId,
-      data: { userId }
-    }).catch(() => undefined);
 
     return { ok: true };
   });

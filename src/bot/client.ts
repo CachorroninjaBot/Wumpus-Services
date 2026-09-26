@@ -20,7 +20,7 @@ import { invalidateChannelIndex } from "../server/db/channel-refs.js";
 import { analyzeTicket } from "./ai.js";
 import { handleImageContent, handleMessage, syncNativeKeywordRule } from "./automod.js";
 import { answerFromKnowledge, type KnowledgeConfig } from "./knowledge.js";
-import { buildPanelPayload, defaultButtons, type PanelFormat } from "./panels.js";
+import { buildPanelPayload, defaultButtons, IS_COMPONENTS_V2, type PanelFormat } from "./panels.js";
 import { handleAuditLogEntry, handleMemberAdd } from "./security.js";
 
 export type BotLogger = {
@@ -274,40 +274,43 @@ export function createBot(token: string, log: BotLogger): BotHandle {
       await interaction.editReply(`Atendimento aberto em <#${channel.id}>.`);
 
       // Log de atendimento: e aqui que a equipe tem o botao de analise por IA.
+      // Migrado para Components V2 (Container + Text Display + Action Row),
+      // consistente com o resto dos paineis e logs do produto.
       const logChannelId = typeof config.config.logChannelId === "string" ? config.config.logChannelId : "";
       const aiEnabled = config.config.aiSupportEnabled !== false;
       if (logChannelId) {
+        const containerChildren: Array<Record<string, unknown>> = [
+          {
+            type: 10,
+            content:
+              `## Atendimento #${ticketId} aberto\n` +
+              `Aberto por <@${interaction.user.id}> em <#${channel.id}>.\n\n` +
+              `**Departamento**\n${department ?? "não informado"}\n\n` +
+              `**Assunto**\nAtendimento aberto pelo painel`
+          }
+        ];
+
+        if (aiEnabled) {
+          containerChildren.push({ type: 14, divider: true, spacing: 1 });
+          containerChildren.push({
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 2,
+                label: "Analisar com IA",
+                emoji: { name: "🧠" },
+                custom_id: `wumpus:ai:analyze:${ticketId}`
+              }
+            ]
+          });
+        }
+
         await current.rest
           .post(Routes.channelMessages(logChannelId), {
             body: {
-              embeds: [
-                {
-                  title: `Atendimento #${ticketId} aberto`,
-                  description: `Aberto por <@${interaction.user.id}> em <#${channel.id}>.`,
-                  color: 0x7c5cff,
-                  fields: [
-                    { name: "Departamento", value: department ?? "não informado", inline: true },
-                    { name: "Assunto", value: "Atendimento aberto pelo painel", inline: true }
-                  ],
-                  timestamp: new Date().toISOString()
-                }
-              ],
-              components: aiEnabled
-                ? [
-                    {
-                      type: 1,
-                      components: [
-                        {
-                          type: 2,
-                          style: 2,
-                          label: "Analisar com IA",
-                          emoji: { name: "🧠" },
-                          custom_id: `wumpus:ai:analyze:${ticketId}`
-                        }
-                      ]
-                    }
-                  ]
-                : []
+              flags: IS_COMPONENTS_V2,
+              components: [{ type: 17, accent_color: 0x7c5cff, components: containerChildren }]
             }
           })
           .catch((error) => log.error("falha ao publicar o log do atendimento", { error: String(error) }));

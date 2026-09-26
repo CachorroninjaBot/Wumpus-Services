@@ -8,6 +8,11 @@
  *
  * Importante: com IS_COMPONENTS_V2 nao se pode usar `content` nem `embeds`
  * no nivel superior — o conteudo vive dentro do Container.
+ *
+ * Atualizacao: logs e alertas internos (AutoMod, anti-raid/anti-nuke,
+ * atendimento) tambem migraram para Components V2. `buildLogPayload`
+ * mantem a mesma assinatura para nao exigir mudanca nos chamadores —
+ * so o payload devolvido mudou de embed para Container V2.
  */
 
 export type PanelFormat = "components_v2" | "embed";
@@ -101,26 +106,41 @@ export function buildPanelPayload(spec: PanelSpec): Record<string, unknown> {
   };
 }
 
-/** Payload do aviso de log/incidente enviado pela equipe. */
+/**
+ * Payload de log/alerta interno (AutoMod, anti-raid, anti-nuke, atendimento).
+ *
+ * Agora em Components V2: Container com titulo+descricao em um Text Display,
+ * um Separator, e um segundo Text Display com os campos formatados em
+ * negrito. Fica visualmente mais limpo que o embed antigo e alinhado com o
+ * resto do produto, que ja usa V2 nos paineis publicados.
+ */
 export function buildLogPayload(input: {
   title: string;
   description: string;
   accentColor?: string;
   fields?: Array<{ name: string; value: string; inline?: boolean }>;
 }): Record<string, unknown> {
+  const color = hexToInt(input.accentColor ?? "#7c5cff");
+  const title = input.title.slice(0, 256);
+  const description = input.description.slice(0, 4000);
+  const fields = (input.fields ?? []).slice(0, 25);
+
+  const children: Array<Record<string, unknown>> = [
+    { type: 10, content: `## ${title}\n${description}` }
+  ];
+
+  if (fields.length) {
+    children.push({ type: 14, divider: true, spacing: 1 });
+    children.push({
+      type: 10,
+      content: fields
+        .map((field) => `**${field.name.slice(0, 256)}**\n${field.value.slice(0, 1024)}`)
+        .join("\n\n")
+    });
+  }
+
   return {
-    embeds: [
-      {
-        title: input.title.slice(0, 256),
-        description: input.description.slice(0, 4000),
-        color: hexToInt(input.accentColor ?? "#7c5cff"),
-        fields: (input.fields ?? []).slice(0, 25).map((field) => ({
-          name: field.name.slice(0, 256),
-          value: field.value.slice(0, 1024),
-          inline: field.inline ?? false
-        })),
-        timestamp: new Date().toISOString()
-      }
-    ]
+    flags: IS_COMPONENTS_V2,
+    components: [{ type: 17, accent_color: color, components: children }]
   };
 }

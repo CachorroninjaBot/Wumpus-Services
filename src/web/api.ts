@@ -35,13 +35,6 @@ export type GuildGroupLink = {
   color: string;
 };
 
-export type GuildGroupLink = {
-  guildId: string;
-  groupId: number;
-  name: string;
-  color: string;
-};
-
 export type Me = {
   user: SessionUser;
   guilds: SessionGuild[];
