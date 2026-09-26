@@ -11,32 +11,86 @@ import { startMetricsFlush, flushMetrics } from "./metrics.js";
 import { purgeExpiredSessions } from "./db/sessions.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// dist/server/index.js -> dist/web (build do Vite)
 const webRoot = path.resolve(here, "../web");
 const port = Number(process.env.PORT ?? 80);
 const host = "0.0.0.0";
 
+/* ------------------------------------------------------------------ *
+ * Logger customizado — formato limpo, uma linha por evento
+ * ------------------------------------------------------------------ */
+
+function ts(): string {
+  return new Date().toLocaleString("pt-BR", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function logLine(level: string, msg: string, extra?: string): void {
+  const prefix = level === "error" ? "❌" : level === "warn" ? "⚠️" : level === "bot" ? "🤖" : "▸";
+  const line = extra ? `${prefix}  ${msg}  ${extra}` : `${prefix}  ${msg}`;
+  console.log(`${ts()}  ${line}`);
+}
+
+/** Logger silencioso para o Fastify — não loga requests automaticamente */
+const silentLogger = { level: "silent" } as const;
+
 const app = Fastify({
-  logger: {
-    level: process.env.LOG_LEVEL ?? "info",
-    serializers: {
-      req(request) {
-        return { method: request.method, url: request.url };
-      },
-      res(reply) {
-        return { statusCode: reply.statusCode };
-      }
-    }
-  },
+  logger: silentLogger,
   trustProxy: true
 });
 
-/** Adapta o log do Fastify para a interface que o bot espera. */
+/** Logger do bot — formato limpo com prefixo */
 const botLog = {
-  info: (message: string, extra?: Record<string, unknown>) => app.log.info(extra ?? {}, `[BOT] ${message}`),
-  warn: (message: string, extra?: Record<string, unknown>) => app.log.warn(extra ?? {}, `[BOT] ${message}`),
-  error: (message: string, extra?: Record<string, unknown>) => app.log.error(extra ?? {}, `[BOT] ${message}`)
+  info: (message: string, extra?: Record<string, unknown>) => {
+    const detail = extra ? Object.entries(extra).map(([k, v]) => `${k}=${v}`).join(" · ") : "";
+    logLine("bot", message, detail);
+  },
+  warn: (message: string, extra?: Record<string, unknown>) => {
+    const detail = extra ? Object.entries(extra).map(([k, v]) => `${k}=${v}`).join(" · ") : "";
+    logLine("warn", `[BOT] ${message}`, detail);
+  },
+  error: (message: string, extra?: Record<string, unknown>) => {
+    const detail = extra ? Object.entries(extra).map(([k, v]) => `${k}=${v}`).join(" · ") : "";
+    logLine("error", `[BOT] ${message}`, detail);
+  }
 };
+
+/* ------------------------------------------------------------------ *
+ * Log manual: apenas eventos importantes
+ * ------------------------------------------------------------------ */
+
+// Após registrar todas as rotas, adiciona um hook que loga apenas
+// erros (4xx/5xx) e mutações (POST/PUT/PATCH/DELETE).
+app.addHook("onResponse", (request, reply, done) => {
+  const url = request.url ?? "";
+  const method = request.method;
+  const status = reply.statusCode;
+
+  // Silencia assets, health, favicon
+  if (url.startsWith("/assets/") || url === "/healthz" || url === "/favicon.ico") {
+    done();
+    return;
+  }
+
+  // Silencia GETs rotineiros (navegação, polling)
+  if (method === "GET" && status < 400) {
+    done();
+    return;
+  }
+
+  // Erros
+  if (status >= 400) {
+    logLine("warn", `${method} ${url} → ${status}`, `${Math.round(reply.elapsedTime)}ms`);
+  }
+  // Auth e webhooks
+  else if (url.startsWith("/auth/") || url.startsWith("/api/webhooks/")) {
+    logLine("info", `${method} ${url} → ${status}`, `${Math.round(reply.elapsedTime)}ms`);
+  }
+  // Mutações (POST/PUT/PATCH/DELETE)
+  else if (method !== "GET" && method !== "HEAD") {
+    logLine("info", `${method} ${url} → ${status}`, `${Math.round(reply.elapsedTime)}ms`);
+  }
+
+  done();
+});
 
 await app.register(fastifyCookie, {
   secret: process.env.WUMPUS_SESSION_SECRET ?? ""
@@ -57,10 +111,6 @@ app.get("/healthz", async () => ({
   version: brand.version
 }));
 
-/**
- * `security` responde a pergunta que importa em producao: a protecao
- * anti-raid/anti-nuke esta de fato armada?
- */
 app.get("/api/status", async () => {
   const bot = botStatus();
   return {
@@ -88,7 +138,7 @@ app.setNotFoundHandler((request, reply) => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, async () => {
-    app.log.info(`recebido ${signal}, encerrando`);
+    logLine("info", `Encerrando (${signal})`);
     await stopBot().catch(() => undefined);
     await app.close();
     await closePool();
@@ -98,28 +148,23 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 try {
   await migrate();
-  app.log.info("schema do banco verificado");
+  logLine("info", "Banco de dados verificado");
   await app.listen({ port, host });
-  app.log.info(`${brand.name} ${brand.version} ouvindo em http://${host}:${port}`);
+  logLine("info", `${brand.name} ${brand.version} ouvindo em :${port}`);
   startBot(botLog);
 
-  // Flush periódico de métricas (a cada 30s)
   startMetricsFlush(30_000);
-
-  // Limpeza de sessões expiradas (a cada 10 min)
   setInterval(() => { void purgeExpiredSessions().catch(() => undefined); }, 10 * 60_000);
 
-  // Heartbeat de serviços (a cada 2 min)
   setInterval(async () => {
     const dbOk = await databaseHealthy();
     const bot = botStatus();
-    const services = [
-      { service: "database", status: dbOk ? "operational" : "offline", metadata: {} },
-      { service: "bot", status: bot.running ? "operational" : "offline", metadata: { mode: bot.mode, security: bot.security, automod: bot.automod } },
-      { service: "api", status: "operational", metadata: { uptime: Math.floor(process.uptime()) } }
-    ];
     const db = getPool();
-    for (const svc of services) {
+    for (const svc of [
+      { service: "database", status: dbOk ? "operational" : "offline", metadata: {} },
+      { service: "bot", status: bot.running ? "operational" : "offline", metadata: { mode: bot.mode } },
+      { service: "api", status: "operational", metadata: { uptime: Math.floor(process.uptime()) } }
+    ]) {
       await db.query(
         `insert into service_health (service, status, metadata, last_heartbeat_at)
          values ($1, $2, $3::jsonb, now())
@@ -129,6 +174,6 @@ try {
     }
   }, 2 * 60_000);
 } catch (error) {
-  app.log.error(error);
+  logLine("error", "Falha ao iniciar", String(error));
   process.exit(1);
 }
