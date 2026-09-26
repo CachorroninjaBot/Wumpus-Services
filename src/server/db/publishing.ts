@@ -8,7 +8,7 @@ import { getPool } from "./index.js";
  * e o envio tem retentativa com erro registrado.
  */
 
-export type PanelFormat = "components_v2" | "embed";
+export type PanelFormat = "components_v2" | "embed"; // same as bot/panels.ts — kept separate to avoid server→bot import
 
 export type PublicationRow = {
   id: number;

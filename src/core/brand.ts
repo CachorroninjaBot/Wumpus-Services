@@ -68,12 +68,3 @@ export const modules: ReadonlyArray<ModuleDescriptor> = [
 export function modulesOf(group: ModuleGroupId): ModuleDescriptor[] {
   return modules.filter((entry) => entry.group === group);
 }
-
-export type ModuleState = "group" | "custom" | "paused" | "active";
-
-export const moduleStateLabels: Record<ModuleState, string> = {
-  group: "Pelo grupo",
-  custom: "Personalizado",
-  paused: "Pausado",
-  active: "Ativo"
-};

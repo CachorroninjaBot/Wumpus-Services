@@ -2,6 +2,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { modules as allModules, type ModuleId } from "../core/brand.js";
 import { defaultsFor } from "../core/module-defaults.js";
 import {
+  verifyWebhookSecret,
+  isShardPayEvent,
+  getPlanLimitsFromProductId,
+  type ShardPayEvent,
+  type InvoiceData,
+  type SubscriptionCreatedData
+} from "./shardpay.js";
+import {
   authorizeUrl,
   avatarUrl,
   canManage,
@@ -17,6 +25,7 @@ import {
   assignGuildToGroup,
   createGroup,
   getPool,
+  listAuditEvents,
   listGroups,
   listInstalledGuilds,
   listServerExceptions,
@@ -105,6 +114,133 @@ function parseModule(value: string): ModuleId | null {
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await ensureOwnerSeeded().catch(() => undefined);
 
+  /* -------------------- ShardPay Webhook ---------------------------- */
+
+  app.post("/api/webhooks/shardpay", async (request, reply) => {
+    // 1. Verificar segredo
+    const secret = request.headers["x-shard-webhook-secret"] as string | undefined;
+    if (!verifyWebhookSecret(secret)) {
+      app.log.warn("shardpay webhook: segredo inválido");
+      return reply.code(401).send({ error: "invalid_secret" });
+    }
+
+    const eventType = request.headers["x-shard-event"] as string | undefined;
+    const deliveryId = request.headers["x-shard-delivery"] as string | undefined;
+    const body = request.body;
+
+    if (!isShardPayEvent(body)) {
+      return reply.code(400).send({ error: "invalid_payload" });
+    }
+
+    app.log.info({ event: body.type, deliveryId }, `shardpay webhook: ${body.type}`);
+
+    try {
+      switch (body.type) {
+        case "invoice.created": {
+          // Log only
+          const data = body.data as InvoiceData;
+          app.log.info({ invoiceId: data.invoice_id, product: data.product_name, amount: data.amount_cents }, "shardpay: fatura criada");
+          break;
+        }
+
+        case "invoice.paid": {
+          const data = body.data as InvoiceData;
+          const discordUserId = data.discord_user_id;
+          const productId = data.product_id;
+          const planLimits = getPlanLimitsFromProductId(productId);
+
+          if (discordUserId) {
+            // Atualiza ou cria licença
+            await getPool().query(
+              `insert into licenses (discord_user_id, plan, status, max_servers, notes, created_at, updated_at)
+               values ($1, $2, 'active', $3, $4, now(), now())
+               on conflict (discord_user_id) do update
+                 set plan = excluded.plan,
+                     status = 'active',
+                     max_servers = excluded.max_servers,
+                     notes = excluded.notes,
+                     updated_at = now()`,
+              [discordUserId, planLimits.plan, planLimits.maxServers, `ShardPay: ${data.product_name} · fatura ${data.invoice_id}`]
+            );
+
+            app.log.info({ discordUserId, plan: planLimits.plan, maxServers: planLimits.maxServers }, "shardpay: licença ativada/atualizada");
+          }
+          break;
+        }
+
+        case "invoice.refunded": {
+          const data = body.data as InvoiceData;
+          const discordUserId = data.discord_user_id;
+          if (discordUserId) {
+            await getPool().query(
+              `update licenses set status = 'expired', updated_at = now() where discord_user_id = $1`,
+              [discordUserId]
+            );
+            app.log.info({ discordUserId }, "shardpay: licença expirada (reembolso)");
+          }
+          break;
+        }
+
+        case "subscription.pending": {
+          // Log: checkout iniciado, mas pagamento ainda não confirmado
+          const data = body.data as { cart_id?: string; gateway_subscription_id?: string; discord_user_id?: string; product_id?: string };
+          app.log.info({
+            cartId: data.cart_id,
+            gatewaySubId: data.gateway_subscription_id,
+            discordUserId: data.discord_user_id,
+            productId: data.product_id
+          }, "shardpay: assinatura pendente (checkout em andamento)");
+          break;
+        }
+
+        case "subscription.created": {
+          const data = body.data as SubscriptionCreatedData;
+          const discordUserId = data.discord_user_id;
+          const productId = data.product_id;
+          const planLimits = getPlanLimitsFromProductId(productId);
+
+          if (discordUserId) {
+            await getPool().query(
+              `insert into licenses (discord_user_id, plan, status, max_servers, notes, created_at, updated_at)
+               values ($1, $2, 'active', $3, $4, now(), now())
+               on conflict (discord_user_id) do update
+                 set plan = excluded.plan,
+                     status = 'active',
+                     max_servers = excluded.max_servers,
+                     notes = excluded.notes,
+                     updated_at = now()`,
+              [discordUserId, planLimits.plan, planLimits.maxServers, `ShardPay subscription: ${data.subscription_id}`]
+            );
+
+            app.log.info({ discordUserId, plan: planLimits.plan, subscriptionId: data.subscription_id }, "shardpay: assinatura criada");
+          }
+          break;
+        }
+
+        case "subscription.cancelled": {
+          const data = body.data as SubscriptionCreatedData;
+          const discordUserId = data.discord_user_id;
+          if (discordUserId) {
+            await getPool().query(
+              `update licenses set status = 'expired', updated_at = now() where discord_user_id = $1`,
+              [discordUserId]
+            );
+            app.log.info({ discordUserId, subscriptionId: data.subscription_id }, "shardpay: assinatura cancelada");
+          }
+          break;
+        }
+
+        default:
+          app.log.info({ type: body.type }, "shardpay: evento não tratado");
+      }
+    } catch (error) {
+      app.log.error({ err: error, event: body.type }, "shardpay: erro ao processar webhook");
+      // Ainda retorna 200 para não causar retry
+    }
+
+    return reply.code(200).send({ ok: true, event: body.type, deliveryId });
+  });
+
   /* ------------------------------ OAuth ------------------------------ */
 
   app.get("/auth/discord", async (_request, reply) => {
@@ -176,6 +312,27 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (sessionId) await deleteSession(sessionId);
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return reply.code(204).send();
+  });
+
+  /* -------------------- Limites do plano --------------------------- */
+
+  app.get("/api/limits", async (request, reply) => {
+    const session = await currentSession(request, reply);
+    if (!session) return;
+
+    const result = await getPool().query(
+      `select plan, max_servers as "maxServers", status from licenses where discord_user_id = $1`,
+      [session.userId]
+    );
+    const license = result.rows[0];
+
+    if (!license || license.status !== "active") {
+      const { getPlanLimits } = await import("./shardpay.js");
+      return { plan: "starter", license: null, limits: getPlanLimits("starter") };
+    }
+
+    const { getPlanLimits } = await import("./shardpay.js");
+    return { plan: license.plan, license, limits: getPlanLimits(license.plan) };
   });
 
   /* -------------------- Login por senha (admin) ---------------------- */
@@ -602,6 +759,56 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(202).send({ publication });
   });
 
+  /* ----------------------- Departamentos de atendimento -------------- */
+
+  app.get("/api/guilds/:guildId/departments", async (request, reply) => {
+    const session = await currentSession(request, reply);
+    if (!session) return;
+    const { guildId } = request.params as { guildId: string };
+    if (!hasGuildAccess(session, guildId)) return reply.code(403).send({ error: "access_denied" });
+
+    const result = await getPool().query(
+      `select id, name, description, emoji, category_id as "categoryId",
+              staff_role_ids as "staffRoleIds", position, is_active as "isActive"
+       from ticket_departments where guild_id = $1 order by position`,
+      [guildId]
+    );
+    return { departments: result.rows };
+  });
+
+  app.post("/api/guilds/:guildId/departments", async (request, reply) => {
+    const session = await currentSession(request, reply);
+    if (!session) return;
+    const { guildId } = request.params as { guildId: string };
+    if (!hasGuildAccess(session, guildId)) return reply.code(403).send({ error: "access_denied" });
+
+    const body = request.body as { name?: string; description?: string; emoji?: string; categoryId?: string; staffRoleIds?: string[] };
+    const name = (body.name ?? "").trim();
+    if (name.length < 2 || name.length > 60) return reply.code(400).send({ error: "invalid_name" });
+
+    const result = await getPool().query<{ id: number }>(
+      `insert into ticket_departments (guild_id, name, description, emoji, category_id, staff_role_ids)
+       values ($1, $2, $3, $4, $5, $6) returning id`,
+      [guildId, name, (body.description ?? "").slice(0, 280), (body.emoji ?? "").slice(0, 10), body.categoryId ?? null, body.staffRoleIds ?? []]
+    );
+
+    await recordAuditEvent({ guildId, module: "tickets", eventType: "department_created", actorId: session.userId, data: { departmentId: result.rows[0].id, name } });
+    return reply.code(201).send({ id: result.rows[0].id });
+  });
+
+  app.delete("/api/guilds/:guildId/departments/:departmentId", async (request, reply) => {
+    const session = await currentSession(request, reply);
+    if (!session) return;
+    const { guildId, departmentId } = request.params as { guildId: string; departmentId: string };
+    if (!hasGuildAccess(session, guildId)) return reply.code(403).send({ error: "access_denied" });
+
+    const id = Number(departmentId);
+    if (!Number.isSafeInteger(id)) return reply.code(400).send({ error: "invalid_id" });
+
+    await getPool().query(`delete from ticket_departments where id = $1 and guild_id = $2`, [id, guildId]);
+    return { ok: true };
+  });
+
   /* ----------------------- Base de conhecimento ---------------------- */
 
   /** Artigos que alimentam as respostas assistidas. */
@@ -830,6 +1037,239 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  /* -------------------- Assistente de configuração IA ---------------- */
+
+  app.post("/api/guilds/:guildId/ai/config-assistant", async (request, reply) => {
+    const session = await currentSession(request, reply);
+    if (!session) return;
+    const { guildId } = request.params as { guildId: string };
+    if (!hasGuildAccess(session, guildId)) return reply.code(403).send({ error: "access_denied" });
+
+    const body = request.body as { prompt?: string };
+    const prompt = (body.prompt ?? "").trim();
+    if (prompt.length < 10) return reply.code(400).send({ error: "prompt_too_short" });
+    if (prompt.length > 500) return reply.code(400).send({ error: "prompt_too_long" });
+
+    const apiKey = process.env.WUMPUS_GROQ_API_KEY;
+    if (!apiKey) return reply.code(503).send({ error: "ai_not_configured" });
+
+    const model = process.env.WUMPUS_GROQ_MODEL || "openai/gpt-oss-120b";
+
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          max_tokens: 800,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: `Você é um assistente de configuração para o bot Wumpus no Discord.
+O usuário descreve o que quer em linguagem natural. Você devolve um JSON com a configuração sugerida.
+
+Módulos disponíveis: automod, security, logs, moderation, tickets, forms, knowledge, ocr, servers, statistics, staff, roles, automations, integrations.
+
+Para cada módulo que o usuário mencionar, inclua um objeto com:
+- "module": o nome do módulo
+- "enabled": true/false
+- "config": objeto com os campos relevantes
+
+Responda EXATAMENTE neste formato JSON:
+{
+  "modules": [
+    { "module": "automod", "enabled": true, "config": { ... } },
+    ...
+  ],
+  "explanation": "Explicação curta do que foi configurado em português."
+}`
+            },
+            { role: "user", content: prompt }
+          ]
+        }),
+        signal: AbortSignal.timeout(20_000)
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        app.log.error({ status: response.status, detail: detail.slice(0, 200) }, "IA respondeu com erro");
+        return reply.code(502).send({ error: "ai_error" });
+      }
+
+      const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const raw = payload.choices?.[0]?.message?.content?.trim();
+      if (!raw) return reply.code(502).send({ error: "empty_response" });
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return reply.code(502).send({ error: "invalid_json", raw: raw.slice(0, 500) });
+      }
+
+      return { ok: true, suggestion: parsed };
+    } catch (error) {
+      app.log.error({ err: error }, "falha no assistente de configuração");
+      return reply.code(500).send({ error: "internal_error" });
+    }
+  });
+
+  /* ---------------------------- Role Drafts IA ----------------------- */
+
+  app.post("/api/guilds/:guildId/roles/draft", async (request, reply) => {
+    const session = await currentSession(request, reply);
+    if (!session) return;
+    const { guildId } = request.params as { guildId: string };
+    if (!hasGuildAccess(session, guildId)) return reply.code(403).send({ error: "access_denied" });
+
+    const body = request.body as { request?: string };
+    const userRequest = (body.request ?? "").trim();
+    if (userRequest.length < 5) return reply.code(400).send({ error: "request_too_short" });
+
+    const apiKey = process.env.WUMPUS_GROQ_API_KEY;
+    if (!apiKey) return reply.code(503).send({ error: "ai_not_configured" });
+
+    const model = process.env.WUMPUS_GROQ_MODEL || "openai/gpt-oss-120b";
+
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          max_tokens: 600,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: `Você gera rascunhos de cargos do Discord. O usuário pede um cargo; você devolve um JSON com:
+{
+  "name": "Nome do cargo",
+  "color": "#hex",
+  "hoist": true/false,
+  "mentionable": true/false,
+  "permissions": ["string de permissões relevantes"],
+  "reason": "Por que este cargo faz sentido"
+}
+Responda apenas com o JSON, em português do Brasil.`
+            },
+            { role: "user", content: userRequest }
+          ]
+        }),
+        signal: AbortSignal.timeout(20_000)
+      });
+
+      if (!response.ok) return reply.code(502).send({ error: "ai_error" });
+      const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const raw = payload.choices?.[0]?.message?.content?.trim();
+      if (!raw) return reply.code(502).send({ error: "empty_response" });
+
+      let draft: Record<string, unknown>;
+      try { draft = JSON.parse(raw); } catch { return reply.code(502).send({ error: "invalid_json" }); }
+
+      const result = await getPool().query<{ id: number }>(
+        `insert into role_drafts (guild_id, created_by, request, draft)
+         values ($1, $2, $3, $4::jsonb) returning id`,
+        [guildId, session.userId, userRequest, JSON.stringify(draft)]
+      );
+
+      await recordAuditEvent({ guildId, module: "roles", eventType: "role_draft_created", actorId: session.userId, data: { draftId: result.rows[0].id } });
+      return reply.code(201).send({ id: result.rows[0].id, draft });
+    } catch (error) {
+      app.log.error({ err: error }, "falha ao gerar rascunho de cargo");
+      return reply.code(500).send({ error: "internal_error" });
+    }
+  });
+
+  app.get("/api/guilds/:guildId/roles/drafts", async (request, reply) => {
+    const session = await currentSession(request, reply);
+    if (!session) return;
+    const { guildId } = request.params as { guildId: string };
+    if (!hasGuildAccess(session, guildId)) return reply.code(403).send({ error: "access_denied" });
+
+    const result = await getPool().query(
+      `select id, request, draft, status, reviewed_by as "reviewedBy", created_at as "createdAt", reviewed_at as "reviewedAt"
+       from role_drafts where guild_id = $1 order by created_at desc limit 20`,
+      [guildId]
+    );
+    return { drafts: result.rows };
+  });
+
+  app.patch("/api/guilds/:guildId/roles/draft/:draftId", async (request, reply) => {
+    const session = await currentSession(request, reply);
+    if (!session) return;
+    const { guildId, draftId } = request.params as { guildId: string; draftId: string };
+    if (!hasGuildAccess(session, guildId)) return reply.code(403).send({ error: "access_denied" });
+
+    const id = Number(draftId);
+    if (!Number.isSafeInteger(id)) return reply.code(400).send({ error: "invalid_id" });
+
+    const body = request.body as { status?: string };
+    const status = body.status === "applied" ? "applied" : body.status === "rejected" ? "rejected" : null;
+    if (!status) return reply.code(400).send({ error: "invalid_status" });
+
+    await getPool().query(
+      `update role_drafts set status = $3, reviewed_by = $4, reviewed_at = now()
+       where id = $1 and guild_id = $2 and status = 'pending'`,
+      [id, guildId, status, session.userId]
+    );
+
+    await recordAuditEvent({ guildId, module: "roles", eventType: `role_draft_${status}`, actorId: session.userId, data: { draftId: id } });
+    return { ok: true, status };
+  });
+
+  /* ---------------------------- Licenças ----------------------------- */
+
+  app.get("/api/admin/licenses", async (request, reply) => {
+    const session = await requireAdmin(request, reply);
+    if (!session) return;
+
+    const result = await getPool().query(
+      `select id, discord_user_id as "discordUserId", plan, status,
+              max_servers as "maxServers", expires_at as "expiresAt",
+              notes, created_at as "createdAt", updated_at as "updatedAt"
+       from licenses order by created_at desc limit 100`
+    );
+    return { licenses: result.rows };
+  });
+
+  app.post("/api/admin/licenses", async (request, reply) => {
+    const session = await requireAdmin(request, reply);
+    if (!session) return;
+
+    const body = request.body as { discordUserId?: string; plan?: string; maxServers?: number; expiresAt?: string; notes?: string };
+    const userId = (body.discordUserId ?? "").trim();
+    if (!/^\d{17,20}$/.test(userId)) return reply.code(400).send({ error: "invalid_user_id" });
+
+    const plan = ["starter", "standard", "professional", "enterprise"].includes(body.plan ?? "") ? body.plan! : "standard";
+    const maxServers = typeof body.maxServers === "number" && body.maxServers > 0 ? body.maxServers : 1;
+
+    await getPool().query(
+      `insert into licenses (discord_user_id, plan, max_servers, expires_at, notes)
+       values ($1, $2, $3, $4, $5)
+       on conflict (discord_user_id) do update
+         set plan = excluded.plan, max_servers = excluded.max_servers,
+             expires_at = excluded.expires_at, notes = excluded.notes, updated_at = now()`,
+      [userId, plan, maxServers, body.expiresAt ?? null, (body.notes ?? "").slice(0, 500)]
+    );
+
+    return reply.code(201).send({ ok: true });
+  });
+
+  app.delete("/api/admin/licenses/:licenseId", async (request, reply) => {
+    const session = await requireAdmin(request, reply);
+    if (!session) return;
+
+    const id = Number((request.params as { licenseId: string }).licenseId);
+    if (!Number.isSafeInteger(id)) return reply.code(400).send({ error: "invalid_id" });
+
+    await getPool().query(`delete from licenses where id = $1`, [id]);
+    return { ok: true };
+  });
+
   /* ---------------------------- Incidentes --------------------------- */
 
   /** Historico de incidentes de seguranca detectados pelo bot. */
@@ -891,12 +1331,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!hasGuildAccess(session, guildId)) return reply.code(403).send({ error: "access_denied" });
 
     const limit = Math.min(Number((request.query as { limit?: string }).limit ?? 50) || 50, 200);
-    const result = await getPool().query(
-      `select id, module, event_type as "eventType", actor_id as "actorId", target_id as "targetId",
-              severity, data, occurred_at as "occurredAt"
-       from audit_events where guild_id = $1 order by occurred_at desc limit $2`,
-      [guildId, limit]
-    );
-    return { events: result.rows };
+    const events = await listAuditEvents(guildId, limit);
+    return { events };
   });
 }

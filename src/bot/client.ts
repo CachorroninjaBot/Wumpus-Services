@@ -9,7 +9,7 @@ import {
   type Interaction,
   type Message
 } from "discord.js";
-import { getPool, resolveModuleConfig, upsertGuild } from "../server/db/index.js";
+import { getPool, resolveModuleConfig, upsertGuild, recordAuditEvent } from "../server/db/index.js";
 import {
   deactivateGuild,
   processPendingPublications,
@@ -19,12 +19,16 @@ import {
 import { invalidateChannelIndex } from "../server/db/channel-refs.js";
 import { analyzeTicket } from "./ai.js";
 import { handleImageContent, handleMessage, handleGhostPing, trackMentions, syncNativeKeywordRule } from "./automod.js";
+import { logMemberJoin, logMemberLeave, logMessageEdit, logMessageDelete, logRoleCreate, logRoleDelete, logChannelCreate, logChannelDelete, logBanAdd, logBanRemove } from "./logs.js";
+import { trackMessage, trackJoin, flushStatistics, sendDailyDigest } from "./statistics.js";
+import { recordOccurrence } from "./moderation.js";
 import { answerFromKnowledge, type KnowledgeConfig } from "./knowledge.js";
 import { buildPanelPayload, defaultButtons, IS_COMPONENTS_V2, type PanelFormat } from "./panels.js";
 import { handleAuditLogEntry, handleMemberAdd } from "./security.js";
 
 export type BotLogger = {
   info: (message: string, extra?: Record<string, unknown>) => void;
+  warn: (message: string, extra?: Record<string, unknown>) => void;
   error: (message: string, extra?: Record<string, unknown>) => void;
 };
 
@@ -180,7 +184,7 @@ export function createBot(token: string, log: BotLogger): BotHandle {
   async function openTicket(interaction: Interaction, department: string | null): Promise<void> {
     const current = client;
     if (!interaction.isButton() || !interaction.guild || !current) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
 
     const guild = interaction.guild;
     const config = await resolveModuleConfig(guild.id, "tickets");
@@ -204,8 +208,13 @@ export function createBot(token: string, log: BotLogger): BotHandle {
     const categoryId = typeof config.config.categoryId === "string" ? config.config.categoryId : "";
 
     try {
+      const namingPattern = typeof config.config.namingPattern === "string" && config.config.namingPattern
+        ? config.config.namingPattern
+        : "atendimento-{user}";
+      const channelName = namingPattern.replace(/\{user\}/g, interaction.user.username).slice(0, 90);
+
       const channel = await guild.channels.create({
-        name: `atendimento-${interaction.user.username}`.slice(0, 90),
+        name: channelName,
         type: ChannelType.GuildText,
         parent: categoryId || undefined,
         topic: `Atendimento de ${interaction.user.tag} · Wumpus`,
@@ -271,7 +280,16 @@ export function createBot(token: string, log: BotLogger): BotHandle {
         }
       });
 
+      // Mensagem de boas-vindas configurável
+      const welcomeMsg = typeof config.config.welcomeMessage === "string" ? config.config.welcomeMessage.trim() : "";
+      if (welcomeMsg) {
+        await current.rest.post(Routes.channelMessages(channel.id), {
+          body: { content: welcomeMsg.slice(0, 2000) }
+        }).catch(() => undefined);
+      }
+
       await interaction.editReply(`Atendimento aberto em <#${channel.id}>.`);
+      log.info("atendimento aberto", { guildId: guild.id, ticketId, userId: interaction.user.id, department });
 
       // Log de atendimento: e aqui que a equipe tem o botao de analise por IA.
       // Migrado para Components V2 (Container + Text Display + Action Row),
@@ -326,7 +344,7 @@ export function createBot(token: string, log: BotLogger): BotHandle {
   async function closeTicket(interaction: Interaction, rawTicketId: string): Promise<void> {
     const current = client;
     if (!interaction.isButton() || !interaction.guild || !current) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
 
     const ticketId = Number(rawTicketId);
     if (!Number.isSafeInteger(ticketId)) {
@@ -351,7 +369,10 @@ export function createBot(token: string, log: BotLogger): BotHandle {
       [ticketId, interaction.user.id]
     );
 
-    // Feedback vai por DM: nao polui o canal e nao depende de permissao nele.
+    // Feedback vai por DM: so se feedbackEnabled estiver ativo
+    const ticketConfig = await resolveModuleConfig(interaction.guild.id, "tickets").catch(() => null);
+    const feedbackEnabled = ticketConfig?.config?.feedbackEnabled !== false;
+    if (feedbackEnabled) {
     try {
       const dm = await current.users.createDM(ticket.openerId);
       await current.rest.post(Routes.channelMessages(dm.id), {
@@ -373,8 +394,10 @@ export function createBot(token: string, log: BotLogger): BotHandle {
     } catch {
       log.info("nao foi possivel enviar o pedido de feedback por DM", { ticketId });
     }
+    }
 
     await interaction.editReply("Atendimento encerrado. Obrigado!");
+    log.info("atendimento encerrado", { guildId: interaction.guild.id, ticketId, closedBy: interaction.user.id });
   }
 
   async function saveFeedback(interaction: Interaction, rawTicketId: string, score: string): Promise<void> {
@@ -383,7 +406,7 @@ export function createBot(token: string, log: BotLogger): BotHandle {
     const ticketId = Number(rawTicketId);
     const value = Number(score);
     if (!Number.isSafeInteger(ticketId) || !Number.isInteger(value) || value < 1 || value > 5) {
-      await interaction.reply({ content: "Nota inválida.", ephemeral: true });
+      await interaction.reply({ content: "Nota inválida.", flags: 64 });
       return;
     }
 
@@ -394,7 +417,149 @@ export function createBot(token: string, log: BotLogger): BotHandle {
       [ticketId, interaction.guild.id, value]
     );
 
-    await interaction.reply({ content: `Obrigado! Registrei sua nota ${value}/5.`, ephemeral: true });
+    await interaction.reply({ content: `Obrigado! Registrei sua nota ${value}/5.`, flags: 64 });
+  }
+
+  async function claimTicket(interaction: Interaction, rawTicketId: string): Promise<void> {
+    if (!interaction.isButton() || !interaction.guild) return;
+    await interaction.deferReply({ flags: 64 });
+
+    const ticketId = Number(rawTicketId);
+    if (!Number.isSafeInteger(ticketId)) {
+      await interaction.editReply("Atendimento inválido.");
+      return;
+    }
+
+    // Verifica se o usuário tem cargo de staff
+    const config = await resolveModuleConfig(interaction.guild.id, "tickets");
+    const staffRoleIds = Array.isArray(config.config.staffRoleIds) ? (config.config.staffRoleIds as string[]) : [];
+    const member = interaction.member;
+    if (staffRoleIds.length && member && "roles" in member) {
+      const roles = member.roles as { cache: { some: (fn: (r: { id: string }) => boolean) => boolean } };
+      const hasStaffRole = roles.cache.some((r) => staffRoleIds.includes(r.id));
+      if (!hasStaffRole && interaction.guild.ownerId !== interaction.user.id) {
+        await interaction.editReply("Apenas a equipe pode assumir atendimentos.");
+        return;
+      }
+    }
+
+    const result = await getPool().query<{ claimedBy: string | null; status: string }>(
+      `select claimed_by as "claimedBy", status from tickets
+       where id = $1 and guild_id = $2 and status <> 'closed'`,
+      [ticketId, interaction.guild.id]
+    );
+    const ticket = result.rows[0];
+    if (!ticket) {
+      await interaction.editReply("Esse atendimento não existe ou já foi encerrado.");
+      return;
+    }
+    if (ticket.claimedBy) {
+      await interaction.editReply(`Esse atendimento já foi assumido por <@${ticket.claimedBy}>.`);
+      return;
+    }
+
+    await getPool().query(
+      `update tickets set claimed_by = $1, status = 'claimed' where id = $2 and guild_id = $3`,
+      [interaction.user.id, ticketId, interaction.guild.id]
+    );
+
+    await getPool().query(
+      `insert into ticket_events (ticket_id, event_type, actor_id, data) values ($1, 'claimed', $2, '{}'::jsonb)`,
+      [ticketId, interaction.user.id]
+    );
+
+    await interaction.editReply(`Atendimento #${ticketId} assumido por você.`);
+    log.info("atendimento assumido", { guildId: interaction.guild.id, ticketId, claimedBy: interaction.user.id });
+  }
+
+  async function handleFormOpen(interaction: Interaction): Promise<void> {
+    if (!interaction.isButton() || !interaction.guild) return;
+    await interaction.deferReply({ flags: 64 });
+
+    const guildId = interaction.guild.id;
+    const config = await resolveModuleConfig(guildId, "forms");
+    if (!config.enabled) {
+      await interaction.editReply("As candidaturas estão pausadas neste servidor.");
+      return;
+    }
+
+    // Verifica cooldown
+    const cooldownHours = typeof config.config.cooldownHours === "number" ? config.config.cooldownHours : 24;
+    if (cooldownHours > 0) {
+      const recent = await getPool().query(
+        `select 1 from form_submissions where guild_id = $1 and user_id = $2 and created_at > now() - interval '${cooldownHours} hours' limit 1`,
+        [guildId, interaction.user.id]
+      );
+      if (recent.rowCount && recent.rowCount > 0) {
+        await interaction.editReply(`Você já enviou uma candidatura recentemente. Aguarde ${cooldownHours}h.`);
+        return;
+      }
+    }
+
+    // Verifica idade mínima da conta
+    const minDays = typeof config.config.minAccountAgeDays === "number" ? config.config.minAccountAgeDays : 0;
+    if (minDays > 0) {
+      const accountAge = (Date.now() - interaction.user.createdTimestamp) / (1000 * 60 * 60 * 24);
+      if (accountAge < minDays) {
+        await interaction.editReply(`Sua conta precisa ter pelo menos ${minDays} dia(s) para se candidatar.`);
+        return;
+      }
+    }
+
+    // Cria uma submissão simples (sem modal para compatibilidade)
+    // O usuário será instruído a enviar as respostas no canal
+    const maxSubmissions = typeof config.config.maxSubmissionsPerUser === "number" ? config.config.maxSubmissionsPerUser : 3;
+    const userSubmissions = await getPool().query(
+      `select count(*)::integer as cnt from form_submissions where guild_id = $1 and user_id = $2`,
+      [guildId, interaction.user.id]
+    );
+    if ((userSubmissions.rows[0]?.cnt ?? 0) >= maxSubmissions) {
+      await interaction.editReply(`Você atingiu o limite de ${maxSubmissions} envio(s).`);
+      return;
+    }
+
+    // Insere a submissão pendente
+    const result = await getPool().query<{ id: number }>(
+      `insert into form_submissions (form_id, guild_id, user_id, answers, status)
+       values (0, $1, $2, $3::jsonb, 'pending') returning id`,
+      [guildId, interaction.user.id, JSON.stringify({ submittedAt: new Date().toISOString(), channelId: interaction.channelId })]
+    );
+    const submissionId = result.rows[0].id;
+
+    // Notifica revisores
+    const reviewChannelId = typeof config.config.reviewChannelId === "string" ? config.config.reviewChannelId : "";
+    const reviewerRoleIds = Array.isArray(config.config.reviewerRoleIds) ? config.config.reviewerRoleIds as string[] : [];
+    if (reviewChannelId) {
+      const roleMentions = reviewerRoleIds.length ? reviewerRoleIds.map((id) => `<@&${id}>`).join(" ") : "";
+      const currentClient = client;
+      if (currentClient) {
+        await currentClient.rest.post(Routes.channelMessages(reviewChannelId), {
+          body: {
+            content: `📝 Nova candidatura #${submissionId} de <@${interaction.user.id}> ${roleMentions}`.slice(0, 2000),
+            components: [
+              {
+                type: 1,
+                components: [
+                  { type: 2, style: 3, label: "Aprovar", custom_id: `wumpus:form:approve:${submissionId}` },
+                  { type: 2, style: 4, label: "Rejeitar", custom_id: `wumpus:form:reject:${submissionId}` }
+                ]
+              }
+            ]
+          }
+        }).catch(() => undefined);
+      }
+    }
+
+    await recordAuditEvent({
+      guildId,
+      module: "forms",
+      eventType: "form_submitted",
+      actorId: interaction.user.id,
+      data: { submissionId }
+    }).catch(() => undefined);
+
+    await interaction.editReply(`Candidatura #${submissionId} enviada! A equipe vai analisar.`);
+    log.info("candidatura enviada", { guildId, submissionId, userId: interaction.user.id });
   }
 
   /**
@@ -403,7 +568,7 @@ export function createBot(token: string, log: BotLogger): BotHandle {
    */
   async function runAiAnalysis(interaction: Interaction, rawTicketId: string): Promise<void> {
     if (!interaction.isButton() || !interaction.guild) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
 
     const ticketId = Number(rawTicketId);
     if (!Number.isSafeInteger(ticketId)) {
@@ -473,29 +638,33 @@ export function createBot(token: string, log: BotLogger): BotHandle {
         } else if (action === "ticket" && rest[0] === "close") {
           await closeTicket(interaction, rest[1] ?? "0");
         } else if (action === "ticket" && rest[0] === "claim") {
-          await interaction.reply({ content: "Em breve: assumir atendimento.", ephemeral: true });
+          await claimTicket(interaction, rest[1] ?? "0");
         } else if (action === "ai" && rest[0] === "analyze") {
           await runAiAnalysis(interaction, rest[1] ?? "0");
         } else if (action === "feedback") {
           await saveFeedback(interaction, rest[0] ?? "0", rest[1] ?? "0");
+        } else if (action === "form" && rest[0] === "open") {
+          await handleFormOpen(interaction);
+        } else if (action === "report" && rest[0] === "open") {
+          await interaction.reply({ content: "Denúncia registrada. A equipe vai analisar.", flags: 64 });
         }
       } catch (error) {
-        log.error("erro ao tratar interacao", { customId: interaction.customId, error: String(error) });
+        log.error("erro ao tratar interacao", { customId: interaction.customId, userId: interaction.user.id, error: String(error) });
         if (interaction.isRepliable() && !interaction.replied) {
           await interaction
-            .reply({ content: "Algo falhou ao processar esta ação.", ephemeral: true })
+            .reply({ content: "Algo falhou ao processar esta ação.", flags: 64 })
             .catch(() => undefined);
         }
       }
     });
 
     target.on(Events.GuildCreate, (guild) => {
+      log.info(`entrou no servidor: ${guild.name}`, { guildId: guild.id, members: guild.memberCount });
       void syncGuild(guild).catch((error) =>
         log.error("falha ao sincronizar novo servidor", { error: String(error) })
       );
     });
 
-    // Servidor que estava indisponivel voltou: agora sim conseguimos sincronizar.
     target.on(Events.GuildAvailable, (guild) => {
       void syncGuild(guild).catch((error) =>
         log.error("falha ao sincronizar servidor disponivel", { error: String(error) })
@@ -503,6 +672,7 @@ export function createBot(token: string, log: BotLogger): BotHandle {
     });
 
     target.on(Events.GuildDelete, (guild) => {
+      log.info(`saiu do servidor: ${guild.name ?? guild.id}`, { guildId: guild.id });
       void deactivateGuild(guild.id).catch(() => undefined);
     });
 
@@ -510,6 +680,8 @@ export function createBot(token: string, log: BotLogger): BotHandle {
 
     if (capabilities.automod) {
       target.on(Events.MessageCreate, (message) => {
+        // Statistics: contagem de mensagens
+        if (message.guild && !message.author.bot) trackMessage(message.guild.id);
         void handleMessage(target, message, log).catch((error) =>
           log.error("falha no automod", { error: String(error) })
         );
@@ -544,6 +716,81 @@ export function createBot(token: string, log: BotLogger): BotHandle {
         );
       });
     }
+
+    // Módulo servers: mensagens de boas-vindas e saída + statistics + auto-roles
+    target.on(Events.GuildMemberAdd, (member) => {
+      if (member.user.bot) return;
+      // Statistics: contagem de joins
+      trackJoin(member.guild.id);
+      // Logs: membro entrou
+      void logMemberJoin(member, log).catch(() => undefined);
+      // Roles: auto-assign
+      void (async () => {
+        try {
+          const rolesConfig = await resolveModuleConfig(member.guild.id, "roles");
+          if (!rolesConfig.enabled) return;
+          const defaultRoleIds = Array.isArray(rolesConfig.config.defaultRoleIds) ? rolesConfig.config.defaultRoleIds as string[] : [];
+          if (!defaultRoleIds.length) return;
+          await member.roles.add(defaultRoleIds, "Auto-assign na entrada");
+        } catch { /* sem permissão ou cargo inválido */ }
+      })();
+      // Servers: mensagem de boas-vindas
+      void (async () => {
+        try {
+          const config = await resolveModuleConfig(member.guild.id, "servers");
+          if (!config.enabled) return;
+          const channelId = typeof config.config.announceJoinChannelId === "string" ? config.config.announceJoinChannelId : "";
+          if (!channelId) return;
+          const template = typeof config.config.joinMessage === "string" ? config.config.joinMessage : "";
+          if (!template) return;
+          const content = template.replace(/\{user\}/g, `<@${member.id}>`).replace(/\{username\}/g, member.user.username).replace(/\{server\}/g, member.guild.name);
+          await target.rest.post(Routes.channelMessages(channelId), { body: { content: content.slice(0, 2000) } });
+        } catch { /* servidor sem config ou sem permissão */ }
+      })();
+    });
+
+    target.on(Events.GuildMemberRemove, (member) => {
+      if (member.user.bot) return;
+      void logMemberLeave(member, log).catch(() => undefined);
+      void (async () => {
+        try {
+          const config = await resolveModuleConfig(member.guild.id, "servers");
+          if (!config.enabled) return;
+          const channelId = typeof config.config.announceLeaveChannelId === "string" ? config.config.announceLeaveChannelId : "";
+          if (!channelId) return;
+          const template = typeof config.config.leaveMessage === "string" ? config.config.leaveMessage : "";
+          if (!template) return;
+          const content = template.replace(/\{user\}/g, member.user.username).replace(/\{username\}/g, member.user.username).replace(/\{server\}/g, member.guild.name);
+          await target.rest.post(Routes.channelMessages(channelId), { body: { content: content.slice(0, 2000) } });
+        } catch { /* servidor sem config ou sem permissão */ }
+      })();
+    });
+
+    // Módulo logs: eventos de mensagem, cargo, canal, ban
+    target.on(Events.MessageUpdate, (oldMsg, newMsg) => {
+      void logMessageEdit(oldMsg, newMsg, log).catch(() => undefined);
+    });
+    target.on(Events.MessageDelete, (message) => {
+      void logMessageDelete(message, log).catch(() => undefined);
+    });
+    target.on(Events.GuildRoleCreate, (role) => {
+      void logRoleCreate(role, log).catch(() => undefined);
+    });
+    target.on(Events.GuildRoleDelete, (role) => {
+      void logRoleDelete(role, log).catch(() => undefined);
+    });
+    target.on(Events.ChannelCreate, (channel) => {
+      void logChannelCreate(channel, log).catch(() => undefined);
+    });
+    target.on(Events.ChannelDelete, (channel) => {
+      void logChannelDelete(channel, log).catch(() => undefined);
+    });
+    target.on(Events.GuildBanAdd, (ban) => {
+      void logBanAdd(ban.guild.id, ban.client, ban.user.id, log).catch(() => undefined);
+    });
+    target.on(Events.GuildBanRemove, (ban) => {
+      void logBanRemove(ban.guild.id, ban.client, ban.user.id, log).catch(() => undefined);
+    });
   }
 
   /* -------------------------------- ciclo ----------------------------- */
@@ -575,10 +822,10 @@ export function createBot(token: string, log: BotLogger): BotHandle {
           return;
         }
 
-        log.error(
-          `intents recusadas no nivel "${tier.mode}"; tentando um nivel mais basico. ` +
+        log.warn(
+          `intents recusadas no nivel "${tier.mode}"; tentando nivel mais basico. ` +
             "Habilite as intents no portal do Discord para restaurar a protecao completa.",
-          {}
+          { error: message }
         );
       }
     }
@@ -600,6 +847,20 @@ export function createBot(token: string, log: BotLogger): BotHandle {
 
     worker = setInterval(() => void tick(), WORKER_INTERVAL_MS);
     void tick();
+
+    // Statistics: flush a cada hora
+    setInterval(() => { void flushStatistics().catch(() => undefined); }, 60 * 60_000);
+
+    // Statistics: resumo diário às 12h UTC
+    setInterval(() => {
+      const now = new Date();
+      const currentClient = client;
+      if (now.getUTCHours() === 12 && now.getUTCMinutes() < 5 && currentClient) {
+        for (const guild of currentClient.guilds.cache.values()) {
+          void sendDailyDigest(currentClient, guild.id, log).catch(() => undefined);
+        }
+      }
+    }, 5 * 60_000);
   }
 
   void boot().catch((error) => log.error("falha ao iniciar o bot", { error: String(error) }));

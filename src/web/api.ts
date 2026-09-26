@@ -359,6 +359,19 @@ export const addDashboardMember = (userId: string, role: string, note?: string) 
 export const removeDashboardMember = (userId: string) =>
   api<{ ok: boolean }>(`/api/admin/members/${userId}`, { method: "DELETE" });
 
+/* -------------------- Assistente de configuração IA ---------------- */
+
+export type AiConfigSuggestion = {
+  modules: Array<{ module: string; enabled: boolean; config: Record<string, unknown> }>;
+  explanation: string;
+};
+
+export const requestAiConfig = (guildId: string, prompt: string) =>
+  api<{ ok: boolean; suggestion: AiConfigSuggestion }>(`/api/guilds/${guildId}/ai/config-assistant`, {
+    method: "POST",
+    body: JSON.stringify({ prompt })
+  });
+
 /* ------------------------------------------------------------------ *
  * Roteamento simples por pathname
  * ------------------------------------------------------------------ */

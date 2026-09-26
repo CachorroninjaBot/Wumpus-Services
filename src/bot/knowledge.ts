@@ -29,6 +29,9 @@ export type KnowledgeConfig = {
   cooldownSeconds?: number;
   minQuestionLength?: number;
   includeArticleLink?: boolean;
+  mentionRequired?: boolean;
+  preferFastModel?: boolean;
+  fallbackMessage?: string;
 };
 
 type Article = {
@@ -108,11 +111,11 @@ export function bestMatch(articles: Article[], question: string, minScore = MIN_
 }
 
 /** Reescreve o artigo de forma natural — usando SOMENTE o que o artigo diz. */
-async function composeWithAi(article: Article, question: string): Promise<string | null> {
+async function composeWithAi(article: Article, question: string, preferFast = true): Promise<string | null> {
   try {
     const result = await groqChat({
-      model: fastModel(),
-      fallbackModel: qualityModel(),
+      model: preferFast ? fastModel() : qualityModel(),
+      fallbackModel: preferFast ? qualityModel() : fastModel(),
       temperature: 0.3,
       maxTokens: 500,
       timeoutMs: 15_000,
@@ -157,13 +160,16 @@ export async function answerFromKnowledge(
   const minLen = config.minQuestionLength ?? MIN_QUERY_CHARS;
   if (content.length < minLen) return;
 
+  // Se mentionRequired, só responde quando o bot é mencionado
+  if (config.mentionRequired && !message.mentions.has(client.user!)) return;
+
   // Canal de respostas: se suggestInAllChannels, atua em qualquer canal.
   // Senão, só no canal configurado.
   const answerChannelId = typeof config.answerChannelId === "string" ? config.answerChannelId : "";
   const suggestEverywhere = config.suggestInAllChannels === true;
   if (!suggestEverywhere && (!answerChannelId || answerChannelId !== channelId)) return;
-  // Se não sugerir em todos, precisa do canal configurado
-  if (suggestEverywhere && !answerChannelId && !suggestEverywhere) return;
+  // Se sugerir em todos mas não tem canal configurado, precisa de ao menos um canal de referência
+  if (suggestEverywhere && !answerChannelId) return;
 
   const cooldownMs = (config.cooldownSeconds ?? 20) * 1000;
   const cooldownKey = `${guildId}:${channelId}`;
@@ -173,12 +179,22 @@ export async function answerFromKnowledge(
   const articles = await loadArticles(guildId, onlyApproved).catch(() => [] as Article[]);
   const minScore = config.similarityThreshold ? Math.round(config.similarityThreshold * 5) : MIN_SCORE;
   const match = bestMatch(articles, content, minScore);
-  if (!match) return;
+  if (!match) {
+    // Nenhum artigo encontrou: envia fallbackMessage se configurado
+    const fallback = typeof config.fallbackMessage === "string" ? config.fallbackMessage.trim() : "";
+    if (fallback) {
+      lastReply.set(cooldownKey, Date.now());
+      await client.rest.post(Routes.channelMessages(channelId), {
+        body: { content: fallback.slice(0, 1900), message_reference: { message_id: message.id } }
+      }).catch(() => undefined);
+    }
+    return;
+  }
 
   lastReply.set(cooldownKey, Date.now());
 
   const useAi = config.useAi !== false;
-  const aiAnswer = useAi ? await composeWithAi(match.article, content) : null;
+  const aiAnswer = useAi ? await composeWithAi(match.article, content, config.preferFastModel !== false) : null;
   const includeLink = config.includeArticleLink !== false;
 
   const body = aiAnswer ?? match.article.body;

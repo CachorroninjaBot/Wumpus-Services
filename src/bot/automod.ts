@@ -197,21 +197,21 @@ async function removeMessages(message: Message, violation: Violation, log: Logge
 }
 
 /** Avisa o autor por DM: nao polui o canal e nao expõe a moderacao. */
-async function warn(client: Client, message: Message, violation: Violation): Promise<boolean> {
+async function warn(client: Client, message: Message, violation: Violation, customMessage?: string): Promise<boolean> {
   try {
     const dm = await client.users.createDM(message.author.id);
-    await client.rest.post(Routes.channelMessages(dm.id), {
-      body: {
-        content: [
+    const warnText = customMessage?.trim()
+      ? `${customMessage}\n\nMotivo: ${violation.label} — ${violation.detail}.`
+      : [
           `Seu envio em **${message.guild?.name ?? "servidor"}** foi removido.`,
           `Motivo: ${violation.label} — ${violation.detail}.`,
           "Se acredita que foi um engano, fale com a equipe."
-        ].join("\n")
-      }
+        ].join("\n");
+    await client.rest.post(Routes.channelMessages(dm.id), {
+      body: { content: warnText }
     });
     return true;
   } catch {
-    // DM fechada e o caso comum; nao e falha da moderacao.
     return false;
   }
 }
@@ -252,11 +252,11 @@ export async function handleMessage(client: Client, message: Message, log: Logge
   let removed = 0;
   let timedOut = false;
 
-  if (action === "delete" || action === "timeout") {
+  if (action === "delete" || action === "timeout" || action === "review") {
     removed = await removeMessages(message, violation, log);
   }
   if (action === "warn") {
-    await warn(client, message, violation);
+    await warn(client, message, violation, asString(config.config.warnMessage));
   }
   if (action === "timeout") {
     timedOut = await applyTimeout(client, guildId, message.author.id, timeoutMinutes);

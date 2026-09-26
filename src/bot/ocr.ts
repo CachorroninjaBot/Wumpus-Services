@@ -21,6 +21,13 @@ export type OcrConfig = {
   language?: string;
   model?: string;
   retainExtractedText?: boolean;
+  maxImageMb?: number;
+  confidenceThreshold?: number;
+  reviewChannelId?: string;
+  autoDeleteSuspicious?: boolean;
+  cacheResults?: boolean;
+  cacheTtlMinutes?: number;
+  logChannelId?: string;
 };
 
 export type OcrResult = {
@@ -143,7 +150,8 @@ export async function extractText(
   size: number | null,
   config: OcrConfig
 ): Promise<OcrResult | null> {
-  if (size !== null && size > MAX_IMAGE_BYTES) return null;
+  const maxBytes = (config.maxImageMb ?? 8) * 1024 * 1024;
+  if (size !== null && size > maxBytes) return null;
 
   const provider = config.provider ?? "hybrid";
 

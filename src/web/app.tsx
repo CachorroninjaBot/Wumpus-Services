@@ -19,6 +19,7 @@ import {
   navigate,
   parseRoute,
   removeDashboardMember,
+  requestAiConfig,
   updateArticle,
   type Group,
   type GuildOverview,
@@ -940,9 +941,7 @@ function GuildOverviewPage({ guildId }: { guildId: string }) {
             <p>
               Descreva o que você quer e receba um rascunho pronto para revisar antes de aplicar no Discord.
             </p>
-            <button type="button" className="btn btn-primary btn-block" disabled title="Chega junto com o bot">
-              Em breve
-            </button>
+            <AiConfigAssistant guildId={guildId} />
           </section>
         </aside>
       </div>
@@ -1248,6 +1247,58 @@ function KnowledgePanel({ guildId }: { guildId: string }) {
         />
       )}
     </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Assistente de configuração com IA
+ * ------------------------------------------------------------------ */
+
+function AiConfigAssistant({ guildId }: { guildId: string }) {
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+
+  async function submit() {
+    if (prompt.trim().length < 10) {
+      setError("Descreva o que você quer com pelo menos 10 caracteres.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const response = await requestAiConfig(guildId, prompt.trim());
+      setResult(response.suggestion.explanation || "Configuração gerada com sucesso.");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 503) setError("IA não configurada no servidor.");
+      else if (err instanceof ApiError && err.status === 502) setError("Erro ao comunicar com a IA. Tente novamente.");
+      else setError("Não foi possível gerar a configuração agora.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder="Ex: Quero que o automod bloqueie links do Telegram e avise a equipe no canal #mod-logs"
+        rows={3}
+        maxLength={500}
+        disabled={busy}
+        style={{ width: "100%", padding: "10px 11px", border: "1px solid var(--line)", borderRadius: 9, background: "var(--surface)", color: "var(--text)", font: "inherit", fontSize: 12, resize: "vertical" }}
+      />
+      <small style={{ color: "var(--text-3)", fontSize: 10 }}>{prompt.length}/500</small>
+      {error ? <p className="form-error">{error}</p> : null}
+      {result ? <Notice tone="ok">{result}</Notice> : null}
+      <button className="btn btn-primary btn-block" type="button" disabled={busy || prompt.length < 10} onClick={submit}>
+        {busy ? "Gerando configuração…" : "Gerar com IA"}
+        {busy ? null : <Icon name="spark" size={15} />}
+      </button>
+    </div>
   );
 }
 
