@@ -171,7 +171,21 @@ export async function handleMemberAdd(client: Client, member: GuildMember, log: 
   const config = await resolveModuleConfig(guild.id, "security");
   if (!config.enabled) return;
 
-  const threshold = num(config.config.raidJoinThreshold, 12);
+  const raidMode = asString(config.config.raidMode) || "smart";
+  const whitelistRoleIds = asList(config.config.whitelistRoleIds);
+  const trustedRoleIds = asList(config.config.trustedRoleIds);
+
+  // Whitelist ignora completamente
+  if (whitelistRoleIds.length) {
+    try {
+      const m = await guild.members.fetch(member.id);
+      if (m.roles.cache.some((role) => whitelistRoleIds.includes(role.id))) return;
+    } catch { /* não conseguiu buscar, continua a verificação */ }
+  }
+
+  const threshold = raidMode === "strict" ? Math.max(3, num(config.config.raidJoinThreshold, 12) - 4) :
+                    raidMode === "passive" ? num(config.config.raidJoinThreshold, 12) * 2 :
+                    num(config.config.raidJoinThreshold, 12);
   const windowMs = num(config.config.raidWindowSeconds, 60) * 1000;
   const now = Date.now();
 
@@ -183,8 +197,7 @@ export async function handleMemberAdd(client: Client, member: GuildMember, log: 
   lastIncident.set(incidentKey, now);
 
   const suspects = [...new Set(hits.map((hit) => hit.userId))];
-  const trustedRoleIds = asList(config.config.trustedRoleIds);
-  const response = asString(config.config.response) || "alert";
+  const response = raidMode === "passive" ? "alert" : (asString(config.config.response) || "alert");
   const timeoutMinutes = num(config.config.timeoutMinutes, 60);
 
   const incidentId = await openIncident({
@@ -196,20 +209,39 @@ export async function handleMemberAdd(client: Client, member: GuildMember, log: 
       joins: hits.length,
       windowSeconds: windowMs / 1000,
       threshold,
-      suspects: suspects.slice(-MAX_CONTAINMENTS)
+      suspects: suspects.slice(-MAX_CONTAINMENTS),
+      raidMode
     }
   });
 
   let contained = 0;
   if (response !== "alert") {
     for (const userId of suspects.slice(-MAX_CONTAINMENTS)) {
-      if (await isExempt(guild, userId, trustedRoleIds)) continue;
+      if (await isExempt(guild, userId, [...trustedRoleIds, ...whitelistRoleIds])) continue;
       if (await applyTimeout(client, guild.id, userId, timeoutMinutes)) contained += 1;
     }
   }
   const verificationRaised = response === "lockdown_review" ? await raiseVerification(client, guild.id) : false;
 
-  // Zera a janela: sem isso o proximo join ja estouraria o limite de novo.
+  // Auto-ban reincidentes
+  const autoBan = config.config.autoBanRepeatOffenders === true;
+  let banned = 0;
+  if (autoBan && response !== "alert") {
+    for (const userId of suspects.slice(-MAX_CONTAINMENTS)) {
+      if (await isExempt(guild, userId, [...trustedRoleIds, ...whitelistRoleIds])) continue;
+      // Verifica se esta conta já causou incidente antes
+      const prev = await getPool().query(
+        `select 1 from incidents where guild_id = $1 and incident_type = 'raid' and status <> 'dismissed' and details->'suspects' ? $2 and id <> $3 limit 1`,
+        [guild.id, userId, incidentId ?? 0]
+      );
+      if (prev.rowCount && prev.rowCount > 0) {
+        await client.rest.put(Routes.guildBan(guild.id, userId), { reason: "Reincidente em raid" }).catch(() => undefined);
+        banned += 1;
+      }
+    }
+  }
+
+  // Zera a janela
   joinHits.set(guild.id, []);
 
   await recordAuditEvent({
@@ -217,8 +249,10 @@ export async function handleMemberAdd(client: Client, member: GuildMember, log: 
     module: "security",
     eventType: "raid_detected",
     severity: "critical",
-    data: { joins: hits.length, threshold, contained, verificationRaised, incidentId }
+    data: { joins: hits.length, threshold, contained, banned, verificationRaised, incidentId, raidMode }
   });
+
+  const lockdownMsg = asString(config.config.lockdownMessage);
 
   await alert(
     client,
@@ -229,7 +263,9 @@ export async function handleMemberAdd(client: Client, member: GuildMember, log: 
       accentColor: "#ff5c6c",
       fields: [
         { name: "Resposta aplicada", value: describeResponse(response), inline: true },
+        { name: "Modo", value: raidMode, inline: true },
         { name: "Contidos", value: `${contained} conta(s) com timeout`, inline: true },
+        ...(banned > 0 ? [{ name: "Banidos", value: `${banned} reincidente(s)`, inline: true }] : []),
         {
           name: "Bloqueio preventivo",
           value: verificationRaised ? "Nível de verificação elevado" : "não aplicado",
@@ -237,7 +273,7 @@ export async function handleMemberAdd(client: Client, member: GuildMember, log: 
         },
         {
           name: "O que fazer agora",
-          value: "Confirme no canal de entradas se essas contas são legítimas. Se não forem, mantenha o bloqueio e revise os convites ativos.",
+          value: lockdownMsg || "Confirme no canal de entradas se essas contas são legítimas. Se não forem, mantenha o bloqueio e revise os convites ativos.",
           inline: false
         }
       ]
@@ -245,7 +281,7 @@ export async function handleMemberAdd(client: Client, member: GuildMember, log: 
     log
   );
 
-  log.info("raid detectado", { guildId: guild.id, joins: hits.length, contained, verificationRaised });
+  log.info("raid detectado", { guildId: guild.id, joins: hits.length, contained, banned, verificationRaised, raidMode });
 }
 
 /* ------------------------------------------------------------------ *
@@ -292,6 +328,8 @@ export async function handleAuditLogEntry(
   lastIncident.set(incidentKey, now);
 
   const trustedRoleIds = asList(config.config.trustedRoleIds);
+  const whitelistRoleIds = asList(config.config.whitelistRoleIds);
+  const allExemptIds = [...trustedRoleIds, ...whitelistRoleIds];
   const response = asString(config.config.response) || "alert";
   const timeoutMinutes = num(config.config.timeoutMinutes, 60);
 
@@ -309,8 +347,8 @@ export async function handleAuditLogEntry(
     }
   });
 
-  // Cargo confiavel nunca e punido — mas o alerta sai mesmo assim.
-  const exempt = await isExempt(guild, executorId, trustedRoleIds);
+  // Cargo confiavel e whitelist nunca sao punidos — mas o alerta sai mesmo assim.
+  const exempt = await isExempt(guild, executorId, allExemptIds);
   const contained = response !== "alert" && !exempt
     ? await applyTimeout(client, guild.id, executorId, timeoutMinutes)
     : false;
@@ -349,7 +387,7 @@ export async function handleAuditLogEntry(
         },
         {
           name: "O que fazer agora",
-          value: "Confirme se a ação foi intencional. Se não foi, revise as permissões desse membro e o que foi apagado.",
+          value: asString(config.config.lockdownMessage) || "Confirme se a ação foi intencional. Se não foi, revise as permissões desse membro e o que foi apagado.",
           inline: false
         }
       ]

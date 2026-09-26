@@ -131,6 +131,7 @@ export const moduleFields: Record<ModuleId, Field[]> = {
     { key: "rateLimitPerMinute", label: "Limite de chamadas por minuto", type: "number", min: 1, max: 1000, section: "Saída" },
     { key: "includeGuildId", label: "Incluir o ID do servidor no payload", type: "boolean", section: "Saída" },
     { key: "logPayloads", label: "Registrar payloads enviados", type: "boolean", help: "Útil para debug. Desligue em produção para economizar espaço.", section: "Saída" },
+    { key: "customHeaders", label: "Headers customizados", type: "list", placeholder: "X-Custom: valor", help: "Formato: Nome: valor. Um por linha ou separado por vírgula.", section: "Saída" },
     { key: "allowIncoming", label: "Aceitar webhooks de entrada", type: "boolean", help: "Desligado por padrão. Só ligue com assinatura configurada.", section: "Entrada" },
     { key: "healthCheckIntervalMinutes", label: "Verificação de saúde (min)", type: "number", min: 1, max: 60, section: "Monitoramento" }
   ],
@@ -171,6 +172,8 @@ export const moduleFields: Record<ModuleId, Field[]> = {
     { key: "scanImages", label: "Ler texto em imagens (OCR)", type: "boolean", section: "Conteúdo" },
     { key: "blockedTerms", label: "Termos bloqueados", type: "list", section: "Conteúdo" },
     { key: "blockedDomains", label: "Domínios bloqueados", type: "list", placeholder: "exemplo.com", section: "Conteúdo" },
+    { key: "minLength", label: "Tamanho mínimo da mensagem", type: "number", min: 0, max: 500, help: "0 = sem mínimo. Mensagens menores que isso são removidas.", section: "Avançado" },
+    { key: "maxLength", label: "Tamanho máximo da mensagem", type: "number", min: 0, max: 10000, help: "0 = sem máximo. Mensagens maiores que isso são removidas.", section: "Avançado" },
     { key: "capsThresholdPercent", label: "Limite de maiúsculas (%)", type: "number", min: 50, max: 100, help: "Mensagens com mais que isso em maiúsculas são flagged. 0 = desativado.", section: "Avançado" },
     { key: "antiGhostPing", label: "Detectar ghost pings", type: "boolean", help: "Alerta quando alguém menciona e apaga a mensagem.", section: "Avançado" }
   ],
@@ -239,6 +242,7 @@ export const moduleFields: Record<ModuleId, Field[]> = {
     { key: "maxOpenPerUser", label: "Atendimentos abertos por pessoa", type: "number", min: 1, max: 10, section: "Fluxo" },
     { key: "pingStaffOnOpen", label: "Mencionar a equipe ao abrir", type: "boolean", section: "Fluxo" },
     { key: "feedbackEnabled", label: "Pedir feedback ao encerrar", type: "boolean", section: "Fluxo" },
+    { key: "satisfactionSurvey", label: "Pesquisa de satisfação detalhada", type: "boolean", help: "Além da nota, envia um formulário de satisfação ao encerrar.", section: "Fluxo" },
     { key: "reopenEnabled", label: "Permitir reabrir atendimento", type: "boolean", section: "Fluxo" },
     { key: "priorityEnabled", label: "Sistema de prioridade", type: "boolean", section: "Fluxo" },
     { key: "slaWarningMinutes", label: "Alerta de SLA (min)", type: "number", min: 5, max: 1440, help: "Alerta quando um atendimento fica sem resposta por este tempo.", section: "Fluxo" },
@@ -274,6 +278,7 @@ export const moduleFields: Record<ModuleId, Field[]> = {
     { key: "minQuestionLength", label: "Tamanho mínimo da pergunta", type: "number", min: 6, max: 200, section: "Regras" },
     { key: "cooldownSeconds", label: "Intervalo entre respostas (s)", type: "number", min: 5, max: 300, section: "Regras" },
     { key: "autoSuggest", label: "Sugestão automática", type: "boolean", help: "Sugere artigos mesmo em canais não configurados.", section: "Regras" },
+    { key: "suggestInAllChannels", label: "Sugestão em todos os canais", type: "boolean", help: "Quando ativado, ignora o canal configurado e sugere em qualquer lugar.", section: "Regras" },
     { key: "includeArticleLink", label: "Incluir link do artigo na resposta", type: "boolean", section: "Regras" },
     { key: "fallbackMessage", label: "Mensagem se nenhum artigo servir", type: "longtext", maxLength: 300, help: "Vazio = o bot fica quieto.", section: "Regras" },
     { key: "logSearches", label: "Registrar buscas", type: "boolean", section: "Monitoramento" },

@@ -18,7 +18,7 @@ import {
 } from "../server/db/publishing.js";
 import { invalidateChannelIndex } from "../server/db/channel-refs.js";
 import { analyzeTicket } from "./ai.js";
-import { handleImageContent, handleMessage, syncNativeKeywordRule } from "./automod.js";
+import { handleImageContent, handleMessage, handleGhostPing, trackMentions, syncNativeKeywordRule } from "./automod.js";
 import { answerFromKnowledge, type KnowledgeConfig } from "./knowledge.js";
 import { buildPanelPayload, defaultButtons, IS_COMPONENTS_V2, type PanelFormat } from "./panels.js";
 import { handleAuditLogEntry, handleMemberAdd } from "./security.js";
@@ -513,13 +513,20 @@ export function createBot(token: string, log: BotLogger): BotHandle {
         void handleMessage(target, message, log).catch((error) =>
           log.error("falha no automod", { error: String(error) })
         );
-        // Le imagens: o texto dentro delas escapa do filtro de texto.
         void handleImageContent(target, message, log).catch((error) =>
           log.error("falha no ocr", { error: String(error) })
         );
-        // Responde pela base de conhecimento, quando o canal for o configurado.
         void handleKnowledge(message).catch((error) =>
           log.error("falha na base de conhecimento", { error: String(error) })
+        );
+        // Rastreia menções para detecção de ghost ping
+        trackMentions(message);
+      });
+
+      target.on(Events.MessageDelete, (message) => {
+        if (!message.guildId) return;
+        void handleGhostPing(target, message.id, message.guildId, message.channelId, log).catch((error) =>
+          log.error("falha na deteccao de ghost ping", { error: String(error) })
         );
       });
     }

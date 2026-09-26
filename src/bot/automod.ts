@@ -77,9 +77,49 @@ function detect(message: Message, config: Record<string, unknown>, now: number):
   const content = normalize(raw);
   const found: Violation[] = [];
 
+  // 0. Tamanho da mensagem
+  const minLen = num(config.minLength, 0);
+  const maxLen = num(config.maxLength, 0);
+  if (minLen > 0 && raw.length < minLen) {
+    found.push({ kind: "short", label: "Mensagem muito curta", detail: `${raw.length} caracteres (mínimo: ${minLen})` });
+  }
+  if (maxLen > 0 && raw.length > maxLen) {
+    found.push({ kind: "long", label: "Mensagem muito longa", detail: `${raw.length} caracteres (máximo: ${maxLen})` });
+  }
+
   // 1. Conteudo proibido: imediato e independente de janela.
   if (config.blockInvites !== false && INVITE_PATTERN.test(raw)) {
     found.push({ kind: "invite", label: "Convite de outro servidor", detail: "mensagem com convite" });
+  }
+
+  // Bloqueio de links
+  if (config.blockLinks && /https?:\/\/\S+/i.test(raw)) {
+    const allowed = asList(config.allowedDomains).map((d) => d.toLowerCase().trim()).filter(Boolean);
+    const links = raw.match(/https?:\/\/(\S+)/gi) ?? [];
+    const hasBlockedLink = links.some((link) => {
+      try {
+        const hostname = new URL(link).hostname.toLowerCase();
+        return !allowed.some((domain) => hostname === domain || hostname.endsWith("." + domain));
+      } catch {
+        return true;
+      }
+    });
+    if (hasBlockedLink) {
+      found.push({ kind: "link", label: "Link não permitido", detail: "mensagem com link bloqueado" });
+    }
+  }
+
+  // Maiúsculas em excesso
+  const capsThreshold = num(config.capsThresholdPercent, 0);
+  if (capsThreshold > 0 && raw.length >= 10) {
+    const letters = raw.replace(/[^a-zA-ZÀ-ÿ]/g, "");
+    if (letters.length >= 5) {
+      const upper = letters.replace(/[^A-ZÀ-Ý]/g, "").length;
+      const percent = Math.round((upper / letters.length) * 100);
+      if (percent >= capsThreshold) {
+        found.push({ kind: "caps", label: "Maiúsculas em excesso", detail: `${percent}% em maiúsculas (limite: ${capsThreshold}%)` });
+      }
+    }
   }
 
   const terms = asList(config.blockedTerms).map(normalize).filter(Boolean);
@@ -120,8 +160,8 @@ function detect(message: Message, config: Record<string, unknown>, now: number):
 
   if (!found.length) return null;
 
-  // Prioridade: conteudo proibido > repeticao > velocidade.
-  const order = ["invite", "term", "domain", "duplicate", "spam"];
+  // Prioridade: conteudo proibido > tamanho > caps > repeticao > velocidade.
+  const order = ["invite", "term", "domain", "link", "long", "short", "caps", "duplicate", "spam"];
   found.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   return found[0];
 }
@@ -178,16 +218,25 @@ async function warn(client: Client, message: Message, violation: Violation): Pro
 
 export async function handleMessage(client: Client, message: Message, log: Logger): Promise<void> {
   if (!message.guild || message.author.bot || message.system) return;
-  // Mensagem de DM ou parcial (sem conteudo) nao e avaliada.
   if (!message.content) return;
 
   const guildId = message.guild.id;
   const config = await resolveModuleConfig(guildId, "automod");
   if (!config.enabled) return;
 
-  // Quem modera nao e moderado: sem isso o proprio staff levaria timeout.
+  // Canais e cargos ignorados: listas configuradas na dashboard.
+  const ignoredChannels = asList(config.config.ignoredChannelIds);
+  if (ignoredChannels.includes(message.channelId)) return;
+
   const member = message.member;
   if (member?.permissions.has("ManageMessages")) return;
+
+  // Cargos ignorados configurados
+  const ignoredRoles = asList(config.config.ignoredRoleIds);
+  if (ignoredRoles.length && member) {
+    const hasIgnoredRole = member.roles.cache.some((role) => ignoredRoles.includes(role.id));
+    if (hasIgnoredRole) return;
+  }
 
   const now = Date.now();
   const violation = detect(message, config.config, now);
@@ -447,6 +496,103 @@ export async function handleImageContent(client: Client, message: Message, log: 
     // Uma acao por mensagem basta: as demais imagens seriam redundantes.
     return;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Ghost Ping Detection
+ * ------------------------------------------------------------------ */
+
+type MentionRecord = { userIds: string[]; at: number };
+
+/** Mensagens com menções recentes: se apagadas em <10s, é ghost ping. */
+const recentMentions = new Map<string, MentionRecord>();
+const GHOST_PING_WINDOW_MS = 10_000;
+const GHOST_PING_COOLDOWN_MS = 60_000;
+const lastGhostAlert = new Map<string, number>();
+
+/**
+ * Registra mensagens que contêm menções reais (não @everyone/@here).
+ * Chamado no MessageCreate, separado do automod principal.
+ */
+export function trackMentions(message: Message): void {
+  if (!message.guild || message.author.bot) return;
+  const mentions = message.mentions.users;
+  if (!mentions.size) return;
+  recentMentions.set(message.id, {
+    userIds: [...mentions.keys()],
+    at: Date.now()
+  });
+  // Limpa entradas antigas
+  const cutoff = Date.now() - GHOST_PING_WINDOW_MS * 2;
+  for (const [id, entry] of recentMentions) {
+    if (entry.at < cutoff) recentMentions.delete(id);
+  }
+}
+
+/**
+ * Detecta ghost ping: mensagem com menção foi apagada rapidamente.
+ */
+export async function handleGhostPing(
+  client: Client,
+  messageId: string,
+  guildId: string,
+  channelId: string,
+  log: Logger
+): Promise<void> {
+  const entry = recentMentions.get(messageId);
+  if (!entry) return;
+  recentMentions.delete(messageId);
+
+  const elapsed = Date.now() - entry.at;
+  if (elapsed > GHOST_PING_WINDOW_MS) return;
+
+  // Verifica se o módulo automod está ativo e se antiGhostPing está ligado
+  const config = await resolveModuleConfig(guildId, "automod").catch(() => null);
+  if (!config?.enabled || config.config.antiGhostPing !== true) return;
+
+  // Cooldown por canal
+  const cooldownKey = `${guildId}:${channelId}:ghost`;
+  if (Date.now() - (lastGhostAlert.get(cooldownKey) ?? 0) < GHOST_PING_COOLDOWN_MS) return;
+  lastGhostAlert.set(cooldownKey, Date.now());
+
+  const mentionedNames = entry.userIds.map((id) => `<@${id}>`).join(", ");
+
+  // Registra como incidente
+  await getPool()
+    .query(
+      `insert into incidents (guild_id, incident_type, severity, actor_id, details)
+       values ($1, 'automod', 'low', $2, $3::jsonb)`,
+      [guildId, null, JSON.stringify({ kind: "ghost_ping", channelId, mentionedUsers: entry.userIds, elapsedMs: elapsed })]
+    )
+    .catch(() => undefined);
+
+  await recordAuditEvent({
+    guildId,
+    module: "automod",
+    eventType: "ghost_ping_detected",
+    channelId,
+    severity: "warning",
+    data: { mentionedUsers: entry.userIds, elapsedMs: elapsed }
+  }).catch(() => undefined);
+
+  const logChannelId = asString(config.config.logChannelId);
+  if (messageId && logChannelId) {
+    await client.rest
+      .post(Routes.channelMessages(logChannelId), {
+        body: buildLogPayload({
+          title: "AutoMod · Ghost ping detectado",
+          description: `Uma mensagem com menção para ${mentionedNames} foi apagada em <#${channelId}> após ${Math.round(elapsed / 1000)}s.`,
+          accentColor: "#f5a524",
+          fields: [
+            { name: "Canal", value: `<#${channelId}>`, inline: true },
+            { name: "Tempo", value: `${Math.round(elapsed / 1000)}s`, inline: true }
+          ]
+        })
+      })
+      .catch(() => undefined);
+  }
+
+  log.info("ghost ping detectado", { guildId, channelId, mentionedUsers: entry.userIds, elapsedMs: elapsed });
 }
 
 /**

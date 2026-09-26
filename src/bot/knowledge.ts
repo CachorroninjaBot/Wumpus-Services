@@ -23,6 +23,12 @@ export type KnowledgeConfig = {
   answerChannelId?: string;
   useAi?: boolean;
   requireApprovedArticles?: boolean;
+  suggestInAllChannels?: boolean;
+  similarityThreshold?: number;
+  maxArticlesPerSearch?: number;
+  cooldownSeconds?: number;
+  minQuestionLength?: number;
+  includeArticleLink?: boolean;
 };
 
 type Article = {
@@ -87,7 +93,7 @@ function scoreArticle(article: Article, terms: string[]): number {
   return score;
 }
 
-export function bestMatch(articles: Article[], question: string): { article: Article; score: number } | null {
+export function bestMatch(articles: Article[], question: string, minScore = MIN_SCORE): { article: Article; score: number } | null {
   const terms = tokenize(question);
   if (!terms.length) return null;
 
@@ -97,7 +103,7 @@ export function bestMatch(articles: Article[], question: string): { article: Art
     if (!best || score > best.score) best = { article, score };
   }
 
-  if (!best || best.score < MIN_SCORE) return null;
+  if (!best || best.score < minScore) return null;
   return best;
 }
 
@@ -146,30 +152,40 @@ export async function answerFromKnowledge(
   const guildId = message.guild?.id;
   const channelId = message.channelId;
   const content = message.content?.trim() ?? "";
-  if (!guildId || content.length < MIN_QUERY_CHARS) return;
+  if (!guildId) return;
 
-  // So atua no canal configurado: em outros canais o bot fica quieto.
+  const minLen = config.minQuestionLength ?? MIN_QUERY_CHARS;
+  if (content.length < minLen) return;
+
+  // Canal de respostas: se suggestInAllChannels, atua em qualquer canal.
+  // Senão, só no canal configurado.
   const answerChannelId = typeof config.answerChannelId === "string" ? config.answerChannelId : "";
-  if (!answerChannelId || answerChannelId !== channelId) return;
+  const suggestEverywhere = config.suggestInAllChannels === true;
+  if (!suggestEverywhere && (!answerChannelId || answerChannelId !== channelId)) return;
+  // Se não sugerir em todos, precisa do canal configurado
+  if (suggestEverywhere && !answerChannelId && !suggestEverywhere) return;
 
+  const cooldownMs = (config.cooldownSeconds ?? 20) * 1000;
   const cooldownKey = `${guildId}:${channelId}`;
-  if (Date.now() - (lastReply.get(cooldownKey) ?? 0) < REPLY_COOLDOWN_MS) return;
+  if (Date.now() - (lastReply.get(cooldownKey) ?? 0) < cooldownMs) return;
 
   const onlyApproved = config.requireApprovedArticles !== false;
   const articles = await loadArticles(guildId, onlyApproved).catch(() => [] as Article[]);
-  const match = bestMatch(articles, content);
+  const minScore = config.similarityThreshold ? Math.round(config.similarityThreshold * 5) : MIN_SCORE;
+  const match = bestMatch(articles, content, minScore);
   if (!match) return;
 
   lastReply.set(cooldownKey, Date.now());
 
   const useAi = config.useAi !== false;
   const aiAnswer = useAi ? await composeWithAi(match.article, content) : null;
+  const includeLink = config.includeArticleLink !== false;
 
   const body = aiAnswer ?? match.article.body;
   const reply = [
     aiAnswer ? body : `**${match.article.title}**\n${body}`,
     "",
-    `-# Base de conhecimento · artigo #${match.article.id}${aiAnswer ? " · resposta assistida por IA" : ""}`
+    `-# Base de conhecimento · artigo #${match.article.id}${aiAnswer ? " · resposta assistida por IA" : ""}${includeLink ? "" : ""}`
   ]
     .join("\n")
     .slice(0, 1_900);
