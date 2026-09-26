@@ -1,6 +1,9 @@
 DISPLAY_NAME=Wumpus
-DESCRIPTION=Bot de gestao de comunidades Wumpus.
+DESCRIPTION=Reescrita do Wumpus com stack nova (Fastify + React/Vite + Postgres). Dashboard e bot de gestão de comunidades Discord, com configuração por grupo e exceções por servidor. Protótipo da nova identidade visual.
+MAIN=index.js
+MEMORY=1024
+VERSION=24.15.0
 LANGUAGE=node
-MEMORY=256
-VERSION=latest
-CUSTOM_COMMAND=npm run build:bot && npm run db:migrate && npm run start:bot
+CUSTOM_COMMAND=npm run build && npm run start
+SUBDOMAIN=wumpus-dashboard
+APPID=260cf682-83bf-46b2-a4ad-368dd288a5ca
