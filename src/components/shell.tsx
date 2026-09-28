@@ -5,6 +5,7 @@ import { BrandMark, GuildBadge } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { brand, groupLabels, navItems, type ModuleGroupId, type NavId } from "@/lib/wumpus/brand";
+import { isPlatformOwner } from "@/lib/wumpus/owner";
 import { useWumpus } from "@/lib/wumpus/store";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +87,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const guild = guilds.find((g) => g.id === activeId) ?? guilds[0];
   const [open, setOpen] = useState(false);
   const active = useActiveNav();
+  const owner = isPlatformOwner(user.id);
 
   useEffect(() => {
     hydrate();
@@ -129,22 +131,22 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <GuildBadge tag={guild?.tag ?? "W"} iconUrl={guild?.iconUrl} size={38} />
           <div className="min-w-0">
             <p className="m-0 truncate text-sm font-semibold">{guild?.name}</p>
-            <p className="m-0 truncate text-xs text-muted-foreground">
-              {guild?.online} online · plano {guild?.plan}
-            </p>
+            <p className="m-0 truncate text-xs text-muted-foreground">plano {guild?.plan}</p>
           </div>
         </header>
         <div className="flex-1 overflow-y-auto px-2 pt-3">
           <NavList />
         </div>
-        <div className="border-t border-border p-2">
-          <Link
-            to="/admin"
-            className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <Shield className="size-4" /> Admin
-          </Link>
-        </div>
+        {owner ? (
+          <div className="border-t border-border p-2">
+            <Link
+              to="/admin"
+              className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <Shield className="size-4" /> Admin
+            </Link>
+          </div>
+        ) : null}
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -178,7 +180,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
           <span className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">{user.globalName}</span>
-          <Link to="/" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="Sair">
+          <Link to="/entrar" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="Sair">
             <LogOut className="size-4" />
           </Link>
         </header>
