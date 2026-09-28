@@ -25,6 +25,8 @@ import { recordOccurrence } from "./moderation.js";
 import { answerFromKnowledge, type KnowledgeConfig } from "./knowledge.js";
 import { buildPanelPayload, defaultButtons, IS_COMPONENTS_V2, type PanelFormat } from "./panels.js";
 import { handleAuditLogEntry, handleMemberAdd } from "./security.js";
+import { handleFormOpen, handleFormModalSubmit, handleFormReview } from "./forms.js";
+import type { GuildMember } from "discord.js";
 
 export type BotLogger = {
   info: (message: string, extra?: Record<string, unknown>) => void;
@@ -153,6 +155,33 @@ export function createBot(token: string, log: BotLogger): BotHandle {
     } finally {
       running = false;
     }
+  }
+
+
+  async function sendJoinLeaveMessage(member: GuildMember, kind: "join" | "leave"): Promise<void> {
+    const current = client;
+    if (!current) return;
+    const mod = await resolveModuleConfig(member.guild.id, "servers").catch(() => null);
+    if (!mod?.enabled) return;
+    const cfg = mod.config;
+    const channelId =
+      kind === "join"
+        ? (typeof cfg.announceJoinChannelId === "string" ? cfg.announceJoinChannelId : "")
+        : (typeof cfg.announceLeaveChannelId === "string" ? cfg.announceLeaveChannelId : "");
+    if (!channelId) return;
+    const template =
+      kind === "join"
+        ? (typeof cfg.joinMessage === "string" && cfg.joinMessage
+            ? cfg.joinMessage
+            : "Bem-vindo(a) ao servidor, {user}!")
+        : (typeof cfg.leaveMessage === "string" && cfg.leaveMessage
+            ? cfg.leaveMessage
+            : "{user} saiu do servidor.");
+    const content = template
+      .replaceAll("{user}", kind === "join" ? `<@${member.id}>` : member.user.username)
+      .replaceAll("{server}", member.guild.name)
+      .slice(0, 2000);
+    await current.rest.post(Routes.channelMessages(channelId), { body: { content } }).catch(() => undefined);
   }
 
   /** Grava mensagens de canais de ticket para histórico/IA. */
@@ -345,5 +374,509 @@ export function createBot(token: string, log: BotLogger): BotHandle {
     }
   }
 
-  // PLACEHOLDER_REMAINDER - will need full file
+  async function closeTicket(interaction: Interaction, rawTicketId: string): Promise<void> {
+    const current = client;
+    if (!interaction.isButton() || !interaction.guild || !current) return;
+    await interaction.deferReply({ flags: 64 });
+
+    const ticketId = Number(rawTicketId);
+    if (!Number.isSafeInteger(ticketId)) {
+      await interaction.editReply("Atendimento inválido.");
+      return;
+    }
+
+    const ticketConfigEarly = await resolveModuleConfig(interaction.guild.id, "tickets");
+    const staffRoleIdsEarly = Array.isArray(ticketConfigEarly.config.staffRoleIds)
+      ? (ticketConfigEarly.config.staffRoleIds as string[])
+      : [];
+    const member = interaction.member;
+    let isStaff = interaction.guild.ownerId === interaction.user.id;
+    if (!isStaff && staffRoleIdsEarly.length && member && "roles" in member) {
+      const roles = member.roles as { cache: { some: (fn: (r: { id: string }) => boolean) => boolean } };
+      isStaff = roles.cache.some((r) => staffRoleIdsEarly.includes(r.id));
+    }
+    if (staffRoleIdsEarly.length && !isStaff) {
+      const ownerCheck = await getPool().query<{ openerId: string }>(
+        `select opener_id as "openerId" from tickets where id = $1 and guild_id = $2`,
+        [ticketId, interaction.guild.id]
+      );
+      if (ownerCheck.rows[0]?.openerId !== interaction.user.id) {
+        await interaction.editReply("Apenas a equipe (ou quem abriu) pode encerrar este atendimento.");
+        return;
+      }
+    }
+
+    const result = await getPool().query<{ openerId: string; channelId: string | null }>(
+      `update tickets set status = 'closed', closed_at = now()
+       where id = $1 and guild_id = $2 and status <> 'closed'
+       returning opener_id as "openerId", channel_id as "channelId"`,
+      [ticketId, interaction.guild.id]
+    );
+    const ticket = result.rows[0];
+    if (!ticket) {
+      await interaction.editReply("Esse atendimento já estava encerrado.");
+      return;
+    }
+
+    await getPool().query(
+      `insert into ticket_events (ticket_id, event_type, actor_id, data) values ($1, 'closed', $2, '{}'::jsonb)`,
+      [ticketId, interaction.user.id]
+    );
+
+    const ticketConfig = await resolveModuleConfig(interaction.guild.id, "tickets").catch(() => null);
+    const feedbackEnabled = ticketConfig?.config?.feedbackEnabled !== false;
+    if (feedbackEnabled) {
+      try {
+        const dm = await current.users.createDM(ticket.openerId);
+        await current.rest.post(Routes.channelMessages(dm.id), {
+          body: {
+            content: "Seu atendimento foi encerrado. Como foi o suporte?",
+            components: [
+              {
+                type: 1,
+                components: [1, 2, 3, 4, 5].map((score) => ({
+                  type: 2,
+                  style: score >= 4 ? 3 : score === 3 ? 2 : 4,
+                  label: "⭐".repeat(score),
+                  custom_id: `wumpus:feedback:${ticketId}:${score}`
+                }))
+              }
+            ]
+          }
+        });
+      } catch {
+        log.info("nao foi possivel enviar o pedido de feedback por DM", { ticketId });
+      }
+    }
+
+    if (ticket.channelId) {
+      try {
+        const ch = await interaction.guild.channels.fetch(ticket.channelId).catch(() => null);
+        if (ch && "permissionOverwrites" in ch) {
+          await ch.permissionOverwrites.edit(ticket.openerId, {
+            SendMessages: false,
+            AddReactions: false
+          }).catch(() => undefined);
+          if ("setName" in ch && typeof ch.setName === "function") {
+            const closedName = `encerrado-${ticketId}`.slice(0, 90);
+            await ch.setName(closedName).catch(() => undefined);
+          }
+        }
+      } catch (error) {
+        log.warn("nao foi possivel arquivar o canal do atendimento", {
+          ticketId,
+          error: String(error)
+        });
+      }
+    }
+
+    await interaction.editReply("Atendimento encerrado. Obrigado!");
+    log.info("atendimento encerrado", { guildId: interaction.guild.id, ticketId, closedBy: interaction.user.id });
+  }
+
+  async function saveFeedback(interaction: Interaction, rawTicketId: string, score: string): Promise<void> {
+    if (!interaction.isButton()) return;
+
+    const ticketId = Number(rawTicketId);
+    const value = Number(score);
+    if (!Number.isSafeInteger(ticketId) || !Number.isInteger(value) || value < 1 || value > 5) {
+      await interaction.reply({ content: "Nota inválida.", flags: 64 });
+      return;
+    }
+
+    const ticket = await getPool().query<{ guildId: string; openerId: string }>(
+      `select guild_id as "guildId", opener_id as "openerId" from tickets where id = $1`,
+      [ticketId]
+    );
+    const row = ticket.rows[0];
+    if (!row) {
+      await interaction.reply({ content: "Atendimento não encontrado.", flags: 64 });
+      return;
+    }
+    if (row.openerId !== interaction.user.id) {
+      await interaction.reply({ content: "Só quem abriu o atendimento pode avaliar.", flags: 64 });
+      return;
+    }
+
+    await getPool().query(
+      `insert into ticket_feedback (ticket_id, guild_id, score)
+       values ($1, $2, $3)
+       on conflict (ticket_id) do update set score = excluded.score, created_at = now()`,
+      [ticketId, row.guildId, value]
+    );
+
+    await interaction.reply({ content: `Obrigado! Registrei sua nota ${value}/5.`, flags: 64 });
+  }
+
+  async function claimTicket(interaction: Interaction, rawTicketId: string): Promise<void> {
+    if (!interaction.isButton() || !interaction.guild) return;
+    await interaction.deferReply({ flags: 64 });
+
+    const ticketId = Number(rawTicketId);
+    if (!Number.isSafeInteger(ticketId)) {
+      await interaction.editReply("Atendimento inválido.");
+      return;
+    }
+
+    const config = await resolveModuleConfig(interaction.guild.id, "tickets");
+    const staffRoleIds = Array.isArray(config.config.staffRoleIds) ? (config.config.staffRoleIds as string[]) : [];
+    const member = interaction.member;
+    if (staffRoleIds.length && member && "roles" in member) {
+      const roles = member.roles as { cache: { some: (fn: (r: { id: string }) => boolean) => boolean } };
+      const hasStaffRole = roles.cache.some((r) => staffRoleIds.includes(r.id));
+      if (!hasStaffRole && interaction.guild.ownerId !== interaction.user.id) {
+        await interaction.editReply("Apenas a equipe pode assumir atendimentos.");
+        return;
+      }
+    }
+
+    const result = await getPool().query<{ claimedBy: string | null; status: string }>(
+      `select claimed_by as "claimedBy", status from tickets
+       where id = $1 and guild_id = $2 and status <> 'closed'`,
+      [ticketId, interaction.guild.id]
+    );
+    const ticket = result.rows[0];
+    if (!ticket) {
+      await interaction.editReply("Esse atendimento não existe ou já foi encerrado.");
+      return;
+    }
+    if (ticket.claimedBy) {
+      await interaction.editReply(`Esse atendimento já foi assumido por <@${ticket.claimedBy}>.`);
+      return;
+    }
+
+    await getPool().query(
+      `update tickets set claimed_by = $1, status = 'claimed' where id = $2 and guild_id = $3`,
+      [interaction.user.id, ticketId, interaction.guild.id]
+    );
+
+    await getPool().query(
+      `insert into ticket_events (ticket_id, event_type, actor_id, data) values ($1, 'claimed', $2, '{}'::jsonb)`,
+      [ticketId, interaction.user.id]
+    );
+
+    await interaction.editReply(`Atendimento #${ticketId} assumido por você.`);
+    log.info("atendimento assumido", { guildId: interaction.guild.id, ticketId, claimedBy: interaction.user.id });
+  }
+
+  async function handleReportOpen(interaction: Interaction): Promise<void> {
+    if (!interaction.isButton() || !interaction.guild) return;
+    await interaction.deferReply({ flags: 64 });
+
+    const guildId = interaction.guild.id;
+    const config = await resolveModuleConfig(guildId, "logs").catch(() => null);
+    await recordAuditEvent({
+      guildId,
+      module: "reports",
+      eventType: "report_submitted",
+      actorId: interaction.user.id,
+      channelId: interaction.channelId ?? undefined,
+      severity: "warning",
+      data: {
+        reportedBy: interaction.user.id,
+        channelId: interaction.channelId,
+        messageId: interaction.message?.id ?? null
+      }
+    }).catch(() => undefined);
+
+    const logChannelId =
+      (typeof config?.config?.channelId === "string" && config.config.channelId) ||
+      "";
+    const current = client;
+    if (logChannelId && current) {
+      await current.rest
+        .post(Routes.channelMessages(logChannelId), {
+          body: {
+            content: `🚨 Nova denúncia de <@${interaction.user.id}> em <#${interaction.channelId}>.`
+          }
+        })
+        .catch(() => undefined);
+    }
+
+    await interaction.editReply("Denúncia registrada. A equipe vai analisar.");
+    log.info("denuncia registrada", { guildId, userId: interaction.user.id });
+  }
+
+  async function runAiAnalysis(interaction: Interaction, rawTicketId: string): Promise<void> {
+    if (!interaction.isButton() || !interaction.guild) return;
+    await interaction.deferReply({ flags: 64 });
+
+    const ticketId = Number(rawTicketId);
+    if (!Number.isSafeInteger(ticketId)) {
+      await interaction.editReply("Atendimento inválido.");
+      return;
+    }
+
+    try {
+      const result = await analyzeTicket({
+        ticketId,
+        guildId: interaction.guild.id,
+        requestedBy: interaction.user.id
+      });
+
+      const suggestions = result.suggestions.length
+        ? result.suggestions.map((entry) => `- ${entry}`).join("\n")
+        : "- (sem sugestões)";
+      const sources = result.sources.length
+        ? result.sources.map((entry) => `${entry.ok ? "✅" : "⚠️"} ${entry.name}`).join(" · ")
+        : "nenhuma plataforma interna configurada";
+
+      const body = [
+        `**Análise do atendimento #${ticketId}**`,
+        result.analysis.slice(0, 1400),
+        "",
+        "**Sugestões**",
+        suggestions,
+        "",
+        `-# Fontes: ${sources} · modelo ${result.model}${result.retries > 0 ? ` · ${result.retries} retry(s)` : ""}`
+      ].join("\n");
+
+      await interaction.editReply({ content: body.slice(0, 1990) });
+    } catch (error) {
+      log.error("falha na analise por IA", { ticketId, error: String(error) });
+      await interaction.editReply(
+        "Não consegui analisar agora. Verifique se a chave da IA está configurada e tente novamente."
+      );
+    }
+  }
+
+  async function handleKnowledge(message: Message): Promise<void> {
+    const current = client;
+    if (!current || !message.guild || message.author.bot || !message.content) return;
+
+    const module = await resolveModuleConfig(message.guild.id, "knowledge");
+    if (!module.enabled) return;
+
+    await answerFromKnowledge(current, message, module.config as KnowledgeConfig, log).catch((error) =>
+      log.error("falha na base de conhecimento", { error: String(error) })
+    );
+  }
+
+  async function boot(): Promise<void> {
+    for (const tier of INTENT_TIERS) {
+      if (stopped) return;
+      try {
+        const target = new Client({ intents: tier.intents });
+        await new Promise<void>((resolve, reject) => {
+          const onReady = () => {
+            target.off("error", onError);
+            resolve();
+          };
+          const onError = (error: Error) => {
+            target.off(Events.ClientReady, onReady);
+            reject(error);
+          };
+          target.once(Events.ClientReady, onReady);
+          target.once("error", onError);
+          void target.login(token).catch(reject);
+        });
+
+        client = target;
+        mode = tier.mode;
+
+        target.on(Events.InteractionCreate, async (interaction) => {
+          try {
+            if (interaction.isModalSubmit()) {
+              const [scope, action] = interaction.customId.split(":");
+              if (scope === "wumpus" && action === "form") {
+                await handleFormModalSubmit(interaction, client, log);
+              }
+              return;
+            }
+            if (!interaction.isButton()) return;
+            const [scope, action, ...rest] = interaction.customId.split(":");
+            if (scope !== "wumpus") return;
+
+            if (action === "ticket" && rest[0] === "open") {
+              await openTicket(interaction, rest[1] ?? null);
+            } else if (action === "ticket" && rest[0] === "close") {
+              await closeTicket(interaction, rest[1] ?? "0");
+            } else if (action === "ticket" && rest[0] === "claim") {
+              await claimTicket(interaction, rest[1] ?? "0");
+            } else if (action === "ai" && rest[0] === "analyze") {
+              await runAiAnalysis(interaction, rest[1] ?? "0");
+            } else if (action === "feedback") {
+              await saveFeedback(interaction, rest[0] ?? "0", rest[1] ?? "0");
+            } else if (action === "form" && rest[0] === "open") {
+              await handleFormOpen(interaction, log);
+            } else if (action === "form" && rest[0] === "approve") {
+              await handleFormReview(interaction, rest[1] ?? "0", "approved", client, log);
+            } else if (action === "form" && rest[0] === "reject") {
+              await handleFormReview(interaction, rest[1] ?? "0", "rejected", client, log);
+            } else if (action === "report" && rest[0] === "open") {
+              await handleReportOpen(interaction);
+            }
+          } catch (error) {
+            log.error("erro ao tratar interacao", {
+              customId: "customId" in interaction ? String(interaction.customId) : "?",
+              userId: interaction.user.id,
+              error: String(error)
+            });
+            if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+              await interaction
+                .reply({ content: "Algo falhou ao processar esta ação.", flags: 64 })
+                .catch(() => undefined);
+            }
+          }
+        });
+
+        target.on(Events.GuildCreate, (guild) => {
+          log.info(`entrou no servidor: ${guild.name}`, { guildId: guild.id, members: guild.memberCount });
+          void syncGuild(guild).catch((error) =>
+            log.error("falha ao sincronizar novo servidor", { error: String(error) })
+          );
+        });
+
+        target.on(Events.GuildAvailable, (guild) => {
+          void syncGuild(guild).catch((error) =>
+            log.error("falha ao sincronizar servidor disponivel", { error: String(error) })
+          );
+        });
+
+        target.on(Events.GuildDelete, (guild) => {
+          void deactivateGuild(guild.id).catch(() => undefined);
+        });
+
+        const capabilities = {
+          messages: tier.mode === "full",
+          security: tier.mode === "full" || tier.mode === "security_only"
+        };
+
+        if (capabilities.messages) {
+          target.on(Events.MessageCreate, (message) => {
+            if (message.guild && !message.author.bot) trackMessage(message.guild.id);
+            void handleMessage(target, message, log).catch((error) =>
+              log.error("falha no automod", { error: String(error) })
+            );
+            void handleImageContent(target, message, log).catch((error) =>
+              log.error("falha no ocr", { error: String(error) })
+            );
+            void handleKnowledge(message).catch((error) =>
+              log.error("falha na base de conhecimento", { error: String(error) })
+            );
+            trackMentions(message);
+            void recordTicketMessage(message).catch((error) =>
+              log.error("falha ao gravar mensagem do atendimento", { error: String(error) })
+            );
+          });
+
+          target.on(Events.MessageDelete, (message) => {
+            if (!message.guildId) return;
+            void handleGhostPing(target, message.id, message.guildId, message.channelId, log).catch((error) =>
+              log.error("falha na deteccao de ghost ping", { error: String(error) })
+            );
+          });
+        }
+
+        if (capabilities.security) {
+          target.on(Events.GuildMemberAdd, (member) => {
+            void handleMemberAdd(target, member, log).catch((error) =>
+              log.error("falha no anti-raid", { error: String(error) })
+            );
+          });
+
+          target.on(Events.GuildAuditLogEntryCreate, (entry, guild) => {
+            void handleAuditLogEntry(target, entry, guild, log).catch((error) =>
+              log.error("falha no anti-nuke", { error: String(error) })
+            );
+          });
+        }
+
+        target.on(Events.GuildMemberAdd, (member) => {
+          if (member.user.bot) return;
+          trackJoin(member.guild.id);
+          void logMemberJoin(member, log).catch(() => undefined);
+          void (async () => {
+            try {
+              const rolesConfig = await resolveModuleConfig(member.guild.id, "roles");
+              if (!rolesConfig.enabled) return;
+              const defaultRoleIds = Array.isArray(rolesConfig.config.defaultRoleIds)
+                ? (rolesConfig.config.defaultRoleIds as string[])
+                : [];
+              if (!defaultRoleIds.length) return;
+              await member.roles.add(defaultRoleIds, "Auto-assign na entrada");
+            } catch { /* sem permissão */ }
+          })();
+          void sendJoinLeaveMessage(member, "join").catch(() => undefined);
+        });
+
+        target.on(Events.GuildMemberRemove, (member) => {
+          if (member.user.bot) return;
+          void logMemberLeave(member, log).catch(() => undefined);
+          void sendJoinLeaveMessage(member, "leave").catch(() => undefined);
+        });
+
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/disallowed intent/i.test(message)) {
+          log.error("nao foi possivel conectar o bot (token invalido?)", { error: message });
+          return;
+        }
+
+        if (tier.mode === "minimal") {
+          log.error("o Discord recusou ate as intents basicas; o bot nao vai subir", { error: message });
+          return;
+        }
+
+        log.warn(
+          `intents recusadas no nivel "${tier.mode}"; tentando nivel mais basico. ` +
+            "Habilite as intents no portal do Discord para restaurar a protecao completa.",
+          { error: message }
+        );
+      }
+    }
+
+    if (!client || !mode) return;
+
+    if (stopped) {
+      await client.destroy().catch(() => undefined);
+      return;
+    }
+
+    log.info("bot conectado", { mode, user: client.user?.tag, guilds: client.guilds.cache.size });
+
+    for (const guild of client.guilds.cache.values()) {
+      await syncGuild(guild).catch((error) =>
+        log.error("falha ao sincronizar servidor", { guildId: guild.id, error: String(error) })
+      );
+    }
+
+    worker = setInterval(() => void tick(), WORKER_INTERVAL_MS);
+    void tick();
+
+    const statsFlushTimer = setInterval(() => {
+      void flushStatistics().catch(() => undefined);
+    }, 60 * 60_000);
+
+    const digestTimer = setInterval(() => {
+      const now = new Date();
+      const currentClient = client;
+      if (now.getUTCHours() === 12 && now.getUTCMinutes() < 5 && currentClient) {
+        for (const guild of currentClient.guilds.cache.values()) {
+          void sendDailyDigest(currentClient, guild.id, log).catch(() => undefined);
+        }
+      }
+    }, 5 * 60_000);
+
+    extraTimers.push(statsFlushTimer, digestTimer);
+  }
+
+  void boot().catch((error) => log.error("falha ao iniciar o bot", { error: String(error) }));
+
+  return {
+    get client() {
+      return client;
+    },
+    get mode() {
+      return mode;
+    },
+    stop: async () => {
+      stopped = true;
+      if (worker) clearInterval(worker);
+      for (const timer of extraTimers) clearInterval(timer);
+      extraTimers.length = 0;
+      await client?.destroy().catch(() => undefined);
+    }
+  };
 }

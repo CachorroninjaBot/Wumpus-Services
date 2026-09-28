@@ -53,6 +53,7 @@ import {
   type DashboardRole
 } from "./db/members.js";
 import { snapshotMetrics, flushMetrics } from "./metrics.js";
+import { validateModuleConfig } from "./config-validation.js";
 
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 5;
@@ -634,6 +635,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const body = request.body as { mode?: string; enabled?: boolean; config?: Record<string, unknown> };
     const group = await getGroupForGuild(guildId);
 
+    let safeConfig: Record<string, unknown> = {};
+    if (body.config && typeof body.config === "object") {
+      const validated = validateModuleConfig(module, body.config);
+      if (!validated.ok) return reply.code(400).send({ error: "invalid_config", detail: validated.error });
+      safeConfig = validated.config;
+    }
+
     if (group) {
       const mode = exceptionModes.has(body.mode ?? "") ? (body.mode as "inherit" | "disabled" | "override") : "inherit";
       await setServerException({
@@ -641,7 +649,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         module,
         mode,
         enabled: body.enabled ?? true,
-        config: mode === "override" ? body.config ?? {} : {},
+        config: mode === "override" ? safeConfig : {},
         updatedBy: session.userId
       });
       await recordAuditEvent({
@@ -659,7 +667,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       scopeId: guildId,
       module,
       enabled: body.enabled ?? true,
-      config: body.config ?? {},
+      config: safeConfig,
       updatedBy: session.userId
     });
     await recordAuditEvent({
@@ -697,12 +705,18 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const body = request.body as { enabled?: boolean; config?: Record<string, unknown> };
+    let safeConfig: Record<string, unknown> = {};
+    if (body.config && typeof body.config === "object") {
+      const validated = validateModuleConfig(module, body.config);
+      if (!validated.ok) return reply.code(400).send({ error: "invalid_config", detail: validated.error });
+      safeConfig = validated.config;
+    }
     await saveModuleConfig({
       scope: "group",
       scopeId: String(groupId),
       module,
       enabled: body.enabled ?? true,
-      config: body.config ?? {},
+      config: safeConfig,
       updatedBy: session.userId
     });
 
