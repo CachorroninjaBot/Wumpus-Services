@@ -23,8 +23,8 @@ const faqs = [
     a: "Não. Painéis no Discord abrem ticket e formulário. A equipe trabalha daqui: assumir, encerrar, advertir, aprovar.",
   },
   {
-    q: "Isso é uma demonstração?",
-    a: "Este painel roda com a comunidade Aurora Store já carregada. Muda um ajuste e vê o bot reagir — sem OAuth, sem espera.",
+    q: "Como eu entro no MEU painel?",
+    a: "Botão Entrar com Discord. OAuth com identify + guilds. Só servidores que tu administra aparecem.",
   },
 ];
 
@@ -52,12 +52,9 @@ function Home() {
             <a href="#faq" className="hover:text-foreground">
               FAQ
             </a>
-            <Link to="/admin" className="hover:text-foreground">
-              Admin
-            </Link>
           </nav>
-          <Link to="/app" className="ml-auto sm:ml-4">
-            <Button size="sm">Abrir painel</Button>
+          <Link to="/entrar" className="ml-auto sm:ml-4">
+            <Button size="sm">Entrar com Discord</Button>
           </Link>
         </div>
       </header>
@@ -76,9 +73,9 @@ function Home() {
               {brand.description}
             </p>
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-              <Link to="/app">
+              <Link to="/entrar">
                 <Button size="lg" className="w-full sm:w-auto">
-                  Entrar no painel demo
+                  Entrar com Discord
                   <ArrowRight className="size-4" />
                 </Button>
               </Link>
@@ -88,18 +85,6 @@ function Home() {
                 </Button>
               </a>
             </div>
-            <ul className="mt-8 grid gap-2 text-sm text-muted-foreground">
-              {[
-                "SLA e prioridade de verdade, não um campo morto",
-                "Modal de candidatura com perguntas suas",
-                "AutoMod com teste ao vivo antes de ligar",
-              ].map((line) => (
-                <li key={line} className="flex items-start gap-2">
-                  <Check className="mt-0.5 size-4 shrink-0 text-ok" />
-                  {line}
-                </li>
-              ))}
-            </ul>
           </div>
           <DiscordPanel
             title="Central de atendimento"
@@ -118,55 +103,10 @@ function Home() {
             Painel por resultado. Avançado fica escondido.
           </h2>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Feature
-              icon={<Ticket className="size-5" />}
-              title="Tickets de verdade"
-              body="Departamentos, SLA, prioridade, tags, transcrição no encerramento, feedback com comentário e métrica por staff."
-            />
-            <Feature
-              icon={<ClipboardList className="size-5" />}
-              title="Candidaturas com modal"
-              body="Perguntas configuráveis, cooldown, idade mínima da conta, aprovar ou recusar com motivo. A IA só sugere para a equipe."
-            />
-            <Feature
-              icon={<Shield className="size-5" />}
-              title="Moderação com entrada"
-              body="Advertir, silenciar, expulsar, banir. Strikes acumulam e o bot escala sozinho no limiar que você definiu."
-            />
-            <Feature
-              icon={<Cpu className="size-5" />}
-              title="Presets, não 40 knobs"
-              body="Comunidade, loja ou RP. Um pacote coerente de AutoMod e anti-raid. Você testa a mensagem antes de publicar a regra."
-            />
-          </div>
-        </div>
-      </section>
-
-      <section className="border-t border-border bg-card/40">
-        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 lg:grid-cols-2 lg:items-center">
-          <div>
-            <p className="m-0 text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-              Contrato único
-            </p>
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight">
-              Se está na tela, o bot usa. Se o bot não usa, sai da tela.
-            </h2>
-            <p className="mt-3 text-muted-foreground">
-              O problema clássico de dashboard de bot: você preenche e nada muda. No Wumpus o SLA pinta o ticket de
-              vermelho, o termo bloqueado cai no tester, a pergunta nova aparece no modal.
-            </p>
-          </div>
-          <div className="rounded-2xl bg-card p-5 shadow-border">
-            <p className="m-0 text-sm font-medium">Exemplo — AutoMod</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Mensagem: <code className="text-foreground">entra no meu server discord.gg/nitrofree</code>
-            </p>
-            <div className="mt-4 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              Bloqueada · regra convite · ação apagar
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Cargos da equipe passam. Links da loja passam se estiverem na lista.
-            </p>
+            <Feature icon={<Ticket className="size-5" />} title="Tickets de verdade" body="Departamentos, SLA, prioridade, tags, transcrição no encerramento, feedback com comentário e métrica por staff." />
+            <Feature icon={<ClipboardList className="size-5" />} title="Candidaturas com modal" body="Perguntas configuráveis, cooldown, idade mínima da conta, aprovar ou recusar com motivo." />
+            <Feature icon={<Shield className="size-5" />} title="Moderação com entrada" body="Advertir, silenciar, expulsar, banir. Strikes acumulam e o bot escala no limiar que você definiu." />
+            <Feature icon={<Cpu className="size-5" />} title="Presets, não 40 knobs" body="Comunidade, loja ou RP. Um pacote coerente de AutoMod e anti-raid." />
           </div>
         </div>
       </section>
@@ -201,9 +141,6 @@ function Home() {
                       Assinar na ShardPay
                     </Button>
                   </a>
-                  <Link to="/app" className="text-center text-sm text-muted-foreground">
-                    Ver no painel
-                  </Link>
                 </div>
               </article>
             ))}
@@ -232,7 +169,9 @@ function Home() {
           <span>
             {brand.name} · {brand.legal}
           </span>
-          <span className="sm:ml-auto">Status: bot online · fila vazia</span>
+          <Link to="/entrar" className="sm:ml-auto text-foreground">
+            Entrar com Discord
+          </Link>
         </div>
       </footer>
     </div>
