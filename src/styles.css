@@ -1,0 +1,203 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-background: #09090c;
+  --color-foreground: #f3f4f7;
+  --color-card: #111116;
+  --color-card-foreground: #f3f4f7;
+  --color-popover: #16161d;
+  --color-popover-foreground: #f3f4f7;
+  --color-primary: #7c5cff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #1a1a22;
+  --color-secondary-foreground: #e8e9ee;
+  --color-muted: #17171e;
+  --color-muted-foreground: #9aa0ad;
+  --color-accent: #7c5cff;
+  --color-accent-foreground: #ffffff;
+  --color-destructive: #ef5d6a;
+  --color-border: rgba(243, 244, 247, 0.1);
+  --color-input: rgba(243, 244, 247, 0.12);
+  --color-ring: #7c5cff;
+  --color-ok: #3ecf8e;
+  --color-warn: #e8a54b;
+  --color-info: #5b8def;
+  --color-discord: #5865f2;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius: 12px;
+}
+
+html[data-theme="light"] {
+  --color-background: #f3f4f8;
+  --color-foreground: #12141a;
+  --color-card: #ffffff;
+  --color-card-foreground: #12141a;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #12141a;
+  --color-secondary: #eceef4;
+  --color-secondary-foreground: #12141a;
+  --color-muted: #eceef3;
+  --color-muted-foreground: #5c6370;
+  --color-border: rgba(18, 20, 26, 0.1);
+  --color-input: rgba(18, 20, 26, 0.12);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background: var(--color-background);
+  }
+  html[data-theme="light"] {
+    color-scheme: light;
+  }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1, h2, h3 {
+    text-wrap: balance;
+    letter-spacing: -0.03em;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  * {
+    border-color: var(--color-border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.font-mono-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.shadow-border {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+html[data-theme="light"] .shadow-border {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 1px 2px -1px rgba(0, 0, 0, 0.06);
+}
+
+.noise {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.035) 0.5px, transparent 0.5px);
+  background-size: 12px 12px;
+}
+
+.discord-window {
+  background: #1e1f22;
+  color: #dbdee1;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.discord-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #2b2d31;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  color: #b5bac1;
+}
+
+.discord-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 99px;
+  background: #3f4147;
+}
+
+.discord-body {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  min-height: 280px;
+}
+
+.discord-rail {
+  background: #1e1f22;
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.discord-channel {
+  padding: 16px 18px 20px;
+  background: #313338;
+}
+
+.discord-embed {
+  margin-top: 12px;
+  border-radius: 8px;
+  background: #2b2d31;
+  padding: 12px 14px 14px 16px;
+  border-left: 4px solid var(--accent, #7c5cff);
+}
+
+.discord-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 4px;
+  background: #4e5058;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+}
+.discord-btn.primary {
+  background: #5865f2;
+}
+
+.discord-v2 {
+  margin-top: 12px;
+  border-radius: 12px;
+  background: #2b2d31;
+  border: 1px solid color-mix(in srgb, var(--accent, #7c5cff) 70%, #2b2d31);
+  padding: 12px 14px 14px;
+}
+
+.discord-kicker {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #949ba4;
+}
+
+.discord-sep {
+  height: 1px;
+  margin: 10px 0;
+  background: rgba(255, 255, 255, 0.08);
+}
