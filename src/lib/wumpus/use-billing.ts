@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getBilling, type BillingSnapshot } from "./shardpay.server";
+import { getBilling, type BillingSnapshot } from "./shardpay";
 
 export function useBilling() {
   const [data, setData] = useState<BillingSnapshot | null>(null);
