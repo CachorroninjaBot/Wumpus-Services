@@ -61,8 +61,7 @@ export async function flushStatistics(): Promise<number> {
   for (const [guildId, count] of messageCounts) {
     await getPool().query(
       `insert into audit_events (guild_id, module, event_type, severity, data)
-       values ($1, 'statistics', 'message_snapshot', 'info', $2::jsonb)
-       on conflict do nothing`,
+       values ($1, 'statistics', 'message_snapshot', 'info', $2::jsonb)`,
       [guildId, JSON.stringify({ date, count, type: "messages" })]
     ).catch(() => undefined);
   }

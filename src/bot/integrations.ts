@@ -33,6 +33,46 @@ function checkRateLimit(guildId: string, limitPerMinute: number): boolean {
   return true;
 }
 
+/** Bloqueia IPs/hosts internos (SSRF). */
+function isBlockedWebhookUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return true;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return true;
+  const host = url.hostname.toLowerCase();
+  if (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".localhost")
+  ) {
+    return true;
+  }
+  // IPv4 privado / link-local / metadata
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (m) {
+    const [a, b, c, d] = m.slice(1).map(Number);
+    if ([a, b, c, d].some((n) => n > 255)) return true;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 0) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  }
+  // IPv6 local/ULA
+  if (host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return true;
+  return false;
+}
+
 /**
  * Envia um evento para todos os webhooks configurados no servidor.
  */
@@ -81,6 +121,10 @@ export async function forwardToWebhooks(
   let sent = 0;
 
   for (const url of allowlist.slice(0, 5)) {
+    if (isBlockedWebhookUrl(url)) {
+      log.error("webhook bloqueado (SSRF / URL interna)", { guildId, url: url.slice(0, 80) });
+      continue;
+    }
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const response = await fetch(url, {
