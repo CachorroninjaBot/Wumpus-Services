@@ -1,8 +1,9 @@
-node_modules/
-dist/
-.next/
-*.tsbuildinfo
+node_modules
+dist
+.vercel
+.nitro
+.secrets
 .env
 .env.*
-!.env.example
 *.log
+.grok

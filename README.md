@@ -1,21 +1,23 @@
-# Wumpus Services
+# Wumpus
 
-Repositório privado do produto Wumpus. Ele separa o bot público e a dashboard de clientes do HubOrderBot para reduzir memória e isolar deploys.
+Painel da comunidade e vitrine dos planos WumPlus. A cobrança e o catálogo vêm da loja Hub Express na ShardPay.
 
-## Hospedagem
+## Planos
 
-- **ShardCloud (256 MB):** somente `apps/wumpus`.
-- **Dashboard:** `apps/dashboard`, publicada separadamente.
-- **PostgreSQL:** compartilhado por bot e dashboard por meio de `DATABASE_URL`.
+| Plano | O que libera |
+| --- | --- |
+| Essencial | 2 servidores, proteção, tickets e formulários. Sem IA. |
+| Pro | 5 servidores, transcrição, knowledge com IA e 500 OCR/mês. |
+| Escala | Servidores, IA e OCR sem teto. |
+| Vitalício | Pagamento único, mesmo acesso do Escala. |
 
-A configuração `.shardcloud` compila somente `core`, `database` e o bot Wumpus. A dashboard não faz parte dos workspaces instalados pela ShardCloud e, portanto, não consome a memória da aplicação do bot.
+## Rodar
 
-## ShardCloud
+```bash
+npm install
+SHARDPAY_API_KEY=sua_chave npm run dev
+```
 
-Conecte este repositório privado e cadastre as variáveis de bot presentes em `.env.example`. A migração do banco é executada antes do bot iniciar.
+A chave nunca entra no repositório. Sem ela o painel mostra a vitrine salva dos quatro planos.
 
-## Dashboard
-
-Use o `vercel.json` da raiz. Cadastre `DATABASE_URL`, credenciais privadas da dashboard e variáveis OAuth diretamente no provedor; nunca publique valores reais.
-
-Veja os módulos e permissões em `docs/WUMPUS.md`.
+Checkout público: https://shardpay.app/pt-br/store/hubexpress

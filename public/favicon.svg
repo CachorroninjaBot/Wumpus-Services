@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Wumpus">
+  <rect width="32" height="32" rx="8" fill="#09090c"/>
+  <path
+    fill="#7c5cff"
+    d="M7.1 8.4 12.05 22.7h3.05L16 16.6l.9 6.1h3.05L24.9 8.4h-3.15L19.2 18.3 16.7 9.7h-1.4L12.8 18.3 10.25 8.4z"
+  />
+</svg>
