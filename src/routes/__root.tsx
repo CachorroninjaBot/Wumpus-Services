@@ -1,6 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
-import appCss from "../styles.css?url";
+import "../styles.css";
 
 const APP_NAME = "Wumpus";
 
@@ -15,8 +15,6 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
-      { rel: "stylesheet", href: appCss },
-      { rel: "stylesheet", href: "/assets/styles.css" },
       { rel: "manifest", href: "/manifest.json" },
       { rel: "apple-touch-icon", href: "/favicon.svg" },
       {
