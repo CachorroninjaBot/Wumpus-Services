@@ -171,11 +171,11 @@ export function validateModuleConfig(
       } else if (key === "webhookAllowlist") {
         const parsed = urlList.safeParse(value);
         out[key] = parsed.success ? parsed.data : [];
-      } else if (key === "blockedTerms" || key === "blockedDomains" || key === "allowedDomains" || key === "tags" || key === "customHeaders") {
+      } else if (key === "blockedTerms" || key === "blockedDomains" || key === "allowedDomains" || key === "tags" || key === "customHeaders" || key === "questions") {
         out[key] = (value as unknown[])
           .filter((entry): entry is string => typeof entry === "string")
           .map((entry) => entry.slice(0, 200))
-          .slice(0, 100);
+          .slice(0, key === "questions" ? 5 : 100);
       } else {
         out[key] = value;
       }

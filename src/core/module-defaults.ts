@@ -202,7 +202,12 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     requireReasonOnReject: true,
     anonymousSubmissions: false,
     maxSubmissionsPerUser: 3,
-    archiveApprovedAfterDays: 90
+    archiveApprovedAfterDays: 90,
+    questions: [
+      "Qual o seu nome ou apelido?",
+      "Por que quer fazer parte da equipe?",
+      "Qual a sua experiência relevante?"
+    ]
   },
   knowledge: {
     answerChannelId: "",
