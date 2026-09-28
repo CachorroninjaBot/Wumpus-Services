@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { modules as allModules, type ModuleId } from "../core/brand.js";
 import { defaultsFor } from "../core/module-defaults.js";
@@ -52,6 +53,29 @@ import {
   type DashboardRole
 } from "./db/members.js";
 import { snapshotMetrics, flushMetrics } from "./metrics.js";
+
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_ATTEMPTS = 5;
+const ATTEMPT_WINDOW_MS = 15 * 60_000;
+
+function loginBlocked(ip: string): boolean {
+  const entry = loginAttempts.get(ip);
+  if (!entry || Date.now() > entry.resetAt) return false;
+  return entry.count >= MAX_ATTEMPTS;
+}
+
+function registerFailure(ip: string): void {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now > entry.resetAt) loginAttempts.set(ip, { count: 1, resetAt: now + ATTEMPT_WINDOW_MS });
+  else entry.count += 1;
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const ha = crypto.createHash("sha256").update(a).digest();
+  const hb = crypto.createHash("sha256").update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
 
 const SESSION_COOKIE = "wumpus_session";
 const STATE_COOKIE = "wumpus_oauth_state";
@@ -338,6 +362,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   /* -------------------- Login por senha (admin) ---------------------- */
 
   app.post("/auth/admin", async (request, reply) => {
+    const ip = request.ip;
+    if (loginBlocked(ip)) return reply.code(429).send({ error: "too_many_attempts" });
     try {
       const body = (request.body ?? {}) as { username?: string; password?: string };
       const envUser = process.env.DASHBOARD_USERNAME?.trim();
@@ -347,10 +373,14 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(503).send({ error: "admin_login_not_configured" });
       }
 
-      if ((body.username ?? "").trim() !== envUser || (body.password ?? "") !== envPass) {
+      const okUser = safeEqual((body.username ?? "").trim(), envUser);
+      const okPass = safeEqual(body.password ?? "", envPass);
+      if (!(okUser && okPass)) {
+        registerFailure(ip);
         app.log.info("login por senha recusado: credenciais invalidas");
         return reply.code(401).send({ error: "invalid_credentials" });
       }
+      loginAttempts.delete(ip);
 
       const ownerId = ownerIdFromEnv();
       if (!ownerId) {
@@ -369,10 +399,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         avatarUrl: null
       });
 
+      const installedGuilds = await listInstalledGuilds();
       const { sessionId, expiresAt } = await createSession({
         userId: ownerId,
         userAgent: request.headers["user-agent"] ?? null,
-        guilds: []
+        guilds: installedGuilds.map((g) => ({ id: g.guildId, name: g.name, iconUrl: g.iconUrl, owner: false }))
       });
 
       reply.setCookie(
@@ -551,9 +582,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     // Adiciona info do plano
     const { getFullPlanLimits, PLAN_MODULES } = await import("./plan-enforcement.js");
     const planLimits = await getFullPlanLimits(session.userId);
-    const lockedModules = [...PLAN_MODULES.starter].filter(
-      (m) => !PLAN_MODULES[planLimits.plan]?.has(m)
-    );
+    const lockedModules = allModules
+      .map((entry) => entry.id)
+      .filter((id) => !PLAN_MODULES[planLimits.plan]?.has(id));
     return { ...overview, plan: planLimits, lockedModules };
   });
 
@@ -659,6 +690,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
     const module = parseModule(rawModule);
     if (!module) return reply.code(404).send({ error: "unknown_module" });
+
+    const planCheck = await canUseModule(session.userId, module);
+    if (!planCheck.allowed) {
+      return reply.code(403).send({ error: "plan_limit", reason: planCheck.reason, plan: planCheck.plan });
+    }
 
     const body = request.body as { enabled?: boolean; config?: Record<string, unknown> };
     await saveModuleConfig({

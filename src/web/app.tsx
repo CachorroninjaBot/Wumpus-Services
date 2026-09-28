@@ -196,6 +196,8 @@ function LoginScreen({ mode, onToggleMode }: { mode: "dark" | "light"; onToggleM
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setLoginError("Usuário ou senha incorretos.");
+      } else if (err instanceof ApiError && err.status === 429) {
+        setLoginError("Muitas tentativas. Aguarde alguns minutos e tente de novo.");
       } else if (err instanceof ApiError && err.status === 503) {
         setLoginError("Login por senha não configurado no servidor.");
       } else {

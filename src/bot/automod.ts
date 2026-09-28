@@ -134,6 +134,15 @@ function detect(message: Message, config: Record<string, unknown>, now: number):
     found.push({ kind: "domain", label: "Domínio bloqueado", detail: `domínio: ${domain}` });
   }
 
+  // Menções em massa
+  const mentionLimit = num(config.mentionLimit, 0);
+  if (mentionLimit > 0) {
+    const mentionCount = message.mentions.users.size + message.mentions.roles.size;
+    if (mentionCount > mentionLimit) {
+      found.push({ kind: "mentions", label: "Menções em excesso", detail: `${mentionCount} menções (limite: ${mentionLimit})` });
+    }
+  }
+
   // 2. Repeticao: a mesma mensagem varias vezes na janela.
   const duplicateLimit = num(config.duplicateLimit, 3);
   const windowMs = num(config.windowSeconds, 10) * 1000;
@@ -161,7 +170,7 @@ function detect(message: Message, config: Record<string, unknown>, now: number):
   if (!found.length) return null;
 
   // Prioridade: conteudo proibido > tamanho > caps > repeticao > velocidade.
-  const order = ["invite", "term", "domain", "link", "long", "short", "caps", "duplicate", "spam"];
+  const order = ["invite", "term", "domain", "link", "mentions", "long", "short", "caps", "duplicate", "spam"];
   found.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   return found[0];
 }
@@ -385,6 +394,7 @@ export async function handleImageContent(client: Client, message: Message, log: 
   const guildId = message.guild.id;
   const automod = await resolveModuleConfig(guildId, "automod");
   if (!automod.enabled) return;
+  if (automod.config.scanImages === false) return;
 
   // Quem modera nao e moderado — mesma regra da varredura de texto.
   if (message.member?.permissions.has("ManageMessages")) return;

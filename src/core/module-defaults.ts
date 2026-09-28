@@ -224,7 +224,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
   ocr: {
     provider: "hybrid",
     language: "pt",
-    model: "qwen/qwen3.8-27b",
+    model: "",
     retainExtractedText: false,
     maxImageMb: 8,
     reviewChannelId: "",

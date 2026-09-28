@@ -44,12 +44,12 @@ export async function recordOccurrence(input: {
   const cfg = config.config as ModerationConfig;
 
   // Conta strikes ativos (não expirados)
-  const expiryDays = cfg.strikeExpiryDays ?? 30;
+  const expiryDays = Math.max(1, Math.min(Math.trunc(Number(cfg.strikeExpiryDays)) || 30, 365));
   const strikesResult = await getPool().query<{ cnt: number }>(
     `select count(*)::integer as cnt from moderation_occurrences
      where guild_id = $1 and target_id = $2 and status in ('applied', 'processing')
-       and created_at > now() - interval '${expiryDays} days'`,
-    [guildId, targetId]
+       and created_at > now() - make_interval(days => $3)`,
+    [guildId, targetId, expiryDays]
   );
   const currentStrikes = strikesResult.rows[0]?.cnt ?? 0;
   const newStrike = currentStrikes + 1;

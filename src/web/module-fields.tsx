@@ -739,6 +739,49 @@ export function ModuleFieldsForm({
       );
     }
 
+    if (field.type === "channel-list") {
+      const list = Array.isArray(value) ? (value as unknown[]).map(String) : [];
+
+      if (scope === "group") {
+        return (
+          <label className="field field-wide" key={field.key} htmlFor={id}>
+            <span>{field.label}</span>
+            <input
+              id={id}
+              value={list.join(", ")}
+              placeholder="IDs separados por vírgula"
+              disabled={disabled}
+              onChange={(event) =>
+                onChange(
+                  field.key,
+                  event.target.value.split(",").map((entry) => entry.trim()).filter(Boolean)
+                )
+              }
+            />
+            <small>
+              {field.help ? `${field.help} ` : ""}
+              No grupo, informe IDs. A resolução por nome ainda não cobre listas de canais.
+            </small>
+          </label>
+        );
+      }
+
+      return (
+        <div className="field field-wide" key={field.key}>
+          <span>{field.label}</span>
+          <ChannelPicker
+            value={list}
+            assets={assets ?? null}
+            filter={field.filter ?? "text"}
+            disabled={disabled}
+            onChange={(next) => onChange(field.key, next)}
+          />
+          {field.help ? <small>{field.help}</small> : null}
+          {!hasAssets ? <small>O bot ainda não sincronizou os canais deste servidor.</small> : null}
+        </div>
+      );
+    }
+
     if (field.type === "list") {
       const list = Array.isArray(value) ? (value as unknown[]).map(String) : [];
       return (

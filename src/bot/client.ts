@@ -484,11 +484,13 @@ export function createBot(token: string, log: BotLogger): BotHandle {
     }
 
     // Verifica cooldown
-    const cooldownHours = typeof config.config.cooldownHours === "number" ? config.config.cooldownHours : 24;
+    const cooldownHours = typeof config.config.cooldownHours === "number"
+      ? Math.max(0, Math.min(Math.ceil(config.config.cooldownHours), 720))
+      : 24;
     if (cooldownHours > 0) {
       const recent = await getPool().query(
-        `select 1 from form_submissions where guild_id = $1 and user_id = $2 and created_at > now() - interval '${cooldownHours} hours' limit 1`,
-        [guildId, interaction.user.id]
+        `select 1 from form_submissions where guild_id = $1 and user_id = $2 and created_at > now() - make_interval(hours => $3) limit 1`,
+        [guildId, interaction.user.id, cooldownHours]
       );
       if (recent.rowCount && recent.rowCount > 0) {
         await interaction.editReply(`Você já enviou uma candidatura recentemente. Aguarde ${cooldownHours}h.`);
