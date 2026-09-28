@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { exchangeDiscordCode } from "@/lib/discord/oauth";
+import { buildOwnerWorkspace } from "@/lib/wumpus/owner-workspace";
 
 const KEY = "wumpus-demo-v2";
 
@@ -31,21 +32,9 @@ function CallbackPage() {
         setMsg(res.error);
         return;
       }
-      try {
-        const raw = localStorage.getItem(KEY);
-        const slice = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-        slice.sessionUser = {
-          id: res.user.id,
-          username: res.user.username,
-          globalName: res.user.globalName,
-          isAdmin: true,
-          signedIn: true,
-        };
-        slice.discordGuilds = res.guilds;
-        localStorage.setItem(KEY, JSON.stringify(slice));
-      } catch {
-        /* quota */
-      }
+      const slice = buildOwnerWorkspace(res.user, res.guilds);
+      localStorage.setItem(KEY, JSON.stringify(slice));
+      localStorage.removeItem("wumpus-demo-v1");
       navigate({ to: "/app" });
     });
   }, [code, error, navigate]);
