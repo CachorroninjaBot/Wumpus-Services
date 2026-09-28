@@ -1,12 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import {
-  Menu,
-  Moon,
-  Sun,
-  Shield,
-  LogOut,
-  Plus,
-} from "lucide-react";
+import { Menu, Moon, Sun, Shield, LogOut, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { BrandMark, GuildBadge } from "@/components/brand";
 import { Button } from "@/components/ui/button";
@@ -116,14 +109,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </Link>
         <span className="h-px w-8 bg-border" />
         {guilds.map((g) => (
-          <button
-            key={g.id}
-            type="button"
-            title={g.name}
-            onClick={() => setActive(g.id)}
-            className="grid place-items-center"
-          >
-            <GuildBadge tag={g.tag} active={g.id === activeId} />
+          <button key={g.id} type="button" title={g.name} onClick={() => setActive(g.id)} className="grid place-items-center">
+            <GuildBadge tag={g.tag} iconUrl={g.iconUrl} active={g.id === activeId} />
           </button>
         ))}
         <a
@@ -139,7 +126,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-card/40 lg:flex">
         <header className="flex items-center gap-3 border-b border-border px-4 py-4">
-          <GuildBadge tag={guild?.tag ?? "W"} size={38} />
+          <GuildBadge tag={guild?.tag ?? "W"} iconUrl={guild?.iconUrl} size={38} />
           <div className="min-w-0">
             <p className="m-0 truncate text-sm font-semibold">{guild?.name}</p>
             <p className="m-0 truncate text-xs text-muted-foreground">
@@ -173,8 +160,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               </div>
               <div className="flex gap-2">
                 {guilds.map((g) => (
-                  <button key={g.id} type="button" onClick={() => { setActive(g.id); }}>
-                    <GuildBadge tag={g.tag} size={40} active={g.id === activeId} />
+                  <button key={g.id} type="button" onClick={() => setActive(g.id)}>
+                    <GuildBadge tag={g.tag} iconUrl={g.iconUrl} size={40} active={g.id === activeId} />
                   </button>
                 ))}
               </div>
@@ -187,17 +174,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               {navItems.find((n) => n.id === active)?.hint}
             </p>
           </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Alternar tema"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          >
+          <Button variant="ghost" size="icon-sm" aria-label="Alternar tema" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
-          <span className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
-            {user.globalName}
-          </span>
+          <span className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">{user.globalName}</span>
           <Link to="/" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="Sair">
             <LogOut className="size-4" />
           </Link>

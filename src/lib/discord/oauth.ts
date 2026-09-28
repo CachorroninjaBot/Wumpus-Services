@@ -5,6 +5,12 @@ const CLIENT_SECRET = () => process.env.DISCORD_CLIENT_SECRET || "";
 const REDIRECT_URI = () =>
   process.env.DISCORD_REDIRECT_URI || "https://wumpus-dashboard.shardweb.app/auth/discord/callback";
 
+export function discordIconUrl(id: string, icon: string | null | undefined) {
+  if (!icon) return null;
+  const ext = icon.startsWith("a_") ? "gif" : "png";
+  return `https://cdn.discordapp.com/icons/${id}/${icon}.${ext}?size=128`;
+}
+
 export function discordAuthorizeUrl(state: string) {
   const q = new URLSearchParams({
     client_id: CLIENT_ID(),
@@ -65,7 +71,13 @@ export const exchangeDiscordCode = createServerFn({ method: "POST" })
       headers: { Authorization: `Bearer ${token.access_token}` },
     });
     const guilds = guildsRes.ok
-      ? ((await guildsRes.json()) as Array<{ id: string; name: string; owner: boolean; permissions: string }>)
+      ? ((await guildsRes.json()) as Array<{
+          id: string;
+          name: string;
+          icon: string | null;
+          owner: boolean;
+          permissions: string;
+        }>)
       : [];
     const managed = guilds.filter((g) => g.owner || (BigInt(g.permissions) & 0x20n) === 0x20n);
 
@@ -77,6 +89,11 @@ export const exchangeDiscordCode = createServerFn({ method: "POST" })
         globalName: me.global_name || me.username,
         avatar: me.avatar,
       },
-      guilds: managed.slice(0, 25).map((g) => ({ id: g.id, name: g.name, owner: g.owner })),
+      guilds: managed.slice(0, 25).map((g) => ({
+        id: g.id,
+        name: g.name,
+        owner: g.owner,
+        iconUrl: discordIconUrl(g.id, g.icon),
+      })),
     };
   });

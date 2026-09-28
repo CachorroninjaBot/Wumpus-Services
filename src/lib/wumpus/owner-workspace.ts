@@ -21,7 +21,12 @@ function emptyModules(): GuildModules {
   return out;
 }
 
-export type DiscordGuildLite = { id: string; name: string; owner: boolean };
+export type DiscordGuildLite = {
+  id: string;
+  name: string;
+  owner: boolean;
+  iconUrl?: string | null;
+};
 
 export function buildOwnerWorkspace(
   user: { id: string; username: string; globalName: string },
@@ -37,6 +42,7 @@ export function buildOwnerWorkspace(
     preset: "community" as const,
     installed: true,
     region: "Discord",
+    iconUrl: g.iconUrl ?? null,
   }));
 
   const modules: Record<string, GuildModules> = {};
@@ -55,7 +61,7 @@ export function buildOwnerWorkspace(
     ];
   }
 
-  const sessionUser: SessionUser & { signedIn?: boolean } = {
+  const sessionUser: SessionUser = {
     id: user.id,
     username: user.username,
     globalName: user.globalName,
@@ -96,7 +102,7 @@ export function buildOwnerWorkspace(
         at: Date.now(),
         actor: user.globalName,
         category: "auth",
-        summary: "Entrou com Discord. Workspace do dono — sem dados da Aurora.",
+        summary: "Entrou com Discord. Workspace do dono.",
       },
     ],
     modules,
