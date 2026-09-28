@@ -8,10 +8,7 @@ export function BrandMark({ size = 36, className }: { size?: number; className?:
       aria-hidden
     >
       <svg viewBox="0 0 24 24" width={size * 0.58} height={size * 0.58} fill="none">
-        <path
-          d="M4 5.5h4.2l3.8 10.2L15.8 5.5H20L13.7 20h-3.4L4 5.5Z"
-          fill="currentColor"
-        />
+        <path d="M4 5.5h4.2l3.8 10.2L15.8 5.5H20L13.7 20h-3.4L4 5.5Z" fill="currentColor" />
       </svg>
     </span>
   );
@@ -31,11 +28,7 @@ export function MemberAvatar({
   return (
     <span
       className={cn("grid shrink-0 place-items-center rounded-full text-[11px] font-semibold text-white", className)}
-      style={{
-        width: size,
-        height: size,
-        background: `hsl(${hue} 42% 38%)`,
-      }}
+      style={{ width: size, height: size, background: `hsl(${hue} 42% 38%)` }}
       aria-hidden
     >
       {initials(name)}
@@ -43,16 +36,30 @@ export function MemberAvatar({
   );
 }
 
-export function GuildBadge({ tag, size = 44, active }: { tag: string; size?: number; active?: boolean }) {
+export function GuildBadge({
+  tag,
+  size = 44,
+  active,
+  iconUrl,
+}: {
+  tag: string;
+  size?: number;
+  active?: boolean;
+  iconUrl?: string | null;
+}) {
   return (
     <span
       className={cn(
-        "grid place-items-center rounded-[14px] bg-muted text-[12px] font-semibold tracking-wide transition-transform duration-150",
+        "grid place-items-center overflow-hidden rounded-[14px] bg-muted text-[12px] font-semibold tracking-wide transition-transform duration-150",
         active && "ring-2 ring-primary",
       )}
       style={{ width: size, height: size }}
     >
-      {tag}
+      {iconUrl ? (
+        <img src={iconUrl} alt="" width={size} height={size} className="size-full object-cover" />
+      ) : (
+        tag
+      )}
     </span>
   );
 }

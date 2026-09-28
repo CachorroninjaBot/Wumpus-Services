@@ -26,6 +26,7 @@ export type Guild = {
   preset: PresetId;
   installed: boolean;
   region: string;
+  iconUrl?: string | null;
 };
 
 export type MemberStatus = "online" | "idle" | "dnd" | "offline";
@@ -174,6 +175,8 @@ export type SessionUser = {
   username: string;
   globalName: string;
   isAdmin: boolean;
+  signedIn?: boolean;
+  avatar?: string | null;
 };
 
 export type ChannelPost = {
