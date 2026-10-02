@@ -70,7 +70,12 @@ function CallbackPage() {
       localStorage.setItem(KEY, JSON.stringify(slice));
       localStorage.removeItem("wumpus-demo-v1");
       navigate({ to: "/app" });
-    })();
+    })().catch((cause: unknown) => {
+      console.error("Falha ao concluir o login do Discord.", cause);
+      setMsg(cause instanceof Error
+        ? `Não foi possível concluir o login: ${cause.message}`
+        : "Não foi possível concluir o login. Volte ao início e tente novamente.");
+    });
   }, [code, error, navigate, state]);
 
   return <main className="grid min-h-dvh place-items-center bg-muted-foreground">{msg}</main>;

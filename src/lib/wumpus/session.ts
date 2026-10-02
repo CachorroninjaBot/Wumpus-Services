@@ -22,7 +22,14 @@ import { resolveEntitlements, type Entitlements, type SubscriptionLite } from ".
 import { loadBilling } from "./shardpay";
 import { isPlatformOwner } from "./owner";
 import { recordDashboardLogin } from "./admin-store.server";
-import { sessionSecret, signSession, verifySession, type SessionGuild, type SessionPayload } from "./session-token";
+import {
+  sessionSecret,
+  signSession,
+  verifySession,
+  SESSION_TOKEN_MAX_LENGTH,
+  type SessionGuild,
+  type SessionPayload,
+} from "./session-token";
 
 export type SessionUserView = {
   id: string;
@@ -79,7 +86,9 @@ export const startSession = createServerFn({ method: "POST" })
  * valido devolve erro — nunca um acesso "vazio mas liberado".
  */
 export const resolveAccess = createServerFn({ method: "POST" })
-  .validator((input: unknown) => z.object({ token: z.string().min(1).max(4096) }).strict().parse(input))
+  .validator((input: unknown) =>
+    z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH) }).strict().parse(input),
+  )
   .handler(async ({ data }): Promise<AccessResult> => {
     const secret = sessionSecret();
     if (!secret) return { ok: false, error: "Segredo de sessão ausente no servidor." };

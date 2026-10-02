@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { moduleDefaults as coreModuleDefaults } from "../../core/module-defaults.ts";
 import { moduleDefaults as dashboardModuleDefaults } from "./defaults.ts";
+import { SESSION_TOKEN_MAX_LENGTH } from "./session-token.ts";
 
 const moduleDefaults = Object.fromEntries(
   Object.entries(coreModuleDefaults).map(([moduleName, defaults]) => [
@@ -65,7 +66,7 @@ const modulesSchema = z.record(z.string(), z.record(z.string(), z.unknown())).su
 });
 
 export const publishInputSchema = z.object({
-  token: z.string().min(1).max(4096),
+  token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
   guildId: z.string().regex(/^\d{17,20}$/),
   name: z.string().max(100).optional(),
   modules: modulesSchema,

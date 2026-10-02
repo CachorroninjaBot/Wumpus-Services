@@ -6,10 +6,11 @@ import { loadBotGuildIds } from "./bot-guilds";
 import { readRuntime, enqueueOutbox } from "./runtime.server";
 import { listDashboardMembers } from "./admin-store.server";
 import { readBotHealth } from "./health.server";
+import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 
-const tokenSchema = z.object({ token: z.string().min(1).max(4096) }).strict();
+const tokenSchema = z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH) }).strict();
 const resyncSchema = z.object({
-  token: z.string().min(1).max(4096),
+  token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
   guildId: z.string().regex(/^\d{17,20}$/),
 }).strict();
 
