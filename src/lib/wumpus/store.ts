@@ -8,6 +8,7 @@ import { isPlatformOwner } from "./owner";
 import type { PlanId } from "./catalog";
 import { normalizePlan } from "./catalog";
 import { getStoredSessionToken } from "./session-token";
+import { resolveAccess } from "./session";
 import { cloneSeed, DEMO_GUILD } from "./seed";
 import type {
   Article,
@@ -170,6 +171,8 @@ export const useWumpus = create<WumpusStore>((set, get) => {
   /** Ultimo objeto de módulos publicado — evita republicar sem mudança real. */
   let publishedModules: unknown = null;
   let publishedGuildId = "";
+  let authorizedGuildIds: Set<string> | null = null;
+  let accessRefreshPending = false;
 
   /**
    * Publica a config do servidor ativo para o bot ler.
@@ -178,15 +181,14 @@ export const useWumpus = create<WumpusStore>((set, get) => {
    * salva, e todo campo vira decoração. Falha de rede aqui não pode quebrar a
    * interface — o painel segue funcionando e tenta de novo na próxima mudança.
    */
-  const publishModules = (state: WumpusStore) => {
-    if (state.modules === publishedModules && state.activeGuildId === publishedGuildId) return;
-    publishedModules = state.modules;
-    publishedGuildId = state.activeGuildId;
-
-    const guildId = state.activeGuildId;
-    const modules = state.modules[guildId];
-    const token = getStoredSessionToken();
-    if (!guildId || !modules || !token) return;
+   const publishModules = (state: WumpusStore) => {
+     const guildId = state.activeGuildId;
+     const modules = state.modules[guildId];
+     const token = getStoredSessionToken();
+     if (!guildId || !modules || !token || !authorizedGuildIds?.has(guildId)) return;
+     if (state.modules === publishedModules && guildId === publishedGuildId) return;
+     publishedModules = state.modules;
+     publishedGuildId = guildId;
 
     const payload: Record<string, Record<string, unknown>> = {};
     for (const [key, value] of Object.entries(modules)) {
@@ -215,6 +217,40 @@ export const useWumpus = create<WumpusStore>((set, get) => {
     }).catch((error: unknown) => {
       console.error("Não foi possível sincronizar a configuração com o bot.", error);
     });
+  };
+
+  const refreshAuthorizedGuilds = async () => {
+    if (accessRefreshPending) return;
+    accessRefreshPending = true;
+    authorizedGuildIds = new Set();
+    const token = getStoredSessionToken();
+    if (!token) {
+      accessRefreshPending = false;
+      return;
+    }
+
+    try {
+      const access = await resolveAccess({ data: { token } });
+      if (!access.ok) {
+        console.error(`Não foi possível validar o acesso ao dashboard: ${access.error}`);
+        return;
+      }
+
+      const guildIds = new Set(access.entitlements.guildIds);
+      authorizedGuildIds = guildIds;
+      const current = get();
+      const guilds = current.guilds.filter((guild) => guildIds.has(guild.id));
+      const activeGuildId = guildIds.has(current.activeGuildId)
+        ? current.activeGuildId
+        : guilds[0]?.id ?? "";
+      set({ guilds, activeGuildId });
+      persist(pick(get()));
+      publishModules(get());
+    } catch (error) {
+      console.error("Não foi possível validar o acesso; a configuração não foi sincronizada.", error);
+    } finally {
+      accessRefreshPending = false;
+    }
   };
 
   const write = (partial: Partial<PersistSlice> | ((s: WumpusStore) => Partial<PersistSlice>)) => {
@@ -292,9 +328,9 @@ export const useWumpus = create<WumpusStore>((set, get) => {
               ? parsed.theme
               : "system";
             document.documentElement.dataset.theme = theme;
-            // Config ja salva no navegador tambem precisa chegar ao bot, mesmo
-            // sem o usuario editar nada nesta sessao.
-            publishModules(get());
+            // Revalida a presença do bot e a assinatura antes de sincronizar
+            // qualquer config que tenha ficado salva no navegador.
+            void refreshAuthorizedGuilds();
             return;
           }
         }
@@ -303,7 +339,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       }
       document.documentElement.dataset.theme = "system";
       set({ hydrated: true });
-      publishModules(get());
+      void refreshAuthorizedGuilds();
     },
 
     resetDemo: () => {
