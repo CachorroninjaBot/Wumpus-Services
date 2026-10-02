@@ -3,6 +3,32 @@
 > Não é "deixar bonito". É fazer a configuração ser compreensível e o estado do
 > bot ser visível.
 
+## Estado da implementação
+
+- [x] Estado do bot exposto na landing, overview e admin por heartbeat do processo.
+- [x] Tokens consolidados para tema claro/escuro/sistema e navegação mobile adaptada.
+- [x] Tickets reorganizados por resultado, com configurações de SLA, cargos,
+  feedback e painel; lista e ações de atendimento continuam demonstrativas e
+  locais, não sincronizadas com o bot.
+- [x] Landing pública separada do painel, com planos ShardPay, FAQ, status,
+  convite e prévias visuais dos módulos. As prévias são componentes React, não
+  screenshots estáticos do produto.
+- [x] Administração protegida por sessão Discord assinada e MFA ativo na conta,
+  com membros registrados, assinaturas, saúde e force-resync via outbox.
+- [x] Validação server-side das configurações publicadas e dos pedidos de
+  publicação.
+- [x] Publicação de tickets e formulários aguarda o resultado real do bot; a
+  página distingue fila local demonstrativa de configuração/publicação real.
+
+**Condições operacionais:** admin e bot precisam compartilhar o volume de
+`data/` (ou os caminhos configurados por `WUMPUS_HEALTH_PATH`,
+`WUMPUS_RUNTIME_PATH` e `WUMPUS_MEMBERS_PATH`) para heartbeat, runtime, outbox e
+cadastro administrativo. A lista de membros é coletada somente a partir desta
+versão. Quando a ShardPay estiver indisponível,
+a landing identifica os valores exibidos como referência salva e recomenda
+confirmar no checkout. O OAuth exige `DISCORD_CLIENT_SECRET`; a sessão aceita
+`WUMPUS_SESSION_SECRET` dedicado ou usa o segredo Discord como fallback.
+
 ## O problema real
 
 A dashboard de hoje tem **40 campos por módulo** e o usuário não sabe o que
@@ -68,8 +94,8 @@ Existe parcialmente (`brand.tsx`, tokens em CSS, `data-theme`). Consolidar:
 | Cores | espalhadas | 1 arquivo de tokens |
 | Tipografia | Outfit | escala definida (não tamanhos soltos) |
 | Espaçamento | valores avulsos | escala de 4px |
-| Dark mode | só escuro | claro/escuro/sistema |
-| Mobile | usável no desktop | navegação própria no mobile |
+| Dark mode | só escuro | claro/escuro/sistema — implementado |
+| Mobile | usável no desktop | navegação própria no mobile — implementada |
 
 **Mobile é o maior buraco.** O layout usa `lg:grid-cols-[280px_1fr]` — abaixo de
 `lg` a lista e o detalhe empilham, e o detalhe fica abaixo da dobra. Quem

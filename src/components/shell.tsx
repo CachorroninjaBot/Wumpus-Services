@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Menu, Moon, Sun, Shield, LogOut, Plus } from "lucide-react";
+import { Menu, Moon, Sun, Shield, LogOut, Plus, Monitor } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { BrandMark, GuildBadge } from "@/components/brand";
 import { Button } from "@/components/ui/button";
@@ -88,6 +88,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const guild = guilds.find((g) => g.id === activeId) ?? guilds[0];
   const [open, setOpen] = useState(false);
   const active = useActiveNav();
+  const nextTheme = theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
   // O link de Admin so aparece para o dono da plataforma. Antes ficava visivel
   // para todos, e a tela so pedia uma senha que estava escrita no codigo.
   const isOwner = isPlatformOwner(user.id);
@@ -167,8 +168,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-dvh bg-background text-foreground">
-      <aside className="hidden w-[72px] shrink-0 flex-col items-center gap-3 border-r border-border py-4 lg:flex">
+    <div className="app-shell flex min-h-dvh bg-background text-foreground">
+      <aside className="app-surface hidden w-[72px] shrink-0 flex-col items-center gap-3 border-r border-border py-4 lg:flex">
         <Link to="/" aria-label="Wumpus" className="grid place-items-center">
           <BrandMark size={40} />
         </Link>
@@ -189,7 +190,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </a>
       </aside>
 
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-card/40 lg:flex">
+      <aside className="app-surface hidden w-60 shrink-0 flex-col border-r border-border bg-card/40 lg:flex">
         <header className="flex items-center gap-3 border-b border-border px-4 py-4">
           <GuildBadge tag={guild?.tag ?? "W"} iconUrl={guild?.iconUrl} size={38} />
           <div className="min-w-0">
@@ -215,24 +216,33 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center gap-2 border-b border-border px-3 sm:px-5">
+        <header className="app-bar sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border px-3 sm:px-5">
           <Sheet open={open} onOpenChange={setOpen}>
             <Button variant="ghost" size="icon-sm" className="lg:hidden" onClick={() => setOpen(true)} aria-label="Menu">
               <Menu className="size-5" />
             </Button>
-            <SheetContent side="left" className="flex flex-col gap-4 overflow-y-auto">
+            <SheetContent side="left" className="app-surface flex flex-col gap-4 overflow-y-auto border-0 bg-popover p-4">
               <div className="mt-6 flex items-center gap-2">
                 <BrandMark size={32} />
                 <strong>Wumpus</strong>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {guilds.map((g) => (
-                  <button key={g.id} type="button" onClick={() => setActive(g.id)}>
+                  <button key={g.id} type="button" onClick={() => { setActive(g.id); setOpen(false); }}>
                     <GuildBadge tag={g.tag} iconUrl={g.iconUrl} size={40} active={g.id === activeId} />
                   </button>
                 ))}
               </div>
               <NavList onNavigate={() => setOpen(false)} />
+              {isOwner ? (
+                <Link
+                  to="/admin"
+                  onClick={() => setOpen(false)}
+                  className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <Shield className="size-4" /> Admin
+                </Link>
+              ) : null}
             </SheetContent>
           </Sheet>
           <div className="min-w-0 flex-1">
@@ -241,15 +251,21 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               {navItems.find((n) => n.id === active)?.hint}
             </p>
           </div>
-          <Button variant="ghost" size="icon-sm" aria-label="Alternar tema" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-            {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Tema ${theme === "dark" ? "escuro" : theme === "light" ? "claro" : "do sistema"}; ativar ${nextTheme === "dark" ? "escuro" : nextTheme === "light" ? "claro" : "do sistema"}`}
+            title={`Tema: ${theme === "dark" ? "escuro" : theme === "light" ? "claro" : "sistema"}`}
+            onClick={() => setTheme(nextTheme)}
+          >
+            {theme === "dark" ? <Moon className="size-4" /> : theme === "light" ? <Sun className="size-4" /> : <Monitor className="size-4" />}
           </Button>
           <span className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">{user.globalName}</span>
           <Link to="/" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="Sair">
             <LogOut className="size-4" />
           </Link>
         </header>
-        <main className="flex-1 overflow-x-hidden p-4 sm:p-6">{children}</main>
+        <main className="app-page flex-1 overflow-x-hidden p-4 sm:p-6">{children}</main>
       </div>
     </div>
   );

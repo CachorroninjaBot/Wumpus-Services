@@ -9,19 +9,26 @@ const KEY = "wumpus-demo-v2";
 export const Route = createFileRoute("/auth/discord/callback")({
   validateSearch: (s: Record<string, unknown>) => ({
     code: typeof s.code === "string" ? s.code : "",
+    state: typeof s.state === "string" ? s.state : "",
     error: typeof s.error === "string" ? s.error : "",
   }),
   component: CallbackPage,
 });
 
 function CallbackPage() {
-  const { code, error } = Route.useSearch();
+  const { code, state, error } = Route.useSearch();
   const navigate = useNavigate();
   const [msg, setMsg] = useState("Falando com o Discord…");
 
   useEffect(() => {
     if (error) {
       setMsg("Login cancelado no Discord.");
+      return;
+    }
+    const expectedState = sessionStorage.getItem("wumpus-discord-oauth-state");
+    sessionStorage.removeItem("wumpus-discord-oauth-state");
+    if (!state || state !== expectedState) {
+      setMsg("A validação do login expirou. Volte ao início e tente novamente.");
       return;
     }
     if (!code) {
@@ -64,7 +71,7 @@ function CallbackPage() {
       localStorage.removeItem("wumpus-demo-v1");
       navigate({ to: "/app" });
     })();
-  }, [code, error, navigate]);
+  }, [code, error, navigate, state]);
 
   return <main className="grid min-h-dvh place-items-center bg-muted-foreground">{msg}</main>;
 }

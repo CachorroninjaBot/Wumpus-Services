@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 
 const CLIENT_ID = () => process.env.DISCORD_CLIENT_ID || "1187601667559002225";
 const CLIENT_SECRET = () => process.env.DISCORD_CLIENT_SECRET || "";
@@ -71,6 +72,7 @@ export async function exchangeDiscordCodeDirect(code: string) {
       username: string;
       global_name?: string | null;
       avatar?: string | null;
+      mfa_enabled?: boolean;
     };
 
     const guildsRes = await fetch("https://discord.com/api/users/@me/guilds", {
@@ -94,6 +96,7 @@ export async function exchangeDiscordCodeDirect(code: string) {
         username: me.username,
         globalName: me.global_name || me.username,
         avatar: me.avatar,
+        mfaEnabled: me.mfa_enabled === true,
       },
       guilds: managed.slice(0, 25).map((g) => ({
         id: g.id,
@@ -106,5 +109,5 @@ export async function exchangeDiscordCodeDirect(code: string) {
 
 /** Porta de entrada do cliente para a troca do code. */
 export const exchangeDiscordCode = createServerFn({ method: "POST" })
-  .validator((input: { code: string }) => input)
+  .validator((input: unknown) => z.object({ code: z.string().min(1).max(2048) }).strict().parse(input))
   .handler(async ({ data }) => exchangeDiscordCodeDirect(data.code));

@@ -152,6 +152,9 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     logChannels: true,
     logBans: true,
     ignoreBotMessages: true,
+    ignoredUserIds: [],
+    ignoredRoleIds: [],
+    ignoredChannelIds: [],
     ignoreChannelIds: [],
     logThreadEvents: true,
     logStageEvents: true,
@@ -192,6 +195,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     escalationRoleId: ""
   },
   forms: {
+    panelChannelId: "",
     reviewerRoleIds: [],
     reviewChannelId: "",
     useAiPreReview: false,

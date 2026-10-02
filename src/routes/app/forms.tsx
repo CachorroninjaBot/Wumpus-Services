@@ -13,6 +13,7 @@ import { asString, planAllows } from "@/lib/wumpus/engine";
 import { uid } from "@/lib/utils";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus, type FormFieldConfig } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
+import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
 import { Plus, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/app/forms")({ component: FormsPage });
@@ -21,7 +22,6 @@ function FormsPage() {
   const gid = useWumpus((s) => s.activeGuildId);
   const questionsMap = useWumpus((s) => s.formQuestions);
   const questions = questionsMap[gid] ?? [];
-  const setQuestions = useWumpus((s) => s.setQuestions);
   const allSubs = useWumpus((s) => s.submissions);
   const submissions = allSubs.filter((x) => x.guildId === gid);
   const members = useGuildMembers();
@@ -33,9 +33,10 @@ function FormsPage() {
   const setAiNote = useWumpus((s) => s.setSubmissionAiNote);
   const user = useWumpus((s) => s.sessionUser);
   const guild = useActiveGuild();
-  const publishPanel = useWumpus((s) => s.publishPanel);
   const formsAllowed = planAllows(guild.plan, "forms");
   const aiAllowed = planAllows(guild.plan, "ai") && Boolean(fcfg.config.useAiPreReview);
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [publishNotice, setPublishNotice] = useState<string | null>(null);
 
   // Campos do formulário: a fonte de verdade é `config.fields` — o mesmo que o
   // bot lê. O fallback converte a lista antiga de perguntas, para não perder
@@ -287,6 +288,24 @@ function FormsPage() {
                 />
               </div>
               <div>
+                <Label>Canal em que o painel aparece</Label>
+                <Input
+                  className="mt-1"
+                  defaultValue={asString(fcfg.config.panelChannelId)}
+                  placeholder="ex.: ch_candidaturas ou ID do canal"
+                  onBlur={(e) => updateConfig("forms", { panelChannelId: e.target.value.trim() })}
+                />
+              </div>
+              <div>
+                <Label>Canal para revisar candidaturas</Label>
+                <Input
+                  className="mt-1"
+                  defaultValue={asString(fcfg.config.reviewChannelId)}
+                  placeholder="ex.: ch_revisao ou ID do canal"
+                  onBlur={(e) => updateConfig("forms", { reviewChannelId: e.target.value.trim() })}
+                />
+              </div>
+              <div>
                 <Label>Título do painel</Label>
                 <Input
                   className="mt-1"
@@ -303,9 +322,29 @@ function FormsPage() {
               description={asString(fcfg.config.panelDescription)}
               buttons={["Candidatar-se"]}
             />
-            <Button variant="outline" onClick={() => publishPanel("forms")}>
-              Publicar painel na fila
+            <Button
+              variant="outline"
+              disabled={publishBusy || !asString(fcfg.config.panelChannelId).trim()}
+              onClick={async () => {
+                setPublishBusy(true);
+                setPublishNotice(null);
+                try {
+                  const result = await publishPanelAndWait({
+                    guildId: gid,
+                    target: "forms",
+                    channelRef: asString(fcfg.config.panelChannelId).trim(),
+                  });
+                  setPublishNotice(publishResultMessage(result));
+                } catch (error) {
+                  setPublishNotice(error instanceof Error ? error.message : "Não foi possível pedir a publicação ao bot.");
+                } finally {
+                  setPublishBusy(false);
+                }
+              }}
+            >
+              {publishBusy ? "Aguardando o bot…" : "Publicar painel no Discord"}
             </Button>
+            {publishNotice ? <p role="status" className="m-0 text-sm text-muted-foreground">{publishNotice}</p> : null}
             <DiscordModalPreview title={asString(fcfg.config.panelTitle)} questions={questions.map((q) => q.label)} />
           </div>
         </TabsContent>

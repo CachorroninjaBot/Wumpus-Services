@@ -18,6 +18,7 @@ const PAYLOAD: SessionPayload = {
   username: "dono",
   globalName: "Dono",
   avatar: null,
+  mfaEnabled: true,
   guilds: [{ id: "123", name: "Meu Servidor", iconUrl: null, owner: true }],
 };
 
@@ -29,6 +30,7 @@ test("assina e verifica de volta", async () => {
 
   assert.equal(back?.userId, PAYLOAD.userId);
   assert.equal(back?.username, "dono");
+  assert.equal(back?.mfaEnabled, true);
   assert.equal(back?.guilds.length, 1);
   assert.equal(back?.guilds[0]!.owner, true);
 });
@@ -36,6 +38,11 @@ test("assina e verifica de volta", async () => {
 test("avatar ausente vira null", async () => {
   const back = await verifySession(await signSession(PAYLOAD, SECRET), SECRET);
   assert.equal(back?.avatar, null);
+});
+
+test("sessão preserva MFA desativado como restrição administrativa", async () => {
+  const back = await verifySession(await signSession({ ...PAYLOAD, mfaEnabled: false }, SECRET), SECRET);
+  assert.equal(back?.mfaEnabled, false);
 });
 
 /* --------------------------------------------------------------- ataques --- */

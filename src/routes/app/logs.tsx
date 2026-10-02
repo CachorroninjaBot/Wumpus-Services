@@ -75,6 +75,60 @@ function LogsPage() {
             onCheckedChange={(v) => updateConfig("logs", { logModeration: v })}
           />
         </div>
+        <div className="flex items-center gap-2">
+          <Label>Ignorar bot</Label>
+          <Switch
+            checked={Boolean(lcfg.config.ignoreBotMessages)}
+            onCheckedChange={(v) => updateConfig("logs", { ignoreBotMessages: v })}
+          />
+        </div>
+      </Card>
+      <Card className="space-y-3">
+        <h2 className="m-0 text-base font-semibold">Ignorar eventos</h2>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div>
+            <Label>Usuários ignorados</Label>
+            <Input
+              defaultValue={Array.isArray(lcfg.config.ignoredUserIds) ? lcfg.config.ignoredUserIds.join(", ") : ""}
+              onBlur={(e) =>
+                updateConfig("logs", {
+                  ignoredUserIds: e.target.value
+                    .split(",")
+                    .map((v) => v.trim())
+                    .filter(Boolean)
+                })
+              }
+            />
+          </div>
+          <div>
+            <Label>Cargos ignorados</Label>
+            <Input
+              defaultValue={Array.isArray(lcfg.config.ignoredRoleIds) ? lcfg.config.ignoredRoleIds.join(", ") : ""}
+              onBlur={(e) =>
+                updateConfig("logs", {
+                  ignoredRoleIds: e.target.value
+                    .split(",")
+                    .map((v) => v.trim())
+                    .filter(Boolean)
+                })
+              }
+            />
+          </div>
+          <div>
+            <Label>Canais ignorados</Label>
+            <Input
+              defaultValue={Array.isArray(lcfg.config.ignoredChannelIds) ? lcfg.config.ignoredChannelIds.join(", ") : ""}
+              onBlur={(e) =>
+                updateConfig("logs", {
+                  ignoredChannelIds: e.target.value
+                    .split(",")
+                    .map((v) => v.trim())
+                    .filter(Boolean)
+                })
+              }
+            />
+          </div>
+        </div>
       </Card>
     </div>
   );

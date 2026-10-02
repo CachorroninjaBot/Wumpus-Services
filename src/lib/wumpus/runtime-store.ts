@@ -12,12 +12,16 @@
  * os wrappers chamaveis pelo cliente.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { enqueueOutbox, readRuntime, writeRuntime, type OutboxJob, type RuntimeFile } from "./runtime.server";
+import { z } from "zod";
+import { enqueueOutbox, readRuntime, writeRuntime, type OutboxJob } from "./runtime.server";
+import { requireGuildAccess } from "./session";
+import { publishInputSchema } from "./runtime-validation";
 
 export type { RuntimeFile, RuntimeGuild, RuntimeArticle, OutboxJob } from "./runtime.server";
 
 /** Payload de config de um servidor: `{ modulo: { ...campos, enabled } }`. */
 export type PublishInput = {
+  token: string;
   guildId: string;
   name?: string;
   modules: Record<string, Record<string, unknown>>;
@@ -26,8 +30,9 @@ export type PublishInput = {
 };
 
 export const publishGuildRuntime = createServerFn({ method: "POST" })
-  .validator((input: PublishInput) => input)
+  .validator((input: unknown) => publishInputSchema.parse(input))
   .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
     const current = await readRuntime();
 
     current.guilds[data.guildId] = {
@@ -70,8 +75,14 @@ export const publishGuildRuntime = createServerFn({ method: "POST" })
  * porque e ele que tem conexao com o gateway — o painel roda em outro processo.
  */
 export const requestPanelPublish = createServerFn({ method: "POST" })
-  .validator((input: { guildId: string; target: string; channelRef: string }) => input)
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(4096),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    target: z.enum(["tickets", "forms"]),
+    channelRef: z.string().trim().min(1).max(100),
+  }).strict().parse(input))
   .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
     const job: OutboxJob = {
       id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       guildId: data.guildId,
@@ -109,8 +120,12 @@ export type PublishStatus = {
 };
 
 export const getPublishStatus = createServerFn({ method: "POST" })
-  .validator((input: { guildId: string }) => input)
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(4096),
+    guildId: z.string().regex(/^\d{17,20}$/),
+  }).strict().parse(input))
   .handler(async ({ data }): Promise<PublishStatus[]> => {
+    await requireGuildAccess(data.token, data.guildId);
     const current = await readRuntime();
 
     return (current.outbox ?? [])
