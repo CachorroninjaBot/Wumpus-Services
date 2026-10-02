@@ -16,6 +16,7 @@ import { z } from "zod";
 import { enqueueOutbox, readRuntime, writeRuntime, type OutboxJob } from "./runtime.server";
 import { requireGuildAccess } from "./session";
 import { publishInputSchema } from "./runtime-validation";
+import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 
 export type { RuntimeFile, RuntimeGuild, RuntimeArticle, OutboxJob } from "./runtime.server";
 
@@ -76,7 +77,7 @@ export const publishGuildRuntime = createServerFn({ method: "POST" })
  */
 export const requestPanelPublish = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({
-    token: z.string().min(1).max(4096),
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
     guildId: z.string().regex(/^\d{17,20}$/),
     target: z.enum(["tickets", "forms"]),
     channelRef: z.string().trim().min(1).max(100),
@@ -121,7 +122,7 @@ export type PublishStatus = {
 
 export const getPublishStatus = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({
-    token: z.string().min(1).max(4096),
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
     guildId: z.string().regex(/^\d{17,20}$/),
   }).strict().parse(input))
   .handler(async ({ data }): Promise<PublishStatus[]> => {

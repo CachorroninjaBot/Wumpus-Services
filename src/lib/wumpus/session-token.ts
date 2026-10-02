@@ -45,6 +45,7 @@ const TTL = "7d";
  * um `resetDemo`) nao apaga a sessao por acidente.
  */
 export const SESSION_TOKEN_KEY = "wumpus-session-token";
+export const SESSION_TOKEN_MAX_LENGTH = 16_384;
 
 export function getStoredSessionToken(): string {
   if (typeof window === "undefined") return "";
