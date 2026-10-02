@@ -1,0 +1,470 @@
+{
+  "updatedAt": 1790901260305,
+  "guilds": {
+    "1014633471790022667": {
+      "servers": {
+        "announceJoinChannelId": "ch_geral",
+        "joinMessage": "Bem-vindo(a) à Aurora, {user}. Leia as regras em #regras e abra um ticket se precisar.",
+        "announceLeaveChannelId": "ch_logs",
+        "leaveMessage": "{user} saiu do servidor.",
+        "maintenanceMode": false,
+        "maintenanceMessage": "Estamos em manutenção. Voltamos em instantes.",
+        "defaultRoleIds": [
+          "role_membro"
+        ],
+        "enabled": true
+      },
+      "tickets": {
+        "panelChannelId": "ch_atendimento",
+        "categoryId": "cat_tickets",
+        "panelFormat": "components_v2",
+        "panelTitle": "Central de atendimento",
+        "panelDescription": "Escolha o departamento. Um canal privado é criado só para você e a equipe.",
+        "panelAccentColor": "#7c5cff",
+        "staffRoleIds": [
+          "role_staff",
+          "role_suporte"
+        ],
+        "transcriptChannelId": "ch_transcripts",
+        "logChannelId": "ch_logs",
+        "aiSupportEnabled": true,
+        "closeAfterHours": 48,
+        "autoCloseInactiveHours": 24,
+        "maxOpenPerUser": 1,
+        "pingStaffOnOpen": true,
+        "feedbackEnabled": true,
+        "reopenEnabled": true,
+        "priorityEnabled": true,
+        "slaWarningMinutes": 60,
+        "namingPattern": "atendimento-{user}",
+        "welcomeMessage": "Olá! Descreva o que você precisa com o máximo de detalhes. A equipe já foi notificada.",
+        "departments": [
+          "Compras",
+          "Suporte",
+          "Denúncia"
+        ],
+        "enabled": true
+      },
+      "forms": {
+        "reviewerRoleIds": [
+          "role_staff"
+        ],
+        "reviewChannelId": "ch_forms",
+        "useAiPreReview": true,
+        "panelFormat": "components_v2",
+        "panelTitle": "Candidaturas",
+        "panelDescription": "Envie sua candidatura pelo formulário. Respondemos em até 7 dias.",
+        "panelAccentColor": "#7c5cff",
+        "cooldownHours": 24,
+        "minAccountAgeDays": 7,
+        "notifyReviewers": true,
+        "requireReasonOnReject": true,
+        "maxSubmissionsPerUser": 3,
+        "questions": [
+          "Qual o seu nome ou apelido?",
+          "Por que quer fazer parte da equipe?",
+          "Qual a sua experiência relevante?"
+        ],
+        "fields": [
+          {
+            "id": "assunto",
+            "label": "Assunto",
+            "type": "select",
+            "required": true,
+            "options": [
+              "Dúvida",
+              "Denúncia",
+              "Parceria"
+            ],
+            "maxLength": 500
+          },
+          {
+            "id": "nome",
+            "label": "Qual o seu nome ou apelido?",
+            "type": "short",
+            "required": true,
+            "options": [],
+            "maxLength": 100
+          },
+          {
+            "id": "motivo",
+            "label": "Por que quer fazer parte da equipe?",
+            "type": "paragraph",
+            "required": true,
+            "options": [],
+            "maxLength": 1000
+          }
+        ],
+        "enabled": true
+      },
+      "moderation": {
+        "logChannelId": "ch_mod",
+        "staffRoleIds": [
+          "role_staff",
+          "role_mod"
+        ],
+        "defaultTimeoutMinutes": 60,
+        "escalateAfterStrikes": 3,
+        "maxStrikesBeforeBan": 5,
+        "strikeExpiryDays": 30,
+        "banDeleteDays": 1,
+        "dmOnPunish": true,
+        "requireEvidence": false,
+        "pardonsEnabled": true,
+        "publicLogging": false,
+        "enabled": true
+      },
+      "automod": {
+        "logChannelId": "ch_mod",
+        "ignoredChannelIds": [
+          "ch_staff"
+        ],
+        "ignoredRoleIds": [
+          "role_staff",
+          "role_mod"
+        ],
+        "action": "delete",
+        "warnMessage": "Sua mensagem foi removida pelo filtro automático.",
+        "messageLimit": 6,
+        "windowSeconds": 10,
+        "duplicateLimit": 3,
+        "mentionLimit": 8,
+        "timeoutMinutes": 10,
+        "blockInvites": true,
+        "blockLinks": false,
+        "allowedDomains": [
+          "aurora.store",
+          "youtube.com",
+          "youtu.be"
+        ],
+        "blockedTerms": [
+          "golpe",
+          "free nitro",
+          "steamgift"
+        ],
+        "blockedDomains": [],
+        "capsThresholdPercent": 80,
+        "minLength": 0,
+        "maxLength": 0,
+        "antiGhostPing": true,
+        "enabled": true
+      },
+      "security": {
+        "alertChannelId": "ch_alerts",
+        "alertStaffRoleIds": [
+          "role_staff"
+        ],
+        "response": "lockdown_review",
+        "raidMode": "smart",
+        "raidJoinThreshold": 12,
+        "raidWindowSeconds": 60,
+        "minAccountAgeHours": 24,
+        "quarantineNewMembers": false,
+        "nukeActionThreshold": 5,
+        "nukeWindowSeconds": 30,
+        "timeoutMinutes": 60,
+        "trustedRoleIds": [
+          "role_staff"
+        ],
+        "lockdownMessage": "O servidor está em modo de proteção. Aguarde a equipe resolver.",
+        "lockdown": false,
+        "enabled": true
+      },
+      "logs": {
+        "channelId": "ch_logs",
+        "retentionDays": 180,
+        "compactMode": false,
+        "logModeration": true,
+        "logMembers": true,
+        "logMessages": false,
+        "logRoles": true,
+        "logBans": true,
+        "logAutoMod": true,
+        "ignoreBotMessages": true,
+        "enabled": true
+      },
+      "staff": {
+        "staffRoleIds": [
+          "role_staff",
+          "role_suporte",
+          "role_mod"
+        ],
+        "logChannelId": "ch_staff",
+        "responseTimeGoalMinutes": 30,
+        "maxConcurrentTickets": 5,
+        "inactivityDays": 14,
+        "requireReason": true,
+        "pingOnClaim": true,
+        "autoArchiveDays": 7,
+        "enabled": true
+      },
+      "knowledge": {
+        "answerChannelId": "ch_geral",
+        "useAi": true,
+        "requireApprovedArticles": true,
+        "minQuestionLength": 12,
+        "cooldownSeconds": 20,
+        "autoSuggest": true,
+        "enabled": true
+      },
+      "statistics": {
+        "retentionDays": 180,
+        "anonymizeUsers": true,
+        "trackMessages": true,
+        "trackJoins": true,
+        "trackTickets": true,
+        "digestChannelId": "ch_staff",
+        "digestHourUtc": 12,
+        "highlightTopMembers": 5,
+        "enabled": true
+      },
+      "roles": {
+        "defaultRoleIds": [
+          "role_membro"
+        ],
+        "protectedRoleIds": [
+          "role_owner",
+          "role_staff"
+        ],
+        "allowAiDrafts": true,
+        "enabled": true
+      },
+      "name": "Logs Gerais"
+    },
+    "g_aurora": {
+      "servers": {
+        "announceJoinChannelId": "ch_geral",
+        "joinMessage": "Bem-vindo(a) à Aurora, {user}. Leia as regras em #regras e abra um ticket se precisar.",
+        "announceLeaveChannelId": "ch_logs",
+        "leaveMessage": "{user} saiu do servidor.",
+        "maintenanceMode": false,
+        "maintenanceMessage": "Estamos em manutenção. Voltamos em instantes.",
+        "defaultRoleIds": [
+          "role_membro"
+        ],
+        "enabled": true
+      },
+      "tickets": {
+        "panelChannelId": "ch_atendimento",
+        "categoryId": "cat_tickets",
+        "panelFormat": "components_v2",
+        "panelTitle": "Central de atendimento",
+        "panelDescription": "Escolha o departamento. Um canal privado é criado só para você e a equipe.",
+        "panelAccentColor": "#7c5cff",
+        "staffRoleIds": [
+          "role_staff",
+          "role_suporte"
+        ],
+        "transcriptChannelId": "ch_transcripts",
+        "logChannelId": "ch_logs",
+        "aiSupportEnabled": true,
+        "closeAfterHours": 48,
+        "autoCloseInactiveHours": 24,
+        "maxOpenPerUser": 1,
+        "pingStaffOnOpen": true,
+        "feedbackEnabled": true,
+        "reopenEnabled": true,
+        "priorityEnabled": true,
+        "slaWarningMinutes": 30,
+        "namingPattern": "atendimento-{user}",
+        "welcomeMessage": "Olá! Descreva o que você precisa com o máximo de detalhes. A equipe já foi notificada.",
+        "departments": [
+          "Compras",
+          "Suporte",
+          "Reembolso"
+        ],
+        "enabled": true
+      },
+      "forms": {
+        "reviewerRoleIds": [
+          "role_staff"
+        ],
+        "reviewChannelId": "ch_forms",
+        "useAiPreReview": true,
+        "panelFormat": "components_v2",
+        "panelTitle": "Candidaturas",
+        "panelDescription": "Envie sua candidatura pelo formulário. Respondemos em até 7 dias.",
+        "panelAccentColor": "#7c5cff",
+        "cooldownHours": 24,
+        "minAccountAgeDays": 7,
+        "notifyReviewers": true,
+        "requireReasonOnReject": true,
+        "maxSubmissionsPerUser": 3,
+        "questions": [
+          "Qual o seu nome ou apelido?",
+          "Por que quer fazer parte da equipe?",
+          "Qual a sua experiência relevante?"
+        ],
+        "enabled": true
+      },
+      "moderation": {
+        "logChannelId": "ch_mod",
+        "staffRoleIds": [
+          "role_staff",
+          "role_mod"
+        ],
+        "defaultTimeoutMinutes": 60,
+        "escalateAfterStrikes": 3,
+        "maxStrikesBeforeBan": 5,
+        "strikeExpiryDays": 30,
+        "banDeleteDays": 1,
+        "dmOnPunish": true,
+        "requireEvidence": false,
+        "pardonsEnabled": true,
+        "publicLogging": false,
+        "enabled": true
+      },
+      "automod": {
+        "logChannelId": "ch_mod",
+        "ignoredChannelIds": [
+          "ch_staff"
+        ],
+        "ignoredRoleIds": [
+          "role_staff",
+          "role_mod"
+        ],
+        "action": "delete",
+        "warnMessage": "Sua mensagem foi removida pelo filtro automático.",
+        "messageLimit": 6,
+        "windowSeconds": 10,
+        "duplicateLimit": 3,
+        "mentionLimit": 8,
+        "timeoutMinutes": 10,
+        "blockInvites": true,
+        "blockLinks": true,
+        "allowedDomains": [
+          "aurora.store",
+          "mercadopago.com",
+          "stripe.com"
+        ],
+        "blockedTerms": [
+          "golpe",
+          "free nitro",
+          "steamgift"
+        ],
+        "blockedDomains": [],
+        "capsThresholdPercent": 80,
+        "minLength": 0,
+        "maxLength": 0,
+        "antiGhostPing": true,
+        "slaWarningMinutes": 30,
+        "enabled": true
+      },
+      "security": {
+        "alertChannelId": "ch_alerts",
+        "alertStaffRoleIds": [
+          "role_staff"
+        ],
+        "response": "lockdown_review",
+        "raidMode": "strict",
+        "raidJoinThreshold": 8,
+        "raidWindowSeconds": 60,
+        "minAccountAgeHours": 48,
+        "quarantineNewMembers": false,
+        "nukeActionThreshold": 5,
+        "nukeWindowSeconds": 30,
+        "timeoutMinutes": 60,
+        "trustedRoleIds": [
+          "role_staff"
+        ],
+        "lockdownMessage": "O servidor está em modo de proteção. Aguarde a equipe resolver.",
+        "lockdown": false,
+        "enabled": true
+      },
+      "logs": {
+        "channelId": "ch_logs",
+        "retentionDays": 180,
+        "compactMode": false,
+        "logModeration": true,
+        "logMembers": true,
+        "logMessages": false,
+        "logRoles": true,
+        "logBans": true,
+        "logAutoMod": true,
+        "ignoreBotMessages": true,
+        "enabled": true
+      },
+      "staff": {
+        "staffRoleIds": [
+          "role_staff",
+          "role_suporte",
+          "role_mod"
+        ],
+        "logChannelId": "ch_staff",
+        "responseTimeGoalMinutes": 30,
+        "maxConcurrentTickets": 5,
+        "inactivityDays": 14,
+        "requireReason": true,
+        "pingOnClaim": true,
+        "autoArchiveDays": 7,
+        "enabled": true
+      },
+      "knowledge": {
+        "answerChannelId": "ch_geral",
+        "useAi": true,
+        "requireApprovedArticles": true,
+        "minQuestionLength": 12,
+        "cooldownSeconds": 20,
+        "autoSuggest": true,
+        "enabled": true
+      },
+      "statistics": {
+        "retentionDays": 180,
+        "anonymizeUsers": true,
+        "trackMessages": true,
+        "trackJoins": true,
+        "trackTickets": true,
+        "digestChannelId": "ch_staff",
+        "digestHourUtc": 12,
+        "highlightTopMembers": 5,
+        "enabled": true
+      },
+      "roles": {
+        "defaultRoleIds": [
+          "role_membro"
+        ],
+        "protectedRoleIds": [
+          "role_owner",
+          "role_staff"
+        ],
+        "allowAiDrafts": true,
+        "enabled": true
+      },
+      "name": "Aurora Store"
+    }
+  },
+  "articles": {
+    "1014633471790022667": [],
+    "g_aurora": [
+      {
+        "id": "a_1",
+        "title": "Como recebo o produto depois do pagamento?",
+        "body": "O cargo Cliente é aplicado automaticamente em até 5 minutos. Se não cair, abra um ticket em Compras com o e-mail da nota.",
+        "tags": [
+          "compras",
+          "produto"
+        ],
+        "approved": true
+      },
+      {
+        "id": "a_2",
+        "title": "Política de reembolso",
+        "body": "Reembolso integral em até 7 dias se a chave não foi resgatada. Depois disso, avaliamos caso a caso no departamento Reembolso.",
+        "tags": [
+          "reembolso"
+        ],
+        "approved": true
+      },
+      {
+        "id": "a_3",
+        "title": "Horário da equipe",
+        "body": "Plantão das 10h às 22h (Brasília), segunda a sábado. Fora disso o ticket fica na fila e o SLA pausa.",
+        "tags": [
+          "equipe"
+        ],
+        "approved": true
+      }
+    ]
+  },
+  "outbox": []
+}

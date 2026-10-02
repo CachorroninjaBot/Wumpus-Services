@@ -3,6 +3,7 @@ import { Menu, Moon, Sun, Shield, LogOut, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { BrandMark, GuildBadge } from "@/components/brand";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { brand, groupLabels, navItems, type ModuleGroupId, type NavId } from "@/lib/wumpus/brand";
 import { isPlatformOwner } from "@/lib/wumpus/owner";
@@ -87,7 +88,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const guild = guilds.find((g) => g.id === activeId) ?? guilds[0];
   const [open, setOpen] = useState(false);
   const active = useActiveNav();
-  const owner = isPlatformOwner(user.id);
+  // O link de Admin so aparece para o dono da plataforma. Antes ficava visivel
+  // para todos, e a tela so pedia uma senha que estava escrita no codigo.
+  const isOwner = isPlatformOwner(user.id);
 
   useEffect(() => {
     hydrate();
@@ -99,6 +102,66 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="grid min-h-dvh place-items-center bg-background text-muted-foreground">
         Carregando o Wumpus…
+      </div>
+    );
+  }
+
+  // Visitante sem sessao nao ve painel nenhum. Antes caia no workspace de
+  // demonstracao, entao qualquer pessoa abria /app e encontrava todos os
+  // servidores com todos os planos liberados.
+  if (!user.signedIn) {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-background px-4 text-foreground">
+        <Card className="w-full max-w-md space-y-4 p-6">
+          <BrandMark />
+          <div>
+            <h1 className="m-0 text-xl font-semibold">Entre para continuar</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              O painel mostra os servidores onde o Wumpus está instalado e que você administra, com o plano que você
+              assinou.
+            </p>
+          </div>
+          <Link
+            to="/entrar"
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground"
+          >
+            Entrar com Discord
+          </Link>
+          <Link to="/" className="block text-center text-sm text-muted-foreground">
+            Ver os planos
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
+  // Sem servidor liberado nao ha painel para mostrar. Antes caia aqui com a
+  // lista cheia de servidores onde o bot nem estava; agora a tela explica o que
+  // falta em vez de exibir uma configuracao que nao valeria nada.
+  if (!guilds.length) {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-background px-4 text-foreground">
+        <Card className="w-full max-w-md space-y-4 p-6">
+          <BrandMark />
+          <div>
+            <h1 className="m-0 text-xl font-semibold">Nenhum servidor disponível</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              O painel mostra apenas servidores onde o Wumpus está instalado e que você administra — e dentro do
+              limite do seu plano.
+            </p>
+          </div>
+          <a
+            href={brand.invite}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground"
+          >
+            Adicionar o Wumpus a um servidor
+          </a>
+          <Link to="/" className="block text-center text-sm text-muted-foreground">
+            Ver os planos
+          </Link>
+        </Card>
       </div>
     );
   }
@@ -131,13 +194,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <GuildBadge tag={guild?.tag ?? "W"} iconUrl={guild?.iconUrl} size={38} />
           <div className="min-w-0">
             <p className="m-0 truncate text-sm font-semibold">{guild?.name}</p>
-            <p className="m-0 truncate text-xs text-muted-foreground">plano {guild?.plan}</p>
+            <p className="m-0 truncate text-xs text-muted-foreground">
+              {guild?.online} online · plano {guild?.plan}
+            </p>
           </div>
         </header>
         <div className="flex-1 overflow-y-auto px-2 pt-3">
           <NavList />
         </div>
-        {owner ? (
+        {isOwner ? (
           <div className="border-t border-border p-2">
             <Link
               to="/admin"
@@ -180,7 +245,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
           <span className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">{user.globalName}</span>
-          <Link to="/entrar" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="Sair">
+          <Link to="/" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="Sair">
             <LogOut className="size-4" />
           </Link>
         </header>

@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1,
+    "guildId": "1014633471790022667",
+    "channelId": "1555080343768408115",
+    "openerId": "928871447940710480",
+    "department": "Compras",
+    "status": "closed",
+    "claimedBy": "928871447940710480",
+    "createdAt": "2026-10-01T04:54:06.102Z",
+    "claimedAt": "2026-10-01T04:54:15.118Z",
+    "closedAt": "2026-10-01T04:54:19.129Z",
+    "closedBy": "928871447940710480",
+    "feedback": null
+  }
+]

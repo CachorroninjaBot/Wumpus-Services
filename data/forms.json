@@ -1,0 +1,24 @@
+[
+  {
+    "id": 1,
+    "guildId": "1014633471790022667",
+    "userId": "928871447940710480",
+    "questions": [
+      "Qual o seu nome ou apelido?",
+      "Por que quer fazer parte da equipe?",
+      "Qual a sua experiência relevante?"
+    ],
+    "answers": [
+      "aaaaaaaaaaaaaaaa",
+      "aaaaaaaaaaaaaa",
+      "aaaaaaaaaaaaaaaa"
+    ],
+    "status": "pending",
+    "reviewedBy": null,
+    "reviewReason": null,
+    "reviewedAt": null,
+    "createdAt": "2026-10-01T04:56:38.557Z",
+    "channelId": null,
+    "messageId": null
+  }
+]

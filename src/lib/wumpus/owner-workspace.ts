@@ -1,5 +1,21 @@
+/**
+ * Monta o workspace de quem entrou com Discord.
+ *
+ * O que este arquivo fazia de errado, e que deixava o painel sem qualquer
+ * checagem:
+ *   - `isAdmin: true` para todo mundo → qualquer login virava admin;
+ *   - `plan: "pro"` fixo → todo servidor vinha com o plano pago liberado;
+ *   - `installed: true` fixo → servidor sem o bot aparecia como instalado;
+ *   - licencas todas `"active"` → nada refletia assinatura real.
+ *
+ * Agora quem decide e `resolveEntitlements`, e aqui so montamos o estado a
+ * partir dessa decisao. Se a pessoa nao tem assinatura ativa, ela entra com a
+ * lista de servidores VAZIA — nao com tudo liberado.
+ */
 import { defaultsFor, type ModuleKey } from "./defaults";
-import type { Guild, GuildModules, SessionUser } from "./types";
+import type { Entitlements } from "./entitlements";
+import { planById } from "./catalog";
+import type { Guild, GuildModules, License, SessionUser } from "./types";
 
 const MODULES: ModuleKey[] = [
   "servers",
@@ -28,18 +44,30 @@ export type DiscordGuildLite = {
   iconUrl?: string | null;
 };
 
-export function buildOwnerWorkspace(
-  user: { id: string; username: string; globalName: string },
+export function buildWorkspace(
+  user: { id: string; username: string; globalName: string; avatar?: string | null },
   guilds: DiscordGuildLite[],
+  entitlements: Entitlements,
 ) {
-  const list: Guild[] = (guilds.length ? guilds : [{ id: user.id, name: user.globalName, owner: true }]).map((g) => ({
+  // So os servidores que passaram na checagem: bot presente + pessoa administra
+  // + dentro do limite do plano.
+  const allowed = new Set(entitlements.guildIds);
+  const entitled = guilds.filter((g) => allowed.has(g.id));
+
+  // O plano aplicado a cada servidor e o plano REAL da assinatura. Sem
+  // assinatura (`plan === null`) nao ha servidor, entao o fallback so cobre o
+  // caso do dono, que ja vem com "escala" resolvido.
+  const plan = entitlements.plan ?? "essencial";
+
+  const list: Guild[] = entitled.map((g) => ({
     id: g.id,
     name: g.name,
     tag: g.name.slice(0, 2).toUpperCase(),
     memberCount: 0,
     online: 0,
-    plan: "pro" as const,
+    plan,
     preset: "community" as const,
+    // Chegou aqui porque o bot esta no servidor — isso ja foi verificado.
     installed: true,
     region: "Discord",
     iconUrl: g.iconUrl ?? null,
@@ -65,29 +93,44 @@ export function buildOwnerWorkspace(
     id: user.id,
     username: user.username,
     globalName: user.globalName,
-    isAdmin: true,
+    // A unica fonte de verdade do admin: o id do dono da plataforma.
+    isAdmin: entitlements.isOwner,
     signedIn: true,
+    avatar: user.avatar ?? null,
   };
 
+  const licenses: License[] = list.map((g) => ({
+    id: `lic-${g.id}`,
+    guildName: g.name,
+    plan,
+    seats: 5,
+    expires: "—",
+    status: "active" as const,
+  }));
+
+  const first = list[0];
+
   return {
-    activeGuildId: list[0]!.id,
+    activeGuildId: first?.id ?? "",
     guilds: list,
-    members: [
-      {
-        id: user.id,
-        guildId: list[0]!.id,
-        username: user.username,
-        displayName: user.globalName,
-        hue: 262,
-        roleIds: [`owner-${list[0]!.id}`],
-        joinedAt: Date.now(),
-        strikes: 0,
-        status: "online" as const,
-        accountCreatedAt: Date.now(),
-        timedOutUntil: null,
-        banned: false,
-      },
-    ],
+    members: first
+      ? [
+          {
+            id: user.id,
+            guildId: first.id,
+            username: user.username,
+            displayName: user.globalName,
+            hue: 262,
+            roleIds: [`owner-${first.id}`],
+            joinedAt: Date.now(),
+            strikes: 0,
+            status: "online" as const,
+            accountCreatedAt: Date.now(),
+            timedOutUntil: null,
+            banned: false,
+          },
+        ]
+      : [],
     tickets: [],
     formQuestions,
     submissions: [],
@@ -97,30 +140,30 @@ export function buildOwnerWorkspace(
     articles: [],
     logs: [
       {
-        id: `l-login`,
-        guildId: list[0]!.id,
+        id: "l-login",
+        guildId: first?.id ?? "",
         at: Date.now(),
         actor: user.globalName,
         category: "auth",
-        summary: "Entrou com Discord. Workspace do dono.",
+        summary: entitlements.isOwner
+          ? "Entrou com Discord. Acesso de dono da plataforma."
+          : `Entrou com Discord. ${entitlements.planName ?? "Sem assinatura"} · ${list.length} servidor(es).`,
       },
     ],
     modules,
     channels,
     roles,
     dashboardMembers: [{ id: user.id, username: user.username, role: "owner" as const, addedAt: Date.now() }],
-    licenses: list.map((g) => ({
-      id: `lic-${g.id}`,
-      guildName: g.name,
-      plan: "pro" as const,
-      seats: 5,
-      expires: "2027-12-31",
-      status: "active" as const,
-    })),
+    licenses,
     posts: [],
     publishQueue: [],
     recentMessages: [],
     sessionUser,
     theme: "dark" as const,
   };
+}
+
+/** Nome do plano para exibir, sem o prefixo comercial. */
+export function planLabel(entitlements: Entitlements): string {
+  return entitlements.plan ? planById(entitlements.plan).name : "Sem assinatura";
 }

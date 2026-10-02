@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AppRouteImport } from './routes/app'
+import { Route as EntrarRouteImport } from './routes/entrar'
 import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AppFormsRouteImport } from './routes/app/forms'
 import { Route as AppKnowledgeRouteImport } from './routes/app/knowledge'
@@ -22,6 +23,7 @@ import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppStaffRouteImport } from './routes/app/staff'
 import { Route as AppStatsRouteImport } from './routes/app/stats'
 import { Route as AppTicketsRouteImport } from './routes/app/tickets'
+import { Route as AuthDiscordCallbackRouteImport } from './routes/auth.discord.callback'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -36,6 +38,11 @@ const AdminRoute = AdminRouteImport.update({
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EntrarRoute = EntrarRouteImport.update({
+  id: '/entrar',
+  path: '/entrar',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -88,11 +95,17 @@ const AppTicketsRoute = AppTicketsRouteImport.update({
   path: '/tickets',
   getParentRoute: () => AppRoute,
 } as any)
+const AuthDiscordCallbackRoute = AuthDiscordCallbackRouteImport.update({
+  id: '/auth/discord/callback',
+  path: '/auth/discord/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/app': typeof AppRouteWithChildren
+  '/entrar': typeof EntrarRoute
   '/app/forms': typeof AppFormsRoute
   '/app/knowledge': typeof AppKnowledgeRoute
   '/app/logs': typeof AppLogsRoute
@@ -103,10 +116,12 @@ export interface FileRoutesByFullPath {
   '/app/stats': typeof AppStatsRoute
   '/app/tickets': typeof AppTicketsRoute
   '/app/': typeof AppIndexRoute
+  '/auth/discord/callback': typeof AuthDiscordCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/entrar': typeof EntrarRoute
   '/app/forms': typeof AppFormsRoute
   '/app/knowledge': typeof AppKnowledgeRoute
   '/app/logs': typeof AppLogsRoute
@@ -117,12 +132,14 @@ export interface FileRoutesByTo {
   '/app/stats': typeof AppStatsRoute
   '/app/tickets': typeof AppTicketsRoute
   '/app': typeof AppIndexRoute
+  '/auth/discord/callback': typeof AuthDiscordCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/app': typeof AppRouteWithChildren
+  '/entrar': typeof EntrarRoute
   '/app/forms': typeof AppFormsRoute
   '/app/knowledge': typeof AppKnowledgeRoute
   '/app/logs': typeof AppLogsRoute
@@ -133,6 +150,7 @@ export interface FileRoutesById {
   '/app/stats': typeof AppStatsRoute
   '/app/tickets': typeof AppTicketsRoute
   '/app/': typeof AppIndexRoute
+  '/auth/discord/callback': typeof AuthDiscordCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -140,6 +158,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/app'
+    | '/entrar'
     | '/app/forms'
     | '/app/knowledge'
     | '/app/logs'
@@ -150,10 +169,12 @@ export interface FileRouteTypes {
     | '/app/stats'
     | '/app/tickets'
     | '/app/'
+    | '/auth/discord/callback'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/admin'
+    | '/entrar'
     | '/app/forms'
     | '/app/knowledge'
     | '/app/logs'
@@ -164,11 +185,13 @@ export interface FileRouteTypes {
     | '/app/stats'
     | '/app/tickets'
     | '/app'
+    | '/auth/discord/callback'
   id:
     | '__root__'
     | '/'
     | '/admin'
     | '/app'
+    | '/entrar'
     | '/app/forms'
     | '/app/knowledge'
     | '/app/logs'
@@ -179,12 +202,15 @@ export interface FileRouteTypes {
     | '/app/stats'
     | '/app/tickets'
     | '/app/'
+    | '/auth/discord/callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AppRoute: typeof AppRouteWithChildren
+  EntrarRoute: typeof EntrarRoute
+  AuthDiscordCallbackRoute: typeof AuthDiscordCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -208,6 +234,13 @@ declare module '@tanstack/react-router' {
       path: '/app'
       fullPath: '/app'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/entrar': {
+      id: '/entrar'
+      path: '/entrar'
+      fullPath: '/entrar'
+      preLoaderRoute: typeof EntrarRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/': {
@@ -280,6 +313,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTicketsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/auth/discord/callback': {
+      id: '/auth/discord/callback'
+      path: '/auth/discord/callback'
+      fullPath: '/auth/discord/callback'
+      preLoaderRoute: typeof AuthDiscordCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -315,6 +355,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AppRoute: AppRouteWithChildren,
+  EntrarRoute: EntrarRoute,
+  AuthDiscordCallbackRoute: AuthDiscordCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

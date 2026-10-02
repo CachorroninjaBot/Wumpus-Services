@@ -2,6 +2,9 @@ import { create } from "zustand";
 import { uid } from "@/lib/utils";
 import { channelNameFor, effectiveStrikes, evaluateNuke, evaluateRaid, nextModerationAction, planAllows, renderTemplate, scanBurst, scanMessage, shouldAutoClose } from "./engine";
 import { defaultsFor, presets, type ModuleKey, type PresetId } from "./defaults";
+import { mergeModuleDefaults } from "./merge-modules";
+import { publishGuildRuntime, requestPanelPublish } from "./runtime-store";
+import { isPlatformOwner } from "./owner";
 import type { PlanId } from "./catalog";
 import { normalizePlan } from "./catalog";
 import { cloneSeed, DEMO_GUILD } from "./seed";
@@ -30,6 +33,23 @@ import type {
   TicketPriority,
   TicketStatus,
 } from "./types";
+
+/**
+ * Campo configurável do formulário.
+ *
+ * Este e o formato que o BOT le (`config.fields`). A dashboard precisa gravar
+ * exatamente isto: antes gravava `config.questions`, e como `fields` passou a
+ * existir no padrao, o bot ignorava o editor inteiro — a tela virava decoracao,
+ * que e justamente o defeito que o painel tinha.
+ */
+export type FormFieldConfig = {
+  id: string;
+  label: string;
+  type: "short" | "paragraph" | "select";
+  required: boolean;
+  options: string[];
+  maxLength: number;
+};
 
 const KEY = "wumpus-demo-v2";
 
@@ -83,6 +103,7 @@ type Actions = {
   setTicketPriority: (id: string, priority: TicketPriority) => void;
   setTicketTags: (id: string, tags: string[]) => void;
   setQuestions: (questions: FormQuestion[]) => void;
+  setFormFields: (fields: FormFieldConfig[]) => void;
   submitForm: (userId: string, answers: Record<string, string>) => { ok: true } | { ok: false; error: string };
   reviewForm: (id: string, status: Exclude<SubmissionStatus, "pending">, reason: string, reviewerId: string) => { ok: true } | { ok: false; error: string };
   setSubmissionAiNote: (id: string, note: string) => void;
@@ -147,9 +168,55 @@ function persist(slice: PersistSlice) {
 }
 
 export const useWumpus = create<WumpusStore>((set, get) => {
+  /** Ultimo objeto de módulos publicado — evita republicar sem mudança real. */
+  let publishedModules: unknown = null;
+
+  /**
+   * Publica a config do servidor ativo para o bot ler.
+   *
+   * O bot é outro processo: sem esta publicação ele nunca vê o que o painel
+   * salva, e todo campo vira decoração. Falha de rede aqui não pode quebrar a
+   * interface — o painel segue funcionando e tenta de novo na próxima mudança.
+   */
+  const publishModules = (state: WumpusStore) => {
+    if (state.modules === publishedModules) return;
+    publishedModules = state.modules;
+
+    const guildId = state.activeGuildId;
+    const modules = state.modules[guildId];
+    if (!guildId || !modules) return;
+
+    const payload: Record<string, Record<string, unknown>> = {};
+    for (const [key, value] of Object.entries(modules)) {
+      if (!value) continue;
+      // `enabled` vai junto: desligar um módulo no painel tem de pará-lo no bot.
+      payload[key] = { ...(value.config ?? {}), enabled: value.enabled !== false };
+    }
+
+    void publishGuildRuntime({
+      data: {
+        guildId,
+        name: state.guilds.find((g) => g.id === guildId)?.name,
+        modules: payload,
+        // A base de conhecimento vai junto: o bot busca nela para responder.
+        articles: state.articles
+          .filter((article) => article.guildId === guildId)
+          .map((article) => ({
+            id: article.id,
+            title: article.title,
+            body: article.body,
+            tags: article.tags,
+            approved: article.approved,
+          })),
+      },
+    }).catch(() => undefined);
+  };
+
   const write = (partial: Partial<PersistSlice> | ((s: WumpusStore) => Partial<PersistSlice>)) => {
     set(partial);
-    persist(pick(get()));
+    const state = get();
+    persist(pick(state));
+    publishModules(state);
   };
 
   const audit = (category: string, summary: string, actor?: string) => {
@@ -188,17 +255,38 @@ export const useWumpus = create<WumpusStore>((set, get) => {
             const base = seedSlice();
             const guilds = (parsed.guilds ?? base.guilds).map((g) => ({ ...g, plan: normalizePlan(g.plan) }));
             const licenses = (parsed.licenses ?? base.licenses).map((l) => ({ ...l, plan: normalizePlan(l.plan) }));
+
+            // Sessao salva antes desta correcao traz `isAdmin: true` para todo
+            // mundo. Revalidar aqui e o que impede um login antigo de continuar
+            // entrando na area restrita — sem isso a correcao so valeria para
+            // quem entrasse de novo.
+            const stored = parsed.sessionUser ?? base.sessionUser;
+            const sessionUser = {
+              ...stored,
+              isAdmin: isPlatformOwner(stored.id),
+            };
+
+            // Os defaults entram POR BAIXO do que esta salvo. Sem isto, chave
+            // de padrao adicionada depois nunca chega a um workspace existente
+            // — foi o que aconteceu com `fields` no formulario.
+            const modules = mergeModuleDefaults({ ...base.modules, ...(parsed.modules ?? {}) });
+
             set({
               ...base,
               ...parsed,
               guilds,
               licenses,
+              modules,
+              sessionUser,
               posts: parsed.posts ?? [],
               publishQueue: parsed.publishQueue ?? [],
               recentMessages: parsed.recentMessages ?? [],
               hydrated: true,
             });
             document.documentElement.dataset.theme = parsed.theme ?? "dark";
+            // Config ja salva no navegador tambem precisa chegar ao bot, mesmo
+            // sem o usuario editar nada nesta sessao.
+            publishModules(get());
             return;
           }
         }
@@ -207,6 +295,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       }
       document.documentElement.dataset.theme = "dark";
       set({ hydrated: true });
+      publishModules(get());
     },
 
     resetDemo: () => {
@@ -224,7 +313,14 @@ export const useWumpus = create<WumpusStore>((set, get) => {
 
     setActiveGuild: (id) => write({ activeGuildId: id }),
 
-    setAdmin: (on) => write({ sessionUser: { ...get().sessionUser, isAdmin: on } }),
+    // `isAdmin` nao pode ser ligado por qualquer um: so o dono da plataforma.
+    // Sem esta trava, bastava chamar setAdmin(true) (ou editar o estado salvo)
+    // para abrir a area restrita.
+    setAdmin: (on) => {
+      const current = get().sessionUser;
+      if (on && !isPlatformOwner(current.id)) return;
+      write({ sessionUser: { ...current, isAdmin: on && isPlatformOwner(current.id) } });
+    },
 
     updateConfig: (module, patch) => {
       const state = get();
@@ -497,6 +593,39 @@ export const useWumpus = create<WumpusStore>((set, get) => {
         },
       });
       audit("forms", "Perguntas do formulário atualizadas.");
+    },
+
+    // Grava `config.fields` — o MESMO caminho que o bot le.
+    //
+    // Este metodo existe porque o editor da dashboard gravava so
+    // `config.questions`: enquanto `fields` nao existia, o bot caia no
+    // fallback e a tela funcionava por acidente. Assim que `fields` entrou no
+    // padrao, o editor passou a nao ter efeito nenhum.
+    setFormFields: (fields) => {
+      const state = get();
+      const forms = cfg("forms");
+
+      write({
+        modules: {
+          ...state.modules,
+          [state.activeGuildId]: {
+            ...state.modules[state.activeGuildId],
+            forms: { ...forms, config: { ...forms.config, fields } },
+          },
+        },
+        // `formQuestions` segue em sincronia para a previa e a simulacao, que
+        // trabalham com a lista simples de rotulos.
+        formQuestions: {
+          ...state.formQuestions,
+          [state.activeGuildId]: fields.map((field) => ({
+            id: field.id,
+            label: field.label,
+            required: field.required,
+          })),
+        },
+      });
+
+      audit("forms", "Formulário atualizado.");
     },
 
     submitForm: (userId, answers) => {
@@ -786,6 +915,10 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       const state = get();
       const mod = cfg(kind);
       const title = String(mod.config.panelTitle ?? kind);
+      const channelRef = String(
+        kind === "tickets" ? mod.config.panelChannelId ?? "ch_atendimento" : mod.config.reviewChannelId ?? "ch_forms",
+      );
+
       const job: PublishJob = {
         id: uid("j"),
         guildId: state.activeGuildId,
@@ -795,7 +928,22 @@ export const useWumpus = create<WumpusStore>((set, get) => {
         at: Date.now(),
       };
       write({ publishQueue: [job, ...state.publishQueue].slice(0, 40) });
-      audit("servers", `Painel de ${kind} entrou na fila: ${title}.`);
+      audit("servers", `Painel de ${kind} enviado para publicação: ${title}.`);
+
+      // O pedido real vai para a fila que o BOT le. Sem isto, "publicar" so
+      // escrevia no estado local e nada chegava ao Discord.
+      void requestPanelPublish({
+        data: { guildId: state.activeGuildId, target: kind, channelRef },
+      })
+        .then((result) => {
+          if (!result.ok) return;
+          write({
+            publishQueue: get().publishQueue.map((entry) =>
+              entry.id === job.id ? { ...entry, status: "published" as const } : entry,
+            ),
+          });
+        })
+        .catch(() => undefined);
     },
 
     processQueue: () => {
@@ -974,6 +1122,10 @@ export const useWumpus = create<WumpusStore>((set, get) => {
 
     setPlan: (plan) => {
       const state = get();
+      // Só o dono troca plano por aqui. O cliente muda de plano pagando na
+      // ShardPay — sem esta trava, o botao da tela de servidor dava Escala de
+      // graca a qualquer sessao.
+      if (!isPlatformOwner(state.sessionUser.id)) return;
       write({
         guilds: state.guilds.map((g) => (g.id === state.activeGuildId ? { ...g, plan } : g)),
         licenses: state.licenses.map((l) => {
@@ -990,8 +1142,29 @@ export function useGuildId() {
   return useWumpus((s) => s.activeGuildId);
 }
 
-export function useActiveGuild() {
-  return useWumpus((s) => s.guilds.find((g) => g.id === s.activeGuildId) ?? s.guilds[0]!);
+/**
+ * Servidor neutro para quando a sessao nao tem nenhum liberado.
+ *
+ * Existe porque lista vazia passou a ser um estado LEGITIMO: sem assinatura
+ * ativa, ou com o bot em nenhum servidor que a pessoa administre. Antes o
+ * codigo fazia `s.guilds[0]!` — uma assercao que mente, porque com a lista
+ * vazia o valor e `undefined` e qualquer acesso a `guild.plan` estourava.
+ */
+const NO_GUILD: Guild = {
+  id: "",
+  name: "Nenhum servidor",
+  tag: "--",
+  memberCount: 0,
+  online: 0,
+  plan: "essencial",
+  preset: "community",
+  installed: false,
+  region: "—",
+  iconUrl: null,
+};
+
+export function useActiveGuild(): Guild {
+  return useWumpus((s) => s.guilds.find((g) => g.id === s.activeGuildId) ?? s.guilds[0] ?? NO_GUILD);
 }
 
 export function useModule(module: ModuleKey) {

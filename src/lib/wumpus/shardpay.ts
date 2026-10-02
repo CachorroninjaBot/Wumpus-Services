@@ -89,7 +89,11 @@ function offline(): BillingSnapshot {
   };
 }
 
-export const getBilling = createServerFn({ method: "GET" }).handler(async (): Promise<BillingSnapshot> => {
+/**
+ * Le assinaturas e planos da ShardPay. Funcao plana para que o handler de
+ * sessao possa chamar sem aninhar `createServerFn`.
+ */
+export async function loadBilling(): Promise<BillingSnapshot> {
   const key = await apiKey();
   if (!key) return { ...offline(), error: "Chave da ShardPay não configurada neste ambiente." };
   try {
@@ -180,4 +184,7 @@ export const getBilling = createServerFn({ method: "GET" }).handler(async (): Pr
   } catch (error) {
     return { ...offline(), error: error instanceof Error ? error.message : "Falha ao falar com a ShardPay." };
   }
-});
+}
+
+/** Porta de entrada do cliente. */
+export const getBilling = createServerFn({ method: "GET" }).handler(async () => loadBilling());

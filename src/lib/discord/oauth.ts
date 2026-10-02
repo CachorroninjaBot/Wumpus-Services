@@ -31,9 +31,15 @@ export const getDiscordLoginUrl = createServerFn({ method: "GET" }).handler(asyn
   return { ok: true as const, url: discordAuthorizeUrl(state), state };
 });
 
-export const exchangeDiscordCode = createServerFn({ method: "POST" })
-  .validator((input: { code: string }) => input)
-  .handler(async ({ data }) => {
+/**
+ * Troca o `code` do Discord pelos dados do usuario.
+ *
+ * Fica como funcao comum exportada para que OUTRO handler de servidor possa
+ * reaproveitar — o de sessao precisa disto para assinar o token com dados que
+ * vieram do Discord, nunca do navegador. O `createServerFn` abaixo e so a
+ * porta de entrada do cliente.
+ */
+export async function exchangeDiscordCodeDirect(code: string) {
     const secret = CLIENT_SECRET();
     if (!secret) return { ok: false as const, error: "DISCORD_CLIENT_SECRET ausente." };
 
@@ -41,7 +47,7 @@ export const exchangeDiscordCode = createServerFn({ method: "POST" })
       client_id: CLIENT_ID(),
       client_secret: secret,
       grant_type: "authorization_code",
-      code: data.code,
+      code,
       redirect_uri: REDIRECT_URI(),
     });
 
@@ -96,4 +102,9 @@ export const exchangeDiscordCode = createServerFn({ method: "POST" })
         iconUrl: discordIconUrl(g.id, g.icon),
       })),
     };
-  });
+}
+
+/** Porta de entrada do cliente para a troca do code. */
+export const exchangeDiscordCode = createServerFn({ method: "POST" })
+  .validator((input: { code: string }) => input)
+  .handler(async ({ data }) => exchangeDiscordCodeDirect(data.code));

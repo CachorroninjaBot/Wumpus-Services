@@ -1,0 +1,54 @@
+[
+  {
+    "guildId": "1014633471790022667",
+    "module": "tickets",
+    "eventType": "ticket_opened",
+    "actorId": "928871447940710480",
+    "channelId": "1555080343768408115",
+    "severity": "info",
+    "id": 1,
+    "at": "2026-10-01T04:54:06.457Z"
+  },
+  {
+    "guildId": "1014633471790022667",
+    "module": "tickets",
+    "eventType": "ticket_claimed",
+    "actorId": "928871447940710480",
+    "severity": "info",
+    "id": 2,
+    "at": "2026-10-01T04:54:15.121Z"
+  },
+  {
+    "guildId": "1014633471790022667",
+    "module": "tickets",
+    "eventType": "ticket_closed",
+    "actorId": "928871447940710480",
+    "channelId": "1555080343768408115",
+    "severity": "info",
+    "id": 3,
+    "at": "2026-10-01T04:54:19.563Z"
+  },
+  {
+    "guildId": "1014633471790022667",
+    "module": "forms",
+    "eventType": "form_submitted",
+    "actorId": "928871447940710480",
+    "severity": "info",
+    "id": 4,
+    "at": "2026-10-01T04:56:38.693Z"
+  },
+  {
+    "guildId": "1014633471790022667",
+    "module": "automod",
+    "eventType": "automod_convite",
+    "targetId": "928871447940710480",
+    "channelId": "1395276277593935884",
+    "severity": "info",
+    "data": {
+      "rule": "convite",
+      "action": "delete"
+    },
+    "id": 5,
+    "at": "2026-10-01T04:57:52.990Z"
+  }
+]

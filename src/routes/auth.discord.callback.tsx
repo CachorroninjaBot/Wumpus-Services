@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { exchangeDiscordCode } from "@/lib/discord/oauth";
-import { buildOwnerWorkspace } from "@/lib/wumpus/owner-workspace";
+import { buildWorkspace } from "@/lib/wumpus/owner-workspace";
+import { resolveAccess, startSession } from "@/lib/wumpus/session";
+import { SESSION_TOKEN_KEY } from "@/lib/wumpus/session-token";
 
 const KEY = "wumpus-demo-v2";
 
@@ -27,17 +28,43 @@ function CallbackPage() {
       setMsg("Código ausente.");
       return;
     }
-    void exchangeDiscordCode({ data: { code } }).then((res) => {
-      if (!res.ok) {
-        setMsg(res.error);
+
+    void (async () => {
+      // O servidor troca o code e ASSINA a identidade. Daqui em diante o
+      // `userId` vem do token, nao do navegador.
+      const started = await startSession({ data: { code } });
+      if (!started.ok) {
+        setMsg(started.error);
         return;
       }
-      const slice = buildOwnerWorkspace(res.user, res.guilds);
+
+      localStorage.setItem(SESSION_TOKEN_KEY, started.token);
+      setMsg("Verificando assinatura e servidores…");
+
+      // O direito e resolvido no servidor: plano pago, bot presente e posse do
+      // servidor sao conferidos la, a cada login.
+      const access = await resolveAccess({ data: { token: started.token } });
+      if (!access.ok) {
+        setMsg(access.error);
+        return;
+      }
+
+      const slice = buildWorkspace(
+        {
+          id: access.session.id,
+          username: access.session.username,
+          globalName: access.session.globalName,
+          avatar: access.session.avatar,
+        },
+        access.guilds,
+        access.entitlements,
+      );
+
       localStorage.setItem(KEY, JSON.stringify(slice));
       localStorage.removeItem("wumpus-demo-v1");
       navigate({ to: "/app" });
-    });
+    })();
   }, [code, error, navigate]);
 
-  return <main className="grid min-h-dvh place-items-center bg-background text-muted-foreground">{msg}</main>;
+  return <main className="grid min-h-dvh place-items-center bg-muted-foreground">{msg}</main>;
 }

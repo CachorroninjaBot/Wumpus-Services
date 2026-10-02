@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 8080",
-    "build": "vite build && node scripts/sync-public.mjs && node scripts/migrate.mjs",
+    "build": "vite build && node scripts/sync-public.mjs && node scripts/migrate.mjs && node scripts/typecheck-report.mjs && node scripts/test-report.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "start": "node scripts/start.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
@@ -16,8 +16,10 @@
     "preview:restart": "node scripts/preview.mjs restart",
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
-    "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts",
+    "typecheck:report": "node scripts/typecheck-report.mjs",
+    "test": "node --experimental-strip-types --test src/bot/*.test.ts",
+    "test:report": "node scripts/test-report.mjs",
+    "verify": "npm run typecheck && npm run test",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

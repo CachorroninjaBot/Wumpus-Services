@@ -62,6 +62,35 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
       "Por que quer fazer parte da equipe?",
       "Qual a sua experiência relevante?",
     ],
+    // Formulario profissional: `fields` e o formato que o BOT le — aceita
+    // escolha (vira menu), texto curto e texto longo. `questions` fica como
+    // compatibilidade para quem ja configurou antes desta versao.
+    fields: [
+      {
+        id: "assunto",
+        label: "Assunto",
+        type: "select",
+        required: true,
+        options: ["Dúvida", "Denúncia", "Parceria"],
+        maxLength: 500,
+      },
+      {
+        id: "nome",
+        label: "Qual o seu nome ou apelido?",
+        type: "short",
+        required: true,
+        options: [],
+        maxLength: 100,
+      },
+      {
+        id: "motivo",
+        label: "Por que quer fazer parte da equipe?",
+        type: "paragraph",
+        required: true,
+        options: [],
+        maxLength: 1000,
+      },
+    ],
   },
   moderation: {
     logChannelId: "ch_mod",

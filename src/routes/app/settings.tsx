@@ -9,6 +9,7 @@ import { renderTemplate, asString } from "@/lib/wumpus/engine";
 import { plans as fallbackPlans, type PlanId } from "@/lib/wumpus/brand";
 import { planById, serverLimit } from "@/lib/wumpus/catalog";
 import { useBilling } from "@/lib/wumpus/use-billing";
+import { isPlatformOwner } from "@/lib/wumpus/owner";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 
 export const Route = createFileRoute("/app/settings")({ component: SettingsPage });
@@ -28,6 +29,10 @@ function SettingsPage() {
   const members = useGuildMembers();
   const posts = useWumpus((s) => s.posts).filter((p) => p.guildId === gid);
   const setPlan = useWumpus((s) => s.setPlan);
+  const sessionUser = useWumpus((s) => s.sessionUser);
+  // Trocar de plano pela interface e poder de dono (ferramenta de suporte).
+  // Cliente so muda de plano pagando: o botao vira link de checkout.
+  const isOwner = isPlatformOwner(sessionUser.id);
   const simulateJoin = useWumpus((s) => s.simulateJoin);
   const sample = members[0];
   const preview = renderTemplate(asString(servers.config.joinMessage), {
@@ -67,15 +72,23 @@ function SettingsPage() {
                 <p className="m-0 text-xs text-muted-foreground">{plan.price}</p>
               </div>
               {guild.plan === plan.id ? <Badge tone="ok">deste servidor</Badge> : null}
-              <Button size="sm" variant="outline" onClick={() => setPlan(plan.id as PlanId)}>
-                Aplicar
-              </Button>
+              {isOwner ? (
+                <Button size="sm" variant="outline" onClick={() => setPlan(plan.id as PlanId)}>
+                  Aplicar
+                </Button>
+              ) : null}
               <a href={plan.checkoutUrl} target="_blank" rel="noreferrer" className="text-sm text-primary">
-                Checkout
+                Assinar
               </a>
             </div>
           ))}
         </div>
+        {!isOwner ? (
+          <p className="m-0 text-xs text-muted-foreground">
+            O plano deste servidor acompanha a sua assinatura na ShardPay. Para mudar, assine outro plano — a
+            liberação é automática.
+          </p>
+        ) : null}
         <div>
           <p className="m-0 text-sm font-medium">Assinaturas na loja</p>
           {billing.data?.subscriptions.length ? (

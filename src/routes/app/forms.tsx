@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { analyzeWithGrok } from "@/lib/wumpus/analyze";
 import { asString, planAllows } from "@/lib/wumpus/engine";
 import { uid } from "@/lib/utils";
-import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
+import { useActiveGuild, useGuildMembers, useModule, useWumpus, type FormFieldConfig } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -36,6 +36,30 @@ function FormsPage() {
   const publishPanel = useWumpus((s) => s.publishPanel);
   const formsAllowed = planAllows(guild.plan, "forms");
   const aiAllowed = planAllows(guild.plan, "ai") && Boolean(fcfg.config.useAiPreReview);
+
+  // Campos do formulário: a fonte de verdade é `config.fields` — o mesmo que o
+  // bot lê. O fallback converte a lista antiga de perguntas, para não perder
+  // quem já tinha configurado antes desta versão.
+  const storedFields = Array.isArray(fcfg.config.fields) ? (fcfg.config.fields as FormFieldConfig[]) : [];
+  const fields: FormFieldConfig[] = storedFields.length
+    ? storedFields
+    : questions.map((q) => ({
+        id: q.id,
+        label: q.label,
+        type: "paragraph" as const,
+        required: q.required,
+        options: [],
+        maxLength: 500,
+      }));
+  const setFields = useWumpus((s) => s.setFormFields);
+  const patchField = (id: string, patch: Partial<FormFieldConfig>) =>
+    setFields(fields.map((field) => (field.id === id ? { ...field, ...patch } : field)));
+  const removeField = (id: string) => setFields(fields.filter((field) => field.id !== id));
+  const addField = () =>
+    setFields([
+      ...fields,
+      { id: uid("f"), label: "Nova pergunta", type: "paragraph", required: true, options: [], maxLength: 500 },
+    ]);
 
   const [selected, setSelected] = useState(submissions.find((s) => s.status === "pending")?.id ?? submissions[0]?.id);
   const [reason, setReason] = useState("");
@@ -172,36 +196,68 @@ function FormsPage() {
         <TabsContent value="form" className="mt-4 grid gap-4 lg:grid-cols-2">
           <Card>
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="m-0 text-base font-semibold">Perguntas do modal</h2>
+              <h2 className="m-0 text-base font-semibold">Perguntas do formulário</h2>
               <Switch checked={fcfg.enabled} onCheckedChange={(v) => setEnabled("forms", v)} />
             </div>
+            <p className="mt-0 mb-3 text-xs text-muted-foreground">
+              O Discord aceita até 5 campos de texto no modal. Campos de escolha são menus e ficam fora desse limite.
+            </p>
             <div className="space-y-3">
-              {questions.map((q, i) => (
-                <div key={q.id} className="flex gap-2">
-                  <Input
-                    value={q.label}
-                    onChange={(e) =>
-                      setQuestions(questions.map((x) => (x.id === q.id ? { ...x, label: e.target.value } : x)))
-                    }
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Remover"
-                    onClick={() => setQuestions(questions.filter((x) => x.id !== q.id))}
-                    disabled={questions.length <= 1}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                  <span className="sr-only">{i + 1}</span>
+              {fields.map((field) => (
+                <div key={field.id} className="space-y-2 rounded-xl bg-muted/40 p-3">
+                  <div className="flex gap-2">
+                    <Input
+                      value={field.label}
+                      onChange={(e) => patchField(field.id, { label: e.target.value })}
+                      placeholder="Pergunta"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Remover"
+                      onClick={() => removeField(field.id)}
+                      disabled={fields.length <= 1}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <NativeSelect
+                      value={field.type}
+                      onChange={(e) => patchField(field.id, { type: e.target.value as FormFieldConfig["type"] })}
+                      className="w-44"
+                    >
+                      <option value="short">Resposta curta</option>
+                      <option value="paragraph">Texto longo</option>
+                      <option value="select">Escolha única</option>
+                    </NativeSelect>
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Switch checked={field.required} onCheckedChange={(v) => patchField(field.id, { required: v })} />
+                      Obrigatória
+                    </label>
+                  </div>
+                  {field.type === "select" ? (
+                    <div>
+                      <Label className="text-xs">Opções (uma por linha)</Label>
+                      <Textarea
+                        className="mt-1"
+                        value={field.options.join("\n")}
+                        onChange={(e) =>
+                          patchField(field.id, {
+                            options: e.target.value
+                              .split("\n")
+                              .map((line) => line.trim())
+                              .filter(Boolean),
+                          })
+                        }
+                        placeholder={"Dúvida\nDenúncia\nParceria"}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               ))}
-              {questions.length < 5 ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setQuestions([...questions, { id: uid("q"), label: "Nova pergunta", required: true }])}
-                >
+              {fields.length < 10 ? (
+                <Button variant="outline" size="sm" onClick={addField}>
                   <Plus className="size-4" /> Pergunta
                 </Button>
               ) : null}

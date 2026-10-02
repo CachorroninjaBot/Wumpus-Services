@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { analyzeWithGrok } from "@/lib/wumpus/analyze";
 import { asList, asString, planAllows, searchArticles, shouldAutoClose, ticketSla, type SlaState } from "@/lib/wumpus/engine";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
+import { getPublishStatus, type PublishStatus } from "@/lib/wumpus/runtime-store";
 import type { Ticket, TicketPriority, TicketStatus } from "@/lib/wumpus/types";
 import { cn, formatRelative, formatTime } from "@/lib/utils";
 
@@ -58,6 +59,7 @@ function TicketsPage() {
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [pubBusy, setPubBusy] = useState(false);
 
   const list = useMemo(() => {
     return tickets
@@ -375,8 +377,35 @@ function TicketsPage() {
                 onBlur={(e) => updateConfig("tickets", { autoCloseInactiveHours: Number(e.target.value) || 0 })}
               />
             </Field>
-            <Button variant="outline" onClick={() => { publishPanel("tickets"); setNotice("Painel na fila. O admin processa a publicação."); }}>
-              Publicar painel na fila
+            <Button
+              variant="outline"
+              disabled={pubBusy}
+              onClick={async () => {
+                setPubBusy(true);
+                publishPanel("tickets");
+
+                // O bot processa a fila em ate 20s. Consulta algumas vezes
+                // para mostrar o resultado REAL, em vez de "publicado" no
+                // instante do clique — que era o defeito antigo.
+                let last: PublishStatus | null = null;
+                for (let attempt = 0; attempt < 10; attempt++) {
+                  await new Promise((resolve) => setTimeout(resolve, 2000));
+                  const rows = await getPublishStatus({ data: { guildId: gid } }).catch(() => []);
+                  last = rows[rows.length - 1] ?? null;
+                  if (last && last.status !== "queued") break;
+                }
+
+                setPubBusy(false);
+                setNotice(
+                  !last
+                    ? "Pedido enviado. O bot publica em instantes."
+                    : last.status === "done"
+                      ? `Publicado no canal "${last.channelRef}".`
+                      : `Não deu: ${last.detail ?? "motivo desconhecido"}`,
+                );
+              }}
+            >
+              {pubBusy ? "Publicando…" : "Publicar painel no Discord"}
             </Button>
             <DiscordPanel
               title={asString(tcfg.config.panelTitle)}
