@@ -1,6 +1,22 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+:root {
+  --wumpus-panel-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 40px rgba(9, 9, 12, 0.2);
+  --wumpus-border-soft: rgba(255, 255, 255, 0.08);
+  --wumpus-radius: 18px;
+  --wumpus-space-1: 0.25rem;
+  --wumpus-space-2: 0.5rem;
+  --wumpus-space-3: 0.75rem;
+  --wumpus-space-4: 1rem;
+  --wumpus-space-6: 1.5rem;
+  --wumpus-space-8: 2rem;
+  --wumpus-type-caption: 0.75rem;
+  --wumpus-type-body: 0.875rem;
+  --wumpus-type-title: 1.25rem;
+  --wumpus-type-display: 2rem;
+}
+
 @theme {
   --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -33,6 +49,9 @@
   --radius-lg: 16px;
   --radius-xl: 24px;
   --radius: 12px;
+
+  --spacing-18: 4.5rem;
+  --size-shell-width: 17.5rem;
 }
 
 html[data-theme="light"] {
@@ -50,6 +69,24 @@ html[data-theme="light"] {
   --color-input: rgba(18, 20, 26, 0.12);
 }
 
+@media (prefers-color-scheme: light) {
+  html[data-theme="system"] {
+    color-scheme: light;
+    --color-background: #f3f4f8;
+    --color-foreground: #12141a;
+    --color-card: #ffffff;
+    --color-card-foreground: #12141a;
+    --color-popover: #ffffff;
+    --color-popover-foreground: #12141a;
+    --color-secondary: #eceef4;
+    --color-secondary-foreground: #12141a;
+    --color-muted: #eceef3;
+    --color-muted-foreground: #5c6370;
+    --color-border: rgba(18, 20, 26, 0.1);
+    --color-input: rgba(18, 20, 26, 0.12);
+  }
+}
+
 @layer base {
   html {
     color-scheme: dark;
@@ -58,12 +95,17 @@ html[data-theme="light"] {
   html[data-theme="light"] {
     color-scheme: light;
   }
+  html[data-theme="system"] {
+    color-scheme: light dark;
+  }
   body {
     margin: 0;
     min-height: 100dvh;
     background: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
+    font-size: var(--wumpus-type-body);
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -77,6 +119,10 @@ html[data-theme="light"] {
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
   }
   * {
     border-color: var(--color-border);
@@ -102,6 +148,31 @@ html[data-theme="light"] .shadow-border {
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.06),
     0 1px 2px -1px rgba(0, 0, 0, 0.06);
+}
+
+.app-shell {
+  background: radial-gradient(circle at top, rgba(124, 92, 255, 0.12), transparent 32%), var(--color-background);
+}
+
+.app-surface,
+.app-bar,
+.app-page > * {
+  border-radius: var(--wumpus-radius);
+}
+
+.app-bar {
+  backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--color-card) 82%, transparent);
+}
+
+.app-page {
+  container-type: inline-size;
+}
+
+@container (max-width: 640px) {
+  .app-page {
+    padding: 0.75rem;
+  }
 }
 
 .noise {
@@ -160,7 +231,7 @@ html[data-theme="light"] .shadow-border {
   border-radius: 8px;
   background: #2b2d31;
   padding: 12px 14px 14px 16px;
-  border-left: 4px solid var(--accent, #7c5cff);
+  border-left: 1px solid rgba(124, 92, 255, 0.7);
 }
 
 .discord-btn {
@@ -183,7 +254,7 @@ html[data-theme="light"] .shadow-border {
   margin-top: 12px;
   border-radius: 12px;
   background: #2b2d31;
-  border: 1px solid color-mix(in srgb, var(--accent, #7c5cff) 70%, #2b2d31);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 12px 14px 14px;
 }
 

@@ -31,6 +31,7 @@ export type SessionPayload = {
   username: string;
   globalName: string;
   avatar: string | null;
+  mfaEnabled: boolean;
   guilds: SessionGuild[];
 };
 
@@ -44,6 +45,11 @@ const TTL = "7d";
  * um `resetDemo`) nao apaga a sessao por acidente.
  */
 export const SESSION_TOKEN_KEY = "wumpus-session-token";
+
+export function getStoredSessionToken(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(SESSION_TOKEN_KEY) ?? "";
+}
 
 /**
  * Segredo do servidor.
@@ -104,6 +110,7 @@ export async function verifySession(token: string, secret: Uint8Array): Promise<
       username: text(payload.username),
       globalName: text(payload.globalName),
       avatar: typeof payload.avatar === "string" ? payload.avatar : null,
+      mfaEnabled: payload.mfaEnabled === true,
       guilds: parseGuilds(payload.guilds),
     };
   } catch {

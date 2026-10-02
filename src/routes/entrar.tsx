@@ -30,6 +30,7 @@ function EntrarPage() {
                 setBusy(false);
                 return;
               }
+              sessionStorage.setItem("wumpus-discord-oauth-state", res.state);
               window.location.href = res.url;
             });
           }}

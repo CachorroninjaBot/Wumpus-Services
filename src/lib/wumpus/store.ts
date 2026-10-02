@@ -3,10 +3,11 @@ import { uid } from "@/lib/utils";
 import { channelNameFor, effectiveStrikes, evaluateNuke, evaluateRaid, nextModerationAction, planAllows, renderTemplate, scanBurst, scanMessage, shouldAutoClose } from "./engine";
 import { defaultsFor, presets, type ModuleKey, type PresetId } from "./defaults";
 import { mergeModuleDefaults } from "./merge-modules";
-import { publishGuildRuntime, requestPanelPublish } from "./runtime-store";
+import { publishGuildRuntime } from "./runtime-store";
 import { isPlatformOwner } from "./owner";
 import type { PlanId } from "./catalog";
 import { normalizePlan } from "./catalog";
+import { getStoredSessionToken } from "./session-token";
 import { cloneSeed, DEMO_GUILD } from "./seed";
 import type {
   Article,
@@ -74,14 +75,14 @@ type PersistSlice = {
   publishQueue: PublishJob[];
   recentMessages: RecentMessage[];
   sessionUser: SessionUser;
-  theme: "dark" | "light";
+  theme: "dark" | "light" | "system";
 };
 
 type Actions = {
   hydrated: boolean;
   hydrate: () => void;
   resetDemo: () => void;
-  setTheme: (theme: "dark" | "light") => void;
+  setTheme: (theme: "dark" | "light" | "system") => void;
   setActiveGuild: (id: string) => void;
   setAdmin: (on: boolean) => void;
   updateConfig: (module: ModuleKey, patch: Record<string, unknown>) => void;
@@ -90,8 +91,6 @@ type Actions = {
   openTicket: (input: { openerId: string; department: string; subject: string; body: string }) => { ok: true; id: string } | { ok: false; error: string };
   claimTicket: (id: string, staffId: string) => { ok: true } | { ok: false; error: string };
   sweepInactive: () => { closed: number; error?: string };
-  publishPanel: (kind: "tickets" | "forms") => void;
-  processQueue: () => number;
   simulateJoin: (input: { username: string; accountAgeHours: number }) => string;
   simulateRaid: (joins: number) => string;
   simulateNuke: (actions: number) => string;
@@ -155,7 +154,7 @@ function pick(s: PersistSlice): PersistSlice {
 
 function seedSlice(): PersistSlice {
   const s = cloneSeed();
-  return { ...s, activeGuildId: DEMO_GUILD, theme: "dark", posts: [], publishQueue: [], recentMessages: [] };
+  return { ...s, activeGuildId: DEMO_GUILD, theme: "system", posts: [], publishQueue: [], recentMessages: [] };
 }
 
 function persist(slice: PersistSlice) {
@@ -170,6 +169,7 @@ function persist(slice: PersistSlice) {
 export const useWumpus = create<WumpusStore>((set, get) => {
   /** Ultimo objeto de módulos publicado — evita republicar sem mudança real. */
   let publishedModules: unknown = null;
+  let publishedGuildId = "";
 
   /**
    * Publica a config do servidor ativo para o bot ler.
@@ -179,12 +179,14 @@ export const useWumpus = create<WumpusStore>((set, get) => {
    * interface — o painel segue funcionando e tenta de novo na próxima mudança.
    */
   const publishModules = (state: WumpusStore) => {
-    if (state.modules === publishedModules) return;
+    if (state.modules === publishedModules && state.activeGuildId === publishedGuildId) return;
     publishedModules = state.modules;
+    publishedGuildId = state.activeGuildId;
 
     const guildId = state.activeGuildId;
     const modules = state.modules[guildId];
-    if (!guildId || !modules) return;
+    const token = getStoredSessionToken();
+    if (!guildId || !modules || !token) return;
 
     const payload: Record<string, Record<string, unknown>> = {};
     for (const [key, value] of Object.entries(modules)) {
@@ -195,6 +197,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
 
     void publishGuildRuntime({
       data: {
+        token,
         guildId,
         name: state.guilds.find((g) => g.id === guildId)?.name,
         modules: payload,
@@ -209,7 +212,9 @@ export const useWumpus = create<WumpusStore>((set, get) => {
             approved: article.approved,
           })),
       },
-    }).catch(() => undefined);
+    }).catch((error: unknown) => {
+      console.error("Não foi possível sincronizar a configuração com o bot.", error);
+    });
   };
 
   const write = (partial: Partial<PersistSlice> | ((s: WumpusStore) => Partial<PersistSlice>)) => {
@@ -283,7 +288,10 @@ export const useWumpus = create<WumpusStore>((set, get) => {
               recentMessages: parsed.recentMessages ?? [],
               hydrated: true,
             });
-            document.documentElement.dataset.theme = parsed.theme ?? "dark";
+            const theme = parsed.theme === "dark" || parsed.theme === "light" || parsed.theme === "system"
+              ? parsed.theme
+              : "system";
+            document.documentElement.dataset.theme = theme;
             // Config ja salva no navegador tambem precisa chegar ao bot, mesmo
             // sem o usuario editar nada nesta sessao.
             publishModules(get());
@@ -293,7 +301,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       } catch {
         /* ignore */
       }
-      document.documentElement.dataset.theme = "dark";
+      document.documentElement.dataset.theme = "system";
       set({ hydrated: true });
       publishModules(get());
     },
@@ -302,7 +310,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       const next = seedSlice();
       write({ ...next });
       set({ hydrated: true });
-      document.documentElement.dataset.theme = "dark";
+      document.documentElement.dataset.theme = "system";
       audit("admin", "Demonstração restaurada ao estado inicial.", "Admin");
     },
 
@@ -802,7 +810,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
     toggleLockdown: () => {
       const state = get();
       const current = cfg("security");
-      const next = !Boolean(current.config.lockdown);
+      const next = current.config.lockdown !== true;
       write({
         modules: {
           ...state.modules,
@@ -909,67 +917,6 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       write({ tickets });
       audit("tickets", `Autoencerramento fechou ${closed} atendimento(s).`);
       return { closed };
-    },
-
-    publishPanel: (kind) => {
-      const state = get();
-      const mod = cfg(kind);
-      const title = String(mod.config.panelTitle ?? kind);
-      const channelRef = String(
-        kind === "tickets" ? mod.config.panelChannelId ?? "ch_atendimento" : mod.config.reviewChannelId ?? "ch_forms",
-      );
-
-      const job: PublishJob = {
-        id: uid("j"),
-        guildId: state.activeGuildId,
-        kind,
-        status: "queued",
-        detail: title,
-        at: Date.now(),
-      };
-      write({ publishQueue: [job, ...state.publishQueue].slice(0, 40) });
-      audit("servers", `Painel de ${kind} enviado para publicação: ${title}.`);
-
-      // O pedido real vai para a fila que o BOT le. Sem isto, "publicar" so
-      // escrevia no estado local e nada chegava ao Discord.
-      void requestPanelPublish({
-        data: { guildId: state.activeGuildId, target: kind, channelRef },
-      })
-        .then((result) => {
-          if (!result.ok) return;
-          write({
-            publishQueue: get().publishQueue.map((entry) =>
-              entry.id === job.id ? { ...entry, status: "published" as const } : entry,
-            ),
-          });
-        })
-        .catch(() => undefined);
-    },
-
-    processQueue: () => {
-      const state = get();
-      const pending = state.publishQueue.filter((j) => j.guildId === state.activeGuildId && j.status === "queued");
-      if (pending.length === 0) return 0;
-      const posts: ChannelPost[] = pending.map((job) => {
-        const mod = cfg(job.kind);
-        const channelId = String(job.kind === "tickets" ? mod.config.panelChannelId ?? "ch_atendimento" : mod.config.reviewChannelId ?? "ch_forms");
-        return {
-          id: uid("p"),
-          guildId: state.activeGuildId,
-          channelId,
-          author: "Wumpus",
-          content: `Painel publicado · ${String(mod.config.panelTitle ?? job.detail)}\n${String(mod.config.panelDescription ?? "")}`,
-          at: Date.now(),
-        };
-      });
-      write({
-        posts: [...posts, ...state.posts].slice(0, 60),
-        publishQueue: state.publishQueue.map((j) =>
-          j.guildId === state.activeGuildId && j.status === "queued" ? { ...j, status: "published" as const } : j,
-        ),
-      });
-      audit("servers", `Fila processada: ${pending.length} painel(is).`);
-      return pending.length;
     },
 
     simulateJoin: ({ username, accountAgeHours }) => {

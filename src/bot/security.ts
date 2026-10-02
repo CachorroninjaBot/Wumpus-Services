@@ -13,16 +13,92 @@ import { bool, isEnabled, list, moduleConfig, num, str } from "./config.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
 import { resolveChannel, resolveRoles } from "./resolve.ts";
+import { mutate, read } from "./store.ts";
 
-const raidWindows = new Map<string, { at: number }[]>();
-const nukeWindows = new Map<string, { at: number; actorId: string }[]>();
+export type SecurityWindowKind = "raid" | "nuke-ban" | "nuke-channel";
+type SecurityWindowEntry = { at: number; actorId?: string };
+type SecurityWindowRecord = {
+  guildId: string;
+  kind: SecurityWindowKind;
+  entries: SecurityWindowEntry[];
+  updatedAt: number;
+};
 
-function push(map: Map<string, { at: number }[]>, key: string, windowMs: number): number {
+const raidWindows = new Map<string, SecurityWindowEntry[]>();
+const nukeWindows = new Map<string, SecurityWindowEntry[]>();
+
+function cacheFor(kind: SecurityWindowKind): Map<string, SecurityWindowEntry[]> {
+  return kind === "raid" ? raidWindows : nukeWindows;
+}
+
+function windowKey(guildId: string, kind: SecurityWindowKind): string {
+  return `${guildId}:${kind}`;
+}
+
+async function persistWindowEntries(guildId: string, kind: SecurityWindowKind, entries: SecurityWindowEntry[]): Promise<void> {
+  await mutate<SecurityWindowRecord>("security-windows", (rows) => {
+    const record: SecurityWindowRecord = { guildId, kind, entries, updatedAt: Date.now() };
+    const index = rows.findIndex((row) => row.guildId === guildId && row.kind === kind);
+    if (index >= 0) rows[index] = record;
+    else rows.push(record);
+    return rows;
+  });
+
+  cacheFor(kind).set(windowKey(guildId, kind), entries);
+}
+
+async function loadWindowEntries(
+  guildId: string,
+  kind: SecurityWindowKind,
+  windowMs: number,
+  actorId?: string
+): Promise<SecurityWindowEntry[]> {
+  const key = windowKey(guildId, kind);
+  const cache = cacheFor(kind);
+  const cached = cache.get(key);
   const now = Date.now();
-  const kept = (map.get(key) ?? []).filter((entry) => now - entry.at <= windowMs);
-  kept.push({ at: now });
-  map.set(key, kept);
-  return kept.length;
+
+  if (cached) {
+    const filtered = cached.filter((entry) => now - entry.at <= windowMs);
+    cache.set(key, filtered);
+    if (!actorId) return filtered;
+    return filtered.filter((entry) => entry.actorId === actorId);
+  }
+
+  const rows = await read<SecurityWindowRecord>("security-windows");
+  const record = rows.find((row) => row.guildId === guildId && row.kind === kind);
+  const entries = (record?.entries ?? []).filter((entry) => now - entry.at <= windowMs);
+
+  cache.set(key, entries);
+  if (!actorId) return entries;
+  return entries.filter((entry) => entry.actorId === actorId);
+}
+
+export async function readPersistedSecurityWindow(
+  guildId: string,
+  kind: SecurityWindowKind,
+  windowMs: number,
+  actorId?: string
+): Promise<SecurityWindowEntry[]> {
+  return loadWindowEntries(guildId, kind, windowMs, actorId);
+}
+
+export async function pushPersistedSecurityWindow(
+  guildId: string,
+  kind: SecurityWindowKind,
+  windowMs: number,
+  actorId?: string
+): Promise<number> {
+  const key = windowKey(guildId, kind);
+  const now = Date.now();
+  const cache = cacheFor(kind);
+  const current = await loadWindowEntries(guildId, kind, windowMs);
+  const next = [...current, { at: now, ...(actorId ? { actorId } : {}) }].filter((entry) => now - entry.at <= windowMs);
+  const count = actorId ? next.filter((entry) => entry.actorId === actorId).length : next.length;
+
+  cache.set(key, next);
+  await persistWindowEntries(guildId, kind, next);
+  return count;
 }
 
 /**
@@ -70,12 +146,12 @@ export async function handleMemberAdd(member: GuildMember, log: Logger): Promise
 
   const threshold = Math.max(2, Math.trunc(num(config, "raidJoinThreshold", 12)));
   const windowMs = Math.max(5, Math.trunc(num(config, "raidWindowSeconds", 60))) * 1000;
-  const count = push(raidWindows, guild.id, windowMs);
+  const count = await pushPersistedSecurityWindow(guild.id, "raid", windowMs);
 
   if (count < threshold) return;
 
   // Avisa uma vez por janela, senao cada entrada seguinte repete o alerta.
-  raidWindows.set(guild.id, []);
+  await persistWindowEntries(guild.id, "raid", []);
 
   const alertChannel = resolveChannel(guild, str(config, "alertChannelId"));
   const staffRoles = resolveRoles(guild, list(config, "alertStaffRoleIds"));
@@ -183,18 +259,12 @@ export async function handleAuditLogEntry(
   if (!isBan && !isChannelDelete) return;
 
   const windowMs = Math.max(5, Math.trunc(num(config, "nukeWindowSeconds", 30))) * 1000;
-  const key = `${guild.id}:${isBan ? "ban" : "channel"}`;
   const threshold = Math.max(2, Math.trunc(num(config, "nukeActionThreshold", 5)));
+  const kind = isBan ? "nuke-ban" : "nuke-channel";
+  const count = await pushPersistedSecurityWindow(guild.id, kind, windowMs, executorId);
 
-  const now = Date.now();
-  const kept = (nukeWindows.get(key) ?? []).filter(
-    (item) => now - item.at <= windowMs && item.actorId === executorId
-  );
-  kept.push({ at: now, actorId: executorId });
-  nukeWindows.set(key, kept);
-
-  if (kept.length < threshold) return;
-  nukeWindows.set(key, []);
+  if (count < threshold) return;
+  await persistWindowEntries(guild.id, kind, []);
 
   await auditAndLog(
     guild,
@@ -205,19 +275,19 @@ export async function handleAuditLogEntry(
       actorId: executorId,
       severity: "critical",
       title: isBan ? "BANIMENTO EM MASSA" : "EXCLUSAO DE CANAIS EM MASSA",
-      description: `<@${executorId}> executou **${kept.length}** acoes em ${Math.round(windowMs / 1000)}s.`,
+      description: `<@${executorId}> executou **${count}** acoes em ${Math.round(windowMs / 1000)}s.`,
       accentColor: "#ff5c6c",
       fields: [
         { name: "Autor", value: `<@${executorId}>` },
-        { name: "Acoes", value: String(kept.length) },
+        { name: "Acoes", value: String(count) },
         { name: "Limite", value: String(threshold) }
       ],
-      data: { count: kept.length, threshold }
+      data: { count, threshold }
     },
     log
   );
 
-  log.warn("possivel nuke", { guildId: guild.id, executorId, count: kept.length, kind: isBan ? "ban" : "channel" });
+  log.warn("possivel nuke", { guildId: guild.id, executorId, count, kind: isBan ? "ban" : "channel" });
 }
 
 /** Permissao minima que o bot precisa para os modulos de seguranca funcionarem. */

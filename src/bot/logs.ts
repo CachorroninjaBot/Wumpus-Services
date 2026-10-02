@@ -12,10 +12,10 @@
  * ter efeito nem a auditoria de ser gravada.
  */
 import type { Guild } from "discord.js";
-import { bool, isEnabled, moduleConfig, str } from "./config.ts";
+import { bool, isEnabled, list, moduleConfig, str } from "./config.ts";
 import type { Logger } from "./logger.ts";
 import { buildLogPayload, type LogField } from "./panels.ts";
-import { resolveChannel } from "./resolve.ts";
+import { resolveChannel, resolveRoles } from "./resolve.ts";
 import { mutate, nextId } from "./store.ts";
 
 export type Severity = "info" | "warning" | "critical";
@@ -69,11 +69,43 @@ export async function recordAudit(input: Omit<AuditEvent, "id" | "at">): Promise
  * Publica no canal de logs, respeitando a categoria.
  * Devolve `false` quando nao havia canal, permissao ou a categoria esta desligada.
  */
+export async function shouldIgnoreLogEvent(
+  guild: Guild,
+  config: Record<string, unknown> | null,
+  details: { actorId?: string; targetId?: string; channelId?: string } = {}
+): Promise<boolean> {
+  if (!config || !isEnabled(config)) return true;
+
+  if (details.actorId && details.actorId === guild.client.user?.id && bool(config, "ignoreBotMessages", true)) {
+    return true;
+  }
+
+  const ignoredUsers = new Set(list(config, "ignoredUserIds"));
+  if (details.actorId && ignoredUsers.has(details.actorId)) return true;
+  if (details.targetId && ignoredUsers.has(details.targetId)) return true;
+
+  const ignoredMentionInChannel = list(config, "ignoredChannelIds");
+  if (details.channelId && ignoredMentionInChannel.includes(details.channelId)) return true;
+
+  const ignoredRoleIds = new Set(
+    resolveRoles(guild, list(config, "ignoredRoleIds")).map((role) => role.id)
+  );
+
+  const actorMember = details.actorId ? await guild.members.fetch(details.actorId).catch(() => null) : null;
+  const targetMember = details.targetId ? await guild.members.fetch(details.targetId).catch(() => null) : null;
+
+  if (actorMember && actorMember.roles.cache.some((role) => ignoredRoleIds.has(role.id))) return true;
+  if (targetMember && targetMember.roles.cache.some((role) => ignoredRoleIds.has(role.id))) return true;
+
+  return false;
+}
+
 export async function logToChannel(
   guild: Guild,
   category: keyof typeof CATEGORY_FLAG | string,
   payload: { title: string; description: string; accentColor?: string; fields?: LogField[] },
-  log: Logger
+  log: Logger,
+  details: { actorId?: string; targetId?: string; channelId?: string } = {}
 ): Promise<boolean> {
   try {
     const config = await moduleConfig(guild.id, "logs");
@@ -81,6 +113,7 @@ export async function logToChannel(
 
     const flag = CATEGORY_FLAG[category];
     if (flag && !bool(config, flag, true)) return false;
+    if (await shouldIgnoreLogEvent(guild, config, details)) return false;
 
     const channel = resolveChannel(guild, str(config, "channelId"));
     if (!channel || !channel.isTextBased()) return false;
@@ -132,7 +165,12 @@ export async function auditAndLog(
       accentColor: input.accentColor,
       fields: input.fields
     },
-    log
+    log,
+    {
+      actorId: input.actorId,
+      targetId: input.targetId,
+      channelId: input.channelId
+    }
   );
 }
 

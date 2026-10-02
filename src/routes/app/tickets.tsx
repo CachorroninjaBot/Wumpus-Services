@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MemberAvatar } from "@/components/brand";
 import { DiscordPanel } from "@/components/discord-panel";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { analyzeWithGrok } from "@/lib/wumpus/analyze";
 import { asList, asString, planAllows, searchArticles, shouldAutoClose, ticketSla, type SlaState } from "@/lib/wumpus/engine";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
-import { getPublishStatus, type PublishStatus } from "@/lib/wumpus/runtime-store";
+import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
 import type { Ticket, TicketPriority, TicketStatus } from "@/lib/wumpus/types";
 import { cn, formatRelative, formatTime } from "@/lib/utils";
 
@@ -42,7 +42,6 @@ function TicketsPage() {
   const setTags = useWumpus((s) => s.setTicketTags);
   const openTicket = useWumpus((s) => s.openTicket);
   const sweep = useWumpus((s) => s.sweepInactive);
-  const publishPanel = useWumpus((s) => s.publishPanel);
   const articles = useWumpus((s) => s.articles);
   const kcfg = useModule("knowledge");
   const aiAllowed = planAllows(guild.plan, "ai") && Boolean(tcfg.config.aiSupportEnabled);
@@ -50,6 +49,7 @@ function TicketsPage() {
 
   const [filter, setFilter] = useState<"active" | TicketStatus>("active");
   const [selectedId, setSelectedId] = useState<string | null>(tickets[0]?.id ?? null);
+  const [showTicketOnMobile, setShowTicketOnMobile] = useState(false);
   const [reply, setReply] = useState("");
   const [settings, setSettings] = useState(false);
   const [compose, setCompose] = useState(false);
@@ -60,6 +60,12 @@ function TicketsPage() {
   const [comment, setComment] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [pubBusy, setPubBusy] = useState(false);
+  const firstTicketId = tickets[0]?.id ?? null;
+
+  useEffect(() => {
+    setSelectedId(firstTicketId);
+    setShowTicketOnMobile(false);
+  }, [gid, firstTicketId]);
 
   const list = useMemo(() => {
     return tickets
@@ -67,7 +73,7 @@ function TicketsPage() {
       .sort((a, b) => b.createdAt - a.createdAt);
   }, [tickets, filter]);
 
-  const ticket = tickets.find((t) => t.id === selectedId) ?? list[0] ?? null;
+  const ticket = list.find((t) => t.id === selectedId) ?? list[0] ?? null;
   const memberById = (id: string) => members.find((m) => m.id === id);
 
   async function runAi(t: Ticket) {
@@ -104,9 +110,13 @@ function TicketsPage() {
           Fechar ociosos
         </Button>
         <Button size="sm" onClick={() => setCompose(true)}>
-          Abrir ticket
+          Simular ticket
         </Button>
       </div>
+
+      <p role="note" className="m-0 rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
+        Esta fila é uma demonstração local. Tickets reais são criados e atendidos pelo bot dentro do Discord; aqui você configura e publica o painel.
+      </p>
 
       {!tcfg.enabled ? (
         <p className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn">Atendimento pausado neste servidor.</p>
@@ -135,10 +145,24 @@ function TicketsPage() {
         ))}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
-        <Card className="max-h-[70vh] overflow-y-auto p-2">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
+        <Card className={cn("max-h-[70vh] overflow-y-auto p-2", showTicketOnMobile && "hidden lg:block")}>
           {list.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">Nenhum atendimento nesta vista.</p>
+            <div className="space-y-3 p-4">
+              <div>
+                <h2 className="m-0 text-base font-semibold">
+                  {tickets.length === 0 ? "Sua fila começa aqui" : "Nenhum atendimento nesta vista"}
+                </h2>
+                <p className="mt-1 mb-0 text-sm text-muted-foreground">
+                  {tickets.length === 0
+                    ? "Configure o canal e os cargos de atendimento e publique o painel no Discord para receber os primeiros tickets."
+                    : "Troque o filtro para consultar os atendimentos de outro estado."}
+                </p>
+              </div>
+              {tickets.length === 0 ? (
+                <Button size="sm" onClick={() => setSettings(true)}>Configurar o fluxo</Button>
+              ) : null}
+            </div>
           ) : (
             list.map((t) => {
               const sla = ticketSla(t, tcfg.config);
@@ -148,6 +172,7 @@ function TicketsPage() {
                   type="button"
                   onClick={() => {
                     setSelectedId(t.id);
+                    setShowTicketOnMobile(true);
                     setAi(null);
                   }}
                   className={cn(
@@ -171,9 +196,17 @@ function TicketsPage() {
         </Card>
 
         {ticket ? (
-          <Card className="flex min-h-[70vh] flex-col p-0">
+          <Card className={cn("min-h-[70vh] min-w-0 flex-col p-0", showTicketOnMobile ? "flex" : "hidden lg:flex")}>
             <header className="border-b border-border px-4 py-3">
               <div className="flex flex-wrap items-start gap-2">
+                <Button
+                  className="lg:hidden"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowTicketOnMobile(false)}
+                >
+                  Voltar à fila
+                </Button>
                 <div className="min-w-0 flex-1">
                   <p className="m-0 text-xs text-muted-foreground">
                     #{ticket.number} · #{ticket.channelName}
@@ -222,7 +255,7 @@ function TicketsPage() {
                     <Button size="sm" variant="secondary" onClick={() => archive(ticket.id)}>
                       Arquivar
                     </Button>
-                    {Boolean(tcfg.config.reopenEnabled) ? (
+                    {tcfg.config.reopenEnabled === true ? (
                       <Button size="sm" variant="outline" onClick={() => reopen(ticket.id)}>
                         Reabrir
                       </Button>
@@ -303,8 +336,8 @@ function TicketsPage() {
             </div>
           </Card>
         ) : (
-          <Card className="grid min-h-64 place-items-center text-sm text-muted-foreground">
-            Selecione um atendimento.
+          <Card className={cn("min-h-64 place-items-center text-sm text-muted-foreground", showTicketOnMobile ? "grid" : "hidden lg:grid")}>
+            {tickets.length ? "Selecione um atendimento da fila." : "Configure e publique o painel para começar a receber atendimentos."}
           </Card>
         )}
       </div>
@@ -312,115 +345,133 @@ function TicketsPage() {
       <Dialog open={settings} onOpenChange={setSettings}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogTitle>Painel e fluxo</DialogTitle>
-          <DialogDesc>O que você muda aqui o bot usa na hora de abrir e fechar ticket.</DialogDesc>
+          <DialogDesc>Defina o caminho do atendimento. As opções avançadas ficam recolhidas.</DialogDesc>
           <div className="mt-4 space-y-4">
             <div className="flex items-center justify-between gap-3">
               <Label>Atendimento ligado</Label>
               <Switch checked={tcfg.enabled} onCheckedChange={(v) => setEnabled("tickets", v)} />
             </div>
-            <Field label="Título do painel">
+            <Field label="Onde o painel de atendimento aparece">
               <Input
-                defaultValue={asString(tcfg.config.panelTitle)}
-                onBlur={(e) => updateConfig("tickets", { panelTitle: e.target.value })}
+                defaultValue={asString(tcfg.config.panelChannelId)}
+                placeholder="ex.: ch_atendimento ou ID do canal"
+                onBlur={(e) => updateConfig("tickets", { panelChannelId: e.target.value.trim() })}
               />
             </Field>
-            <Field label="Descrição">
-              <Textarea
-                defaultValue={asString(tcfg.config.panelDescription)}
-                onBlur={(e) => updateConfig("tickets", { panelDescription: e.target.value })}
-              />
-            </Field>
-            <Field label="Mensagem de boas-vindas">
-              <Textarea
-                defaultValue={asString(tcfg.config.welcomeMessage)}
-                onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })}
-              />
-            </Field>
-            <Field label="Departamentos (vírgula)">
+            <Field label="Quem atende (cargos separados por vírgula)">
               <Input
-                defaultValue={departments.join(", ")}
-                onBlur={(e) =>
-                  updateConfig("tickets", {
-                    departments: e.target.value
-                      .split(",")
-                      .map((x) => x.trim())
-                      .filter(Boolean),
-                  })
-                }
+                defaultValue={asList(tcfg.config.staffRoleIds).join(", ")}
+                placeholder="ex.: Suporte, Moderadores"
+                onBlur={(e) => updateConfig("tickets", {
+                  staffRoleIds: e.target.value.split(",").map((value) => value.trim()).filter(Boolean),
+                })}
               />
             </Field>
-            <Field label="Alerta de SLA (minutos)">
+            <Field label="Avisar a equipe depois de (minutos; 0 desliga)">
               <Input
                 type="number"
+                min={0}
+                max={10080}
                 defaultValue={Number(tcfg.config.slaWarningMinutes ?? 60)}
-                onBlur={(e) => updateConfig("tickets", { slaWarningMinutes: Number(e.target.value) || 0 })}
+                onBlur={(e) => updateConfig("tickets", { slaWarningMinutes: Math.max(0, Number(e.target.value) || 0) })}
               />
             </Field>
             <div className="flex items-center justify-between gap-3">
-              <Label>Pedir feedback ao encerrar</Label>
+              <div>
+                <Label>Pedir avaliação ao encerrar</Label>
+                <p className="m-0 text-xs text-muted-foreground">Receba uma nota e um comentário do cliente.</p>
+              </div>
               <Switch
                 checked={Boolean(tcfg.config.feedbackEnabled)}
                 onCheckedChange={(v) => updateConfig("tickets", { feedbackEnabled: v })}
               />
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <Label>IA de apoio à equipe</Label>
-              <Switch
-                checked={Boolean(tcfg.config.aiSupportEnabled)}
-                onCheckedChange={(v) => updateConfig("tickets", { aiSupportEnabled: v })}
-              />
-            </div>
-            <Field label="Inatividade até encerrar (horas, 0 desliga)">
-              <Input
-                type="number"
-                defaultValue={Number(tcfg.config.autoCloseInactiveHours ?? 24)}
-                onBlur={(e) => updateConfig("tickets", { autoCloseInactiveHours: Number(e.target.value) || 0 })}
-              />
-            </Field>
-            <Button
-              variant="outline"
-              disabled={pubBusy}
-              onClick={async () => {
-                setPubBusy(true);
-                publishPanel("tickets");
-
-                // O bot processa a fila em ate 20s. Consulta algumas vezes
-                // para mostrar o resultado REAL, em vez de "publicado" no
-                // instante do clique — que era o defeito antigo.
-                let last: PublishStatus | null = null;
-                for (let attempt = 0; attempt < 10; attempt++) {
-                  await new Promise((resolve) => setTimeout(resolve, 2000));
-                  const rows = await getPublishStatus({ data: { guildId: gid } }).catch(() => []);
-                  last = rows[rows.length - 1] ?? null;
-                  if (last && last.status !== "queued") break;
-                }
-
-                setPubBusy(false);
-                setNotice(
-                  !last
-                    ? "Pedido enviado. O bot publica em instantes."
-                    : last.status === "done"
-                      ? `Publicado no canal "${last.channelRef}".`
-                      : `Não deu: ${last.detail ?? "motivo desconhecido"}`,
-                );
-              }}
-            >
-              {pubBusy ? "Publicando…" : "Publicar painel no Discord"}
-            </Button>
-            <DiscordPanel
-              title={asString(tcfg.config.panelTitle)}
-              description={asString(tcfg.config.panelDescription)}
-              accent={asString(tcfg.config.panelAccentColor, "#7c5cff")}
-              buttons={departments}
-            />
+            <details className="rounded-xl border border-border px-3 py-2">
+              <summary className="cursor-pointer py-1 text-sm font-medium">Avançado: conteúdo, departamentos e automações</summary>
+              <div className="mt-4 space-y-4">
+                <Field label="Título do painel">
+                  <Input
+                    defaultValue={asString(tcfg.config.panelTitle)}
+                    onBlur={(e) => updateConfig("tickets", { panelTitle: e.target.value })}
+                  />
+                </Field>
+                <Field label="Descrição">
+                  <Textarea
+                    defaultValue={asString(tcfg.config.panelDescription)}
+                    onBlur={(e) => updateConfig("tickets", { panelDescription: e.target.value })}
+                  />
+                </Field>
+                <Field label="Mensagem de boas-vindas">
+                  <Textarea
+                    defaultValue={asString(tcfg.config.welcomeMessage)}
+                    onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })}
+                  />
+                </Field>
+                <Field label="Departamentos (separados por vírgula)">
+                  <Input
+                    defaultValue={departments.join(", ")}
+                    onBlur={(e) => updateConfig("tickets", {
+                      departments: e.target.value.split(",").map((value) => value.trim()).filter(Boolean),
+                    })}
+                  />
+                </Field>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <Label>IA de apoio à equipe</Label>
+                    <p className="m-0 text-xs text-muted-foreground">Gera sugestões privadas para a equipe.</p>
+                  </div>
+                  <Switch
+                    checked={Boolean(tcfg.config.aiSupportEnabled)}
+                    onCheckedChange={(value) => updateConfig("tickets", { aiSupportEnabled: value })}
+                  />
+                </div>
+                <Field label="Encerrar por inatividade (horas; 0 desliga)">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={8760}
+                    defaultValue={Number(tcfg.config.autoCloseInactiveHours ?? 24)}
+                    onBlur={(e) => updateConfig("tickets", { autoCloseInactiveHours: Math.max(0, Number(e.target.value) || 0) })}
+                  />
+                </Field>
+                <Button
+                  variant="outline"
+                  disabled={pubBusy || !asString(tcfg.config.panelChannelId).trim()}
+                  onClick={async () => {
+                    setPubBusy(true);
+                    setNotice(null);
+                    try {
+                      const result = await publishPanelAndWait({
+                        guildId: gid,
+                        target: "tickets",
+                        channelRef: asString(tcfg.config.panelChannelId).trim(),
+                      });
+                      setNotice(publishResultMessage(result));
+                    } catch (cause) {
+                      setNotice(cause instanceof Error ? cause.message : "Não foi possível pedir a publicação ao bot.");
+                    } finally {
+                      setPubBusy(false);
+                    }
+                  }}
+                >
+                  {pubBusy ? "Aguardando o bot…" : "Publicar painel no Discord"}
+                </Button>
+                <DiscordPanel
+                  title={asString(tcfg.config.panelTitle)}
+                  description={asString(tcfg.config.panelDescription)}
+                  accent={asString(tcfg.config.panelAccentColor, "#7c5cff")}
+                  buttons={departments}
+                />
+              </div>
+            </details>
           </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={compose} onOpenChange={setCompose}>
         <DialogContent>
-          <DialogTitle>Simular abertura</DialogTitle>
-          <DialogDesc>Como se o membro tivesse apertado o botão no Discord.</DialogDesc>
+          <DialogTitle>Simular ticket</DialogTitle>
+          <DialogDesc>Cria um registro local de demonstração; não abre um canal no Discord.</DialogDesc>
           <ComposeForm
             departments={departments}
             members={members}
@@ -428,6 +479,7 @@ function TicketsPage() {
               const res = openTicket(data);
               if (res.ok) {
                 setSelectedId(res.id);
+                setShowTicketOnMobile(true);
                 setCompose(false);
               } else {
                 alert(res.error);

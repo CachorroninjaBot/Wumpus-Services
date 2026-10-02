@@ -159,7 +159,7 @@ export function buildWorkspace(
     publishQueue: [],
     recentMessages: [],
     sessionUser,
-    theme: "dark" as const,
+    theme: "system" as const,
   };
 }
 

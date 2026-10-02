@@ -47,6 +47,7 @@ import {
 } from "./tickets.ts";
 import { handleAuditLogEntry, handleMemberAdd } from "./security.ts";
 import { processOutbox } from "./outbox-send.ts";
+import { writeBotHealth } from "../lib/wumpus/health.server.ts";
 
 export type BotHandle = {
   client: Client;
@@ -277,8 +278,23 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
 export function createBot(token: string, log: Logger = consoleLogger): BotHandle {
   const client = new Client({ intents: INTENTS, partials: [Partials.Channel, Partials.Message] });
 
+  let healthTimer: ReturnType<typeof setInterval> | null = null;
+  const reportHealth = (status: "online" | "offline") =>
+    writeBotHealth({
+      status,
+      at: Date.now(),
+      startedAt,
+      guildCount: client.guilds.cache.size,
+      pingMs: client.ws.ping >= 0 ? client.ws.ping : null,
+    });
+  const startedAt = Date.now();
+
   client.once(Events.ClientReady, async () => {
     log.info("online", { user: client.user?.tag, guilds: client.guilds.cache.size });
+    await reportHealth("online").catch((error) => log.error("falha ao publicar saúde do bot", { error: String(error) }));
+    healthTimer = setInterval(() => {
+      void reportHealth("online").catch((error) => log.error("falha ao publicar saúde do bot", { error: String(error) }));
+    }, 30_000);
     if (client.user) await registerCommands(client.user.id, token, log);
   });
 
@@ -419,6 +435,8 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     clearInterval(pruneTimer);
     clearInterval(inactivityTimer);
     clearInterval(outboxTimer);
+    if (healthTimer) clearInterval(healthTimer);
+    await reportHealth("offline").catch((error) => log.error("falha ao marcar bot offline", { error: String(error) }));
     await client.destroy();
     log.info("desconectado");
   };

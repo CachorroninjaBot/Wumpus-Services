@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, AlertTriangle, Clock3, Ticket, Shield } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input";
 import { ticketSla } from "@/lib/wumpus/engine";
 import { useActiveGuild, useModule, useWumpus } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
+import { getPublishStatus, type PublishStatus } from "@/lib/wumpus/runtime-store";
+import { getPublicBotHealth, type PublicBotHealth } from "@/lib/wumpus/health";
+import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 
 export const Route = createFileRoute("/app/")({ component: Overview });
 
@@ -23,11 +26,41 @@ function Overview() {
   const automod = useModule("automod");
   const [cmd, setCmd] = useState("/config status");
   const [cmdOut, setCmdOut] = useState<string | null>(null);
+  const [publishStatuses, setPublishStatuses] = useState<PublishStatus[]>([]);
+  const [botHealth, setBotHealth] = useState<PublicBotHealth | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const tickets = allTickets.filter((t) => t.guildId === gid);
   const incidents = allIncidents.filter((i) => i.guildId === gid && i.status !== "closed");
   const logs = allLogs.filter((l) => l.guildId === gid).slice(0, 6);
   const submissions = allSubs.filter((x) => x.guildId === gid && x.status === "pending");
+  const pendingSync = publishStatuses.filter((job) => job.status === "queued").length;
+  const latestSync = [...publishStatuses].sort((a, b) => (b.at ?? b.createdAt) - (a.at ?? a.createdAt))[0];
+
+  useEffect(() => {
+    let active = true;
+    const refreshStatus = async () => {
+      try {
+        const [health, statuses] = await Promise.all([
+          getPublicBotHealth(),
+          getPublishStatus({ data: { token: getStoredSessionToken(), guildId: gid } }),
+        ]);
+        if (active) {
+          setBotHealth(health);
+          setPublishStatuses(statuses);
+          setStatusError(null);
+        }
+      } catch (error) {
+        if (active) setStatusError(error instanceof Error ? error.message : "Não foi possível consultar o estado real do bot.");
+      }
+    };
+    void refreshStatus();
+    const timer = window.setInterval(() => void refreshStatus(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [gid]);
 
   const open = tickets.filter((t) => t.status === "open" || t.status === "claimed");
   const breaches = open.filter((t) => ticketSla(t, tcfg.config) !== "ok");
@@ -68,8 +101,37 @@ function Overview() {
           </p>
           <h1 className="mt-1 mb-0 text-2xl font-semibold tracking-tight">O que precisa de você agora</h1>
         </div>
-        {lockdown ? <Badge tone="danger">Lockdown ativo</Badge> : <Badge tone="ok">Bot operacional</Badge>}
+        {lockdown
+          ? <Badge tone="danger">Lockdown ativo</Badge>
+          : <Badge tone={botHealth?.status === "online" ? "ok" : botHealth?.status === "offline" ? "danger" : "warn"}>
+              {botHealth?.status === "online" ? "Bot online" : botHealth?.status === "offline" ? "Bot offline" : "Status indisponível"}
+            </Badge>}
       </header>
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className={`grid size-10 place-items-center rounded-full ${pendingSync > 0 ? "bg-warn/15 text-warn" : botHealth?.status === "online" ? "bg-ok/15 text-ok" : "bg-destructive/10 text-destructive"}`}>
+              <span className={`size-2.5 rounded-full ${pendingSync > 0 ? "bg-warn" : botHealth?.status === "online" ? "bg-ok" : "bg-destructive"}`} />
+            </div>
+            <div>
+              <p className="m-0 text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">Status do bot</p>
+              <h2 className="m-0 text-lg font-semibold">
+                {pendingSync > 0 ? "Sincronização pendente" : botHealth?.status === "online" ? "Bot online" : botHealth?.status === "offline" ? "Bot offline" : "Estado do bot desconhecido"}
+              </h2>
+            </div>
+          </div>
+          <Badge tone={pendingSync > 0 ? "warn" : botHealth?.status === "online" ? "ok" : "danger"}>
+            {pendingSync > 0 ? `${pendingSync} na fila` : botHealth?.status === "online" ? `${botHealth.pingMs ?? "—"} ms` : "offline"}
+          </Badge>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          <StatusMetric label="Servidores" value={botHealth?.guildCount === null || botHealth?.guildCount === undefined ? "indisponível" : String(botHealth.guildCount)} />
+          <StatusMetric label="Última publicação" value={latestSync ? formatRelative(latestSync.at ?? latestSync.createdAt) : "nenhuma registrada"} />
+          <StatusMetric label="Publicações" value={pendingSync > 0 ? `${pendingSync} pendentes` : `${publishStatuses.filter((job) => job.status === "done").length} concluídas`} />
+        </div>
+        {statusError ? <p className="mt-3 mb-0 text-xs text-destructive">{statusError}</p> : null}
+      </Card>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Fila aberta" value={String(open.length)} hint="tickets sem encerrar" />
@@ -193,6 +255,15 @@ function Stat({ label, value, hint, warn }: { label: string; value: string; hint
       <p className={`mt-1 mb-0 font-mono-num text-3xl font-semibold ${warn ? "text-destructive" : ""}`}>{value}</p>
       <p className="m-0 text-xs text-muted-foreground">{hint}</p>
     </Card>
+  );
+}
+
+function StatusMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/30 px-3 py-2">
+      <p className="m-0 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">{label}</p>
+      <p className="mt-1 mb-0 text-sm font-medium">{value}</p>
+    </div>
   );
 }
 

@@ -1,18 +1,21 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, Check, Shield, Ticket, ClipboardList, Cpu } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 import { BrandMark } from "@/components/brand";
-import { DiscordPanel } from "@/components/discord-panel";
+import { DiscordModalPreview, DiscordPanel } from "@/components/discord-panel";
 import { Button } from "@/components/ui/button";
 import { brand, plans as fallbackPlans } from "@/lib/wumpus/brand";
 import { SHARD_STORE } from "@/lib/wumpus/catalog";
 import { useBilling } from "@/lib/wumpus/use-billing";
+import { getPublicBotHealth, type PublicBotHealth } from "@/lib/wumpus/health";
+import { useEffect, useState } from "react";
+import { formatRelative } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({ component: Home });
 
 const faqs = [
   {
     q: "O bot realmente lê o que eu configuro?",
-    a: "Sim. Cada campo do painel entra no contrato do bot: SLA, cargos, termos bloqueados, perguntas do modal. Se não for usado, não aparece.",
+    a: "As configurações publicadas passam por validação no servidor antes de chegar ao bot. Os recursos divulgados aqui correspondem aos fluxos integrados; campos sem integração não são anunciados como concluídos.",
   },
   {
     q: "A IA fala com o cliente?",
@@ -20,7 +23,7 @@ const faqs = [
   },
   {
     q: "Preciso decorar comandos?",
-    a: "Não. Painéis no Discord abrem ticket e formulário. A equipe trabalha daqui: assumir, encerrar, advertir, aprovar.",
+    a: "Não. Os painéis publicados no Discord abrem tickets e formulários. A fila de tickets desta prévia ainda é demonstrativa; as ações de atendimento não são sincronizadas com o bot.",
   },
   {
     q: "Como eu entro no MEU painel?",
@@ -30,12 +33,36 @@ const faqs = [
 
 function Home() {
   const billing = useBilling();
+  const [health, setHealth] = useState<PublicBotHealth | null>(null);
+  const [healthError, setHealthError] = useState(false);
   const plans = billing.data?.plans?.length ? billing.data.plans : fallbackPlans;
   const discounts = billing.data?.discounts ?? [
     { label: "trimestral", discount: 5 },
     { label: "semestral", discount: 10 },
     { label: "anual", discount: 18 },
   ];
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void getPublicBotHealth()
+        .then((result) => {
+          if (active) {
+            setHealth(result);
+            setHealthError(false);
+          }
+        })
+        .catch(() => {
+          if (active) setHealthError(true);
+        });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
   return (
     <div className="min-h-dvh bg-background text-foreground">
       <header className="sticky top-0 z-30 border-b border-border/80 bg-background/80 backdrop-blur-md">
@@ -102,11 +129,27 @@ function Home() {
           <h2 className="mt-2 mb-8 max-w-xl text-3xl font-semibold tracking-tight">
             Painel por resultado. Avançado fica escondido.
           </h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Feature icon={<Ticket className="size-5" />} title="Tickets de verdade" body="Departamentos, SLA, prioridade, tags, transcrição no encerramento, feedback com comentário e métrica por staff." />
-            <Feature icon={<ClipboardList className="size-5" />} title="Candidaturas com modal" body="Perguntas configuráveis, cooldown, idade mínima da conta, aprovar ou recusar com motivo." />
-            <Feature icon={<Shield className="size-5" />} title="Moderação com entrada" body="Advertir, silenciar, expulsar, banir. Strikes acumulam e o bot escala no limiar que você definiu." />
-            <Feature icon={<Cpu className="size-5" />} title="Presets, não 40 knobs" body="Comunidade, loja ou RP. Um pacote coerente de AutoMod e anti-raid." />
+          <div className="grid gap-x-8 lg:grid-cols-2">
+            <Feature
+              title="Tickets de verdade"
+              body="Departamentos, SLA, prioridade, transcrição no encerramento, feedback e métricas por atendente."
+              preview={<DiscordPanel channel="abrir-atendimento" title="Central de atendimento" description="Escolha um departamento para falar com a equipe." buttons={["Suporte", "Compras", "Denúncias"]} />}
+            />
+            <Feature
+              title="Candidaturas com modal"
+              body="Formulário no Discord, cooldown e aprovação ou recusa com um motivo visível."
+              preview={<DiscordModalPreview title="Candidatura à equipe" questions={["Nome ou apelido", "Por que quer entrar?", "Experiência relevante"]} />}
+            />
+            <Feature
+              title="Moderação com histórico"
+              body="Advertências, silenciamento, expulsão e banimento registrados para a equipe."
+              preview={<DiscordPanel channel="moderação" title="Ação registrada" description="O histórico acompanha o motivo, a evidência e as medidas anteriores." buttons={["Advertir", "Silenciar", "Revisar caso"]} />}
+            />
+            <Feature
+              title="Proteção configurável"
+              body="AutoMod e resposta a raids com níveis graduais; sem tomar ações destrutivas sem autorização."
+              preview={<DiscordPanel channel="segurança" title="Proteção da comunidade" description="Revise alertas e escolha a resposta adequada para o seu servidor." buttons={["Ver alertas", "Lockdown"]} />}
+            />
           </div>
         </div>
       </section>
@@ -118,6 +161,11 @@ function Home() {
             Loja {billing.data?.storeName ?? SHARD_STORE.name}. Nos planos mensais,{" "}
             {discounts.map((d) => `${d.label} −${d.discount}%`).join(", ")}.
           </p>
+          {billing.data && !billing.data.ok ? (
+            <p role="status" className="mb-5 text-sm text-warn">
+              A ShardPay está indisponível. Estes valores são a referência salva; confirme o preço atual no checkout.
+            </p>
+          ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             {plans.map((plan) => (
               <article
@@ -145,6 +193,27 @@ function Home() {
               </article>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="bot-status-title" className="border-t border-border">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 sm:flex-row sm:items-center">
+          <div className={`size-2.5 shrink-0 rounded-full ${health?.status === "online" ? "bg-ok" : health?.status === "offline" ? "bg-destructive" : "bg-muted-foreground"}`} />
+          <div className="min-w-0 flex-1">
+            <h2 id="bot-status-title" className="m-0 text-base font-semibold">Status do Wumpus</h2>
+            <p className="m-0 text-sm text-muted-foreground">
+              {healthError
+                ? "Não foi possível consultar o monitor de saúde."
+                : health?.status === "online"
+                  ? `Online · ${health.guildCount ?? "—"} servidores conectados · atualizado ${health.lastSeenAt ? formatRelative(health.lastSeenAt) : "agora"}`
+                  : health?.status === "offline"
+                    ? `Sem heartbeat recente${health.lastSeenAt ? ` · visto ${formatRelative(health.lastSeenAt)}` : ""}`
+                    : "Status ainda não disponível."}
+            </p>
+          </div>
+          {health?.pingMs !== null && health?.pingMs !== undefined ? (
+            <span className="text-sm text-muted-foreground">latência {health.pingMs} ms</span>
+          ) : null}
         </div>
       </section>
 
@@ -178,20 +247,14 @@ function Home() {
   );
 }
 
-function Feature({
-  icon,
-  title,
-  body,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
+function Feature({ title, body, preview }: { title: string; body: string; preview: React.ReactNode }) {
   return (
-    <article className="rounded-2xl bg-card p-5 shadow-border">
-      <div className="grid size-10 place-items-center rounded-xl bg-muted text-foreground">{icon}</div>
-      <h3 className="mt-4 mb-1 text-lg font-semibold">{title}</h3>
-      <p className="m-0 text-sm leading-relaxed text-muted-foreground">{body}</p>
+    <article className="grid min-w-0 gap-4 border-t border-border py-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:items-center">
+      <div>
+        <h3 className="mt-0 mb-2 text-lg font-semibold">{title}</h3>
+        <p className="m-0 max-w-[42ch] text-sm leading-relaxed text-muted-foreground">{body}</p>
+      </div>
+      <div className="min-w-0 overflow-hidden rounded-xl">{preview}</div>
     </article>
   );
 }

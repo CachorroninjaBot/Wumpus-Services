@@ -16,7 +16,7 @@ export function DiscordPanel({
   format?: "v2" | "embed";
 }) {
   return (
-    <div className="discord-window">
+    <div className="discord-window" aria-hidden="true">
       <div className="discord-top">
         <span className="discord-dot" />
         <span className="discord-dot" />
@@ -39,7 +39,7 @@ export function DiscordPanel({
                 Wumpus <span className="ml-1 rounded-[3px] bg-[#5865f2] px-1 py-px text-[9px] font-bold uppercase">bot</span>
               </p>
               {format === "v2" ? (
-                <div className="discord-v2" style={{ borderColor: accent }}>
+                <div className="discord-v2">
                   <p className="discord-kicker">Components V2</p>
                   <p className="m-0 mt-2 text-[15px] font-semibold text-white">{title}</p>
                   <p className="mt-1.5 mb-0 text-[13px] leading-relaxed text-[#dbdee1]">{description}</p>
@@ -81,7 +81,7 @@ export function DiscordModalPreview({
   questions: string[];
 }) {
   return (
-    <div className="rounded-2xl bg-[#313338] p-4 text-[#dbdee1] shadow-border">
+    <div className="rounded-2xl bg-[#313338] p-4 text-[#dbdee1] shadow-border" aria-hidden="true">
       <p className="m-0 text-[11px] font-semibold tracking-[0.14em] text-[#949ba4] uppercase">Modal do Discord</p>
       <p className="mt-2 mb-3 text-[16px] font-semibold text-white">{title}</p>
       <div className="space-y-3">
