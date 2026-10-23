@@ -25,7 +25,9 @@ const TTL_MS = 5_000;
 const EMPTY: Runtime = { updatedAt: 0, guilds: {} };
 
 let cache: { runtime: Runtime; at: number } | null = null;
+let runtimePending: Promise<Runtime> | null = null;
 let licenseCache: { byGuild: Record<string, GuildLicense>; at: number } | null = null;
+let licensesPending: Promise<Record<string, GuildLicense>> | null = null;
 
 function runtimePath(): string {
   return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
@@ -38,26 +40,45 @@ function runtimePath(): string {
 export async function loadRuntime(force = false): Promise<Runtime> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.runtime;
 
+  if (!force && runtimePending) return runtimePending;
+
+  const pending = (async () => {
+    try {
+      const parsed = JSON.parse(await readFile(runtimePath(), "utf8")) as Partial<Runtime>;
+      const runtime: Runtime = {
+        updatedAt: Number(parsed?.updatedAt) || 0,
+        guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {}
+      };
+      cache = { runtime, at: Date.now() };
+      return runtime;
+    } catch {
+      // Arquivo ausente ou invalido nao pode derrubar o bot: vale como "nada publicado".
+      cache = { runtime: EMPTY, at: Date.now() };
+      return EMPTY;
+    }
+  })();
+  if (!force) runtimePending = pending;
   try {
-    const parsed = JSON.parse(await readFile(runtimePath(), "utf8")) as Partial<Runtime>;
-    const runtime: Runtime = {
-      updatedAt: Number(parsed?.updatedAt) || 0,
-      guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {}
-    };
-    cache = { runtime, at: Date.now() };
-    return runtime;
-  } catch {
-    // Arquivo ausente ou invalido nao pode derrubar o bot: vale como "nada publicado".
-    cache = { runtime: EMPTY, at: Date.now() };
-    return EMPTY;
+    return await pending;
+  } finally {
+    if (runtimePending === pending) runtimePending = null;
   }
 }
 
 async function loadLicenses(force = false): Promise<Record<string, GuildLicense>> {
   if (!force && licenseCache && Date.now() - licenseCache.at < TTL_MS) return licenseCache.byGuild;
-  const licenses = await readGuildLicenses();
-  licenseCache = { byGuild: licenses.byGuild, at: Date.now() };
-  return licenses.byGuild;
+  if (!force && licensesPending) return licensesPending;
+
+  const pending = readGuildLicenses().then((licenses) => {
+    licenseCache = { byGuild: licenses.byGuild, at: Date.now() };
+    return licenses.byGuild;
+  });
+  if (!force) licensesPending = pending;
+  try {
+    return await pending;
+  } finally {
+    if (licensesPending === pending) licensesPending = null;
+  }
 }
 
 /** Config de um modulo num servidor. `null` quando o painel ainda nao publicou esse modulo. */

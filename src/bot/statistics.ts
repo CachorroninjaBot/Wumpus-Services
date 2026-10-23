@@ -15,6 +15,7 @@ import { buildPanelPayload } from "./panels.ts";
 import { resolveChannel } from "./resolve.ts";
 import { mutate, read } from "./store.ts";
 import { reportLines, ticketStaffReport } from "./tickets-metrics.ts";
+import { mergeStatisticDeltas, type StatisticDelta, type StatisticField } from "./statistics-buffer.ts";
 
 export type DailyStat = {
   guildId: string;
@@ -25,6 +26,10 @@ export type DailyStat = {
   leaves: number;
   tickets: number;
 };
+
+const pendingDeltas = new Map<string, StatisticDelta>();
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let flushQueue: Promise<void> = Promise.resolve();
 
 /** Chave de um dia, para agrupar sem depender de fuso do processo. */
 function dayKey(at = new Date()): string {
@@ -39,7 +44,7 @@ function dayKey(at = new Date()): string {
  */
 export async function bump(
   guildId: string,
-  field: "messages" | "joins" | "leaves" | "tickets",
+  field: StatisticField,
   amount = 1
 ): Promise<void> {
   try {
@@ -56,24 +61,56 @@ export async function bump(
     if (!bool(config, flag, true)) return;
 
     const day = dayKey();
-
-    await mutate<DailyStat>("statistics", (rows) => {
-      const row = rows.find((entry) => entry.guildId === guildId && entry.day === day);
-      if (row) {
-        row[field] += amount;
-      } else {
-        rows.push({ guildId, day, messages: 0, joins: 0, leaves: 0, tickets: 0, [field]: amount });
-      }
-      return rows;
-    });
+    const key = `${guildId}:${day}:${field}`;
+    const delta = pendingDeltas.get(key);
+    if (delta) delta.amount += amount;
+    else pendingDeltas.set(key, { guildId, day, field, amount });
+    scheduleStatisticsFlush();
   } catch {
     // Metrica perdida nao e incidente.
   }
 }
 
+function scheduleStatisticsFlush(): void {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    void flushPendingStatistics().catch((error) => {
+      console.error("[statistics] falha ao persistir contadores agrupados", error);
+    });
+  }, 1_000);
+  flushTimer.unref?.();
+}
+
+export function flushPendingStatistics(): Promise<void> {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (!pendingDeltas.size) return flushQueue;
+
+  const batch = [...pendingDeltas.values()];
+  pendingDeltas.clear();
+  const next = flushQueue.catch(() => undefined).then(async () => {
+    await mutate<DailyStat>("statistics", (rows) => mergeStatisticDeltas(rows, batch));
+  });
+  flushQueue = next.catch((error) => {
+    for (const delta of batch) {
+      const key = `${delta.guildId}:${delta.day}:${delta.field}`;
+      const pending = pendingDeltas.get(key);
+      if (pending) pending.amount += delta.amount;
+      else pendingDeltas.set(key, delta);
+    }
+    scheduleStatisticsFlush();
+    throw error;
+  });
+  return flushQueue;
+}
+
 export async function statsFor(guildId: string, days = 30): Promise<DailyStat[]> {
   const cutoff = dayKey(new Date(Date.now() - days * 86_400_000));
-  const rows = await read<DailyStat>("statistics");
+  const persisted = await read<DailyStat>("statistics");
+  const rows = mergeStatisticDeltas(persisted.map((row) => ({ ...row })), [...pendingDeltas.values()]);
 
   return rows
     .filter((row) => row.guildId === guildId && row.day >= cutoff)
@@ -108,6 +145,7 @@ export async function summarize(guildId: string, days = 7): Promise<{
  * `digestHourUtc` vem da config; a marca de "ja enviado" fica em `counters`.
  */
 export async function maybeSendDigest(guild: Guild, log: Logger): Promise<boolean> {
+  await flushPendingStatistics();
   const config = await moduleConfig(guild.id, "statistics");
   if (!isEnabled(config)) return false;
 
@@ -176,6 +214,7 @@ export async function maybeSendDigest(guild: Guild, log: Logger): Promise<boolea
  * Sem isso o arquivo cresce indefinidamente, um dia por servidor.
  */
 export async function pruneStatistics(guildId: string, log: Logger): Promise<number> {
+  await flushPendingStatistics();
   const config = await moduleConfig(guildId, "statistics");
   const retentionDays = Math.max(7, Math.trunc(num(config, "retentionDays", 180)));
   const cutoff = dayKey(new Date(Date.now() - retentionDays * 86_400_000));

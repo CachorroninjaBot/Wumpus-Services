@@ -5,7 +5,7 @@
  * nao conseguem carregar. A decisao (o que esta pendente, o que fazer com o
  * resultado) e pura e vive no outro arquivo.
  */
-import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Guild } from "discord.js";
 import { pendingJobs, pruneOutbox, settleActionJob, settleJob } from "./outbox.ts";
@@ -23,17 +23,40 @@ function runtimePath(): string {
   return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
 }
 
+let runtimeCache: { signature: string; snapshot: RuntimeFile } | null = null;
+let runtimeReadPending: Promise<RuntimeFile> | null = null;
+
 /** Le o runtime do disco. O bot nao compartilha memoria com o painel. */
 export async function readRuntimeFile(): Promise<RuntimeFile> {
+  if (runtimeReadPending) return runtimeReadPending;
+
+  const path = runtimePath();
   try {
-    const raw = await readFile(runtimePath(), "utf8");
-    const parsed = JSON.parse(raw) as Partial<RuntimeFile>;
-    return {
-      updatedAt: Number(parsed?.updatedAt) || 0,
-      guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {},
-      articles: parsed?.articles && typeof parsed.articles === "object" ? parsed.articles : {},
-      outbox: Array.isArray(parsed?.outbox) ? parsed.outbox : []
-    };
+    const details = await stat(path, { bigint: true });
+    const signature = `${details.dev}:${details.ino}:${details.size}:${details.mtimeNs}`;
+    if (runtimeCache?.signature === signature) return runtimeCache.snapshot;
+    const pending = (async () => {
+      const raw = await readFile(path, "utf8");
+      const parsed = JSON.parse(raw) as Partial<RuntimeFile>;
+      const snapshot = {
+        updatedAt: Number(parsed?.updatedAt) || 0,
+        guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {},
+        articles: parsed?.articles && typeof parsed.articles === "object" ? parsed.articles : {},
+        outbox: Array.isArray(parsed?.outbox) ? parsed.outbox : []
+      };
+      const finalStat = await stat(path, { bigint: true });
+      runtimeCache = {
+        signature: `${finalStat.dev}:${finalStat.ino}:${finalStat.size}:${finalStat.mtimeNs}`,
+        snapshot
+      };
+      return snapshot;
+    })();
+    runtimeReadPending = pending;
+    try {
+      return await pending;
+    } finally {
+      if (runtimeReadPending === pending) runtimeReadPending = null;
+    }
   } catch {
     return { updatedAt: 0, guilds: {}, articles: {}, outbox: [] };
   }
@@ -45,6 +68,7 @@ async function writeRuntimeFile(next: RuntimeFile): Promise<void> {
   const tmp = `${path}.tmp`;
   await writeFile(tmp, JSON.stringify(next, null, 2));
   await rename(tmp, path);
+  runtimeCache = null;
 }
 
 /**

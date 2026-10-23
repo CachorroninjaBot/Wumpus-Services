@@ -48,7 +48,7 @@ import { renderLogEvent } from "./log-render.ts";
 import { resolveRoles } from "./resolve.ts";
 import { applyDefaultRole, removeManagedRolesOnLeave } from "./roles.ts";
 import { checkInactivity, checkOverload } from "./staff.ts";
-import { bump, maybeSendDigest, pruneStatistics } from "./statistics.ts";
+import { bump, flushPendingStatistics, maybeSendDigest, pruneStatistics } from "./statistics.ts";
 import {
   claimTicket,
   checkSla,
@@ -891,6 +891,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     clearInterval(pruneTimer);
     clearInterval(inactivityTimer);
     clearInterval(outboxTimer);
+    await flushPendingStatistics().catch((error) => log.error("falha ao persistir estatísticas no encerramento", { error: String(error) }));
     if (healthTimer) clearInterval(healthTimer);
     await reportHealth("offline").catch((error) => log.error("falha ao marcar bot offline", { error: String(error) }));
     await client.destroy();
