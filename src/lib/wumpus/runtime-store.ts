@@ -295,3 +295,30 @@ export const getGuildActivity = createServerFn({ method: "POST" })
       }), { messages: 0, joins: 0, tickets: 0, automod: 0, moderation: 0 }),
     };
   });
+
+export const getGuildAudit = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    limit: z.number().int().min(1).max(500).default(200),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    type AuditRecord = { id: number; guildId: string; module: string; eventType: string; actorId?: string; targetId?: string; channelId?: string; severity: string; at: string; data?: Record<string, unknown> };
+    const records = await readBotCollection<AuditRecord>("audit");
+    return records
+      .filter((row) => row.guildId === data.guildId)
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+      .slice(0, data.limit)
+      .map((row) => ({
+        id: row.id,
+        category: row.module,
+        eventType: row.eventType,
+        actorId: row.actorId ?? null,
+        targetId: row.targetId ?? null,
+        channelId: row.channelId ?? null,
+        severity: row.severity,
+        summary: typeof row.data?.summary === "string" ? row.data.summary : row.eventType.replaceAll("_", " "),
+        at: Date.parse(row.at) || 0,
+      }));
+  });

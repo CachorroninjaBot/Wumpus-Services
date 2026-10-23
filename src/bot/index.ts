@@ -12,6 +12,7 @@
 import {
   ActionRowBuilder,
   Client,
+  AuditLogEvent,
   Events,
   GatewayIntentBits,
   Partials,
@@ -21,17 +22,20 @@ import {
   type Guild,
   type Interaction,
   type Message,
+  type PartialMessage,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction
 } from "discord.js";
 import { handleGhostPing, handleImageContent, handleMessage } from "./automod.ts";
 import { handleCommand, registerCommands } from "./commands.ts";
-import { list, moduleConfig } from "./config.ts";
+import { bool, isEnabled, list, moduleConfig } from "./config.ts";
 import { buildFormModal, handleFormSelect, openForm, parseFields, readDraft, reviewForm, submitForm } from "./forms.ts";
 import { id, parseId } from "./ids.ts";
 import { handleKnowledgeMessage } from "./knowledge.ts";
 import { consoleLogger, type Logger } from "./logger.ts";
-import { pruneAudit } from "./logs.ts";
+import { auditAndLog, logToChannel, pruneAudit, recordAudit, shouldIgnoreLogEvent } from "./logs.ts";
+import { renderAuditDiff } from "./log-diff.ts";
+import { renderLogEvent } from "./log-render.ts";
 import { applyDefaultRole, removeManagedRolesOnLeave } from "./roles.ts";
 import { checkInactivity, checkOverload } from "./staff.ts";
 import { bump, maybeSendDigest, pruneStatistics } from "./statistics.ts";
@@ -63,8 +67,147 @@ export const INTENTS = [
   GatewayIntentBits.GuildMembers,
   GatewayIntentBits.GuildModeration,
   GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.GuildVoiceStates,
   GatewayIntentBits.MessageContent
 ];
+
+async function recordMessageLog(message: Message | PartialMessage, eventType: string, title: string, content: string, log: Logger): Promise<void> {
+  if (!message.guild) return;
+  const config = await moduleConfig(message.guild.id, "logs");
+  if (!isEnabled(config) || !bool(config, "logMessages", false)) return;
+  const details = { actorId: message.author?.id, targetId: message.author?.id, channelId: message.channelId };
+  if (await shouldIgnoreLogEvent(message.guild, config, details)) return;
+  const text = content.slice(0, 1800);
+  await auditAndLog(message.guild, {
+    module: "messages", category: "messages", eventType,
+    ...details,
+    title, description: `<@${message.author?.id}> · <#${message.channelId}>\n\n${text || "(sem texto)"}`,
+  }, log);
+}
+
+const AUDIT_CATEGORIES: Partial<Record<AuditLogEvent, { module: string; category: string; title: string }>> = {
+  [AuditLogEvent.GuildUpdate]: { module: "server", category: "channels", title: "SERVIDOR ATUALIZADO" },
+  [AuditLogEvent.ChannelCreate]: { module: "channels", category: "channels", title: "CANAL CRIADO" },
+  [AuditLogEvent.ChannelUpdate]: { module: "channels", category: "channels", title: "CANAL ATUALIZADO" },
+  [AuditLogEvent.ChannelDelete]: { module: "channels", category: "channels", title: "CANAL APAGADO" },
+  [AuditLogEvent.ChannelOverwriteCreate]: { module: "channels", category: "channels", title: "PERMISSÃO DE CANAL CRIADA" },
+  [AuditLogEvent.ChannelOverwriteUpdate]: { module: "channels", category: "channels", title: "PERMISSÃO DE CANAL ATUALIZADA" },
+  [AuditLogEvent.ChannelOverwriteDelete]: { module: "channels", category: "channels", title: "PERMISSÃO DE CANAL REMOVIDA" },
+  [AuditLogEvent.MemberKick]: { module: "members", category: "members", title: "MEMBRO EXPULSO" },
+  [AuditLogEvent.MemberPrune]: { module: "members", category: "members", title: "MEMBROS REMOVIDOS POR INATIVIDADE" },
+  [AuditLogEvent.MemberBanAdd]: { module: "bans", category: "bans", title: "MEMBRO BANIDO" },
+  [AuditLogEvent.MemberBanRemove]: { module: "bans", category: "bans", title: "BANIMENTO REMOVIDO" },
+  [AuditLogEvent.MemberUpdate]: { module: "members", category: "members", title: "MEMBRO ATUALIZADO" },
+  [AuditLogEvent.MemberRoleUpdate]: { module: "roles", category: "roles", title: "CARGOS DO MEMBRO ALTERADOS" },
+  [AuditLogEvent.MemberMove]: { module: "voice", category: "voice", title: "MEMBRO MOVIDO DE CANAL DE VOZ" },
+  [AuditLogEvent.MemberDisconnect]: { module: "voice", category: "voice", title: "MEMBRO DESCONECTADO DA VOZ" },
+  [AuditLogEvent.MessagePin]: { module: "messages", category: "messages", title: "MENSAGEM FIXADA" },
+  [AuditLogEvent.MessageUnpin]: { module: "messages", category: "messages", title: "MENSAGEM DESAFIXADA" },
+  [AuditLogEvent.MessageBulkDelete]: { module: "messages", category: "messages", title: "MENSAGENS APAGADAS EM MASSA" },
+  [AuditLogEvent.BotAdd]: { module: "members", category: "members", title: "BOT ADICIONADO" },
+  [AuditLogEvent.RoleCreate]: { module: "roles", category: "roles", title: "CARGO CRIADO" },
+  [AuditLogEvent.RoleUpdate]: { module: "roles", category: "roles", title: "CARGO ATUALIZADO" },
+  [AuditLogEvent.RoleDelete]: { module: "roles", category: "roles", title: "CARGO APAGADO" },
+  [AuditLogEvent.InviteCreate]: { module: "invites", category: "channels", title: "CONVITE CRIADO" },
+  [AuditLogEvent.InviteUpdate]: { module: "invites", category: "channels", title: "CONVITE ATUALIZADO" },
+  [AuditLogEvent.InviteDelete]: { module: "invites", category: "channels", title: "CONVITE APAGADO" },
+  [AuditLogEvent.WebhookCreate]: { module: "integrations", category: "channels", title: "WEBHOOK CRIADO" },
+  [AuditLogEvent.WebhookUpdate]: { module: "integrations", category: "channels", title: "WEBHOOK ATUALIZADO" },
+  [AuditLogEvent.WebhookDelete]: { module: "integrations", category: "channels", title: "WEBHOOK APAGADO" },
+  [AuditLogEvent.IntegrationCreate]: { module: "integrations", category: "channels", title: "INTEGRAÇÃO ADICIONADA" },
+  [AuditLogEvent.IntegrationUpdate]: { module: "integrations", category: "channels", title: "INTEGRAÇÃO ATUALIZADA" },
+  [AuditLogEvent.IntegrationDelete]: { module: "integrations", category: "channels", title: "INTEGRAÇÃO REMOVIDA" },
+  [AuditLogEvent.EmojiCreate]: { module: "server", category: "channels", title: "EMOJI CRIADO" },
+  [AuditLogEvent.EmojiUpdate]: { module: "server", category: "channels", title: "EMOJI ATUALIZADO" },
+  [AuditLogEvent.EmojiDelete]: { module: "server", category: "channels", title: "EMOJI APAGADO" },
+  [AuditLogEvent.StickerCreate]: { module: "server", category: "channels", title: "FIGURINHA CRIADA" },
+  [AuditLogEvent.StickerUpdate]: { module: "server", category: "channels", title: "FIGURINHA ATUALIZADA" },
+  [AuditLogEvent.StickerDelete]: { module: "server", category: "channels", title: "FIGURINHA APAGADA" },
+  [AuditLogEvent.ThreadCreate]: { module: "channels", category: "threads", title: "THREAD CRIADA" },
+  [AuditLogEvent.ThreadUpdate]: { module: "channels", category: "threads", title: "THREAD ATUALIZADA" },
+  [AuditLogEvent.ThreadDelete]: { module: "channels", category: "threads", title: "THREAD APAGADA" },
+  [AuditLogEvent.StageInstanceCreate]: { module: "events", category: "stages", title: "STAGE CRIADO" },
+  [AuditLogEvent.StageInstanceUpdate]: { module: "events", category: "stages", title: "STAGE ATUALIZADO" },
+  [AuditLogEvent.StageInstanceDelete]: { module: "events", category: "stages", title: "STAGE ENCERRADO" },
+  [AuditLogEvent.GuildScheduledEventCreate]: { module: "events", category: "scheduled", title: "EVENTO AGENDADO CRIADO" },
+  [AuditLogEvent.GuildScheduledEventUpdate]: { module: "events", category: "scheduled", title: "EVENTO AGENDADO ATUALIZADO" },
+  [AuditLogEvent.GuildScheduledEventDelete]: { module: "events", category: "scheduled", title: "EVENTO AGENDADO APAGADO" },
+  [AuditLogEvent.AutoModerationRuleCreate]: { module: "automod", category: "automod", title: "REGRA DO AUTOMOD CRIADA" },
+  [AuditLogEvent.AutoModerationRuleUpdate]: { module: "automod", category: "automod", title: "REGRA DO AUTOMOD ATUALIZADA" },
+  [AuditLogEvent.AutoModerationRuleDelete]: { module: "automod", category: "automod", title: "REGRA DO AUTOMOD APAGADA" },
+  [AuditLogEvent.AutoModerationBlockMessage]: { module: "automod", category: "automod", title: "MENSAGEM BLOQUEADA PELO AUTOMOD" },
+  [AuditLogEvent.AutoModerationFlagToChannel]: { module: "automod", category: "automod", title: "MENSAGEM SINALIZADA PELO AUTOMOD" },
+  [AuditLogEvent.AutoModerationUserCommunicationDisabled]: { module: "automod", category: "automod", title: "USUÁRIO LIMITADO PELO AUTOMOD" },
+  [AuditLogEvent.AutoModerationQuarantineUser]: { module: "automod", category: "automod", title: "USUÁRIO EM QUARENTENA PELO AUTOMOD" },
+  [AuditLogEvent.SoundboardSoundCreate]: { module: "server", category: "channels", title: "SOM DO SOUNDBOARD CRIADO" },
+  [AuditLogEvent.SoundboardSoundUpdate]: { module: "server", category: "channels", title: "SOM DO SOUNDBOARD ATUALIZADO" },
+  [AuditLogEvent.SoundboardSoundDelete]: { module: "server", category: "channels", title: "SOM DO SOUNDBOARD APAGADO" },
+  [AuditLogEvent.OnboardingPromptCreate]: { module: "server", category: "channels", title: "PERGUNTA DE ONBOARDING CRIADA" },
+  [AuditLogEvent.OnboardingPromptUpdate]: { module: "server", category: "channels", title: "PERGUNTA DE ONBOARDING ATUALIZADA" },
+  [AuditLogEvent.OnboardingPromptDelete]: { module: "server", category: "channels", title: "PERGUNTA DE ONBOARDING REMOVIDA" },
+  [AuditLogEvent.OnboardingCreate]: { module: "server", category: "channels", title: "ONBOARDING CONFIGURADO" },
+  [AuditLogEvent.OnboardingUpdate]: { module: "server", category: "channels", title: "ONBOARDING ATUALIZADO" },
+  [AuditLogEvent.HomeSettingsCreate]: { module: "server", category: "channels", title: "CONFIGURAÇÃO DA PÁGINA INICIAL CRIADA" },
+  [AuditLogEvent.HomeSettingsUpdate]: { module: "server", category: "channels", title: "CONFIGURAÇÃO DA PÁGINA INICIAL ATUALIZADA" },
+  [AuditLogEvent.VoiceChannelStatusCreate]: { module: "voice", category: "voice", title: "STATUS DO CANAL DE VOZ CRIADO" },
+  [AuditLogEvent.VoiceChannelStatusDelete]: { module: "voice", category: "voice", title: "STATUS DO CANAL DE VOZ REMOVIDO" },
+  [AuditLogEvent.ApplicationCommandPermissionUpdate]: { module: "integrations", category: "channels", title: "PERMISSÕES DE COMANDO ATUALIZADAS" },
+  [AuditLogEvent.CreatorMonetizationRequestCreated]: { module: "server", category: "channels", title: "PEDIDO DE MONETIZAÇÃO CRIADO" },
+  [AuditLogEvent.CreatorMonetizationTermsAccepted]: { module: "server", category: "channels", title: "TERMOS DE MONETIZAÇÃO ACEITOS" },
+};
+
+async function recordGatewayAudit(entry: import("discord.js").GuildAuditLogsEntry, guild: Guild, log: Logger): Promise<void> {
+  let mapped = AUDIT_CATEGORIES[entry.action as AuditLogEvent];
+  if (!mapped) return;
+  const isTimeout = entry.action === AuditLogEvent.MemberUpdate && entry.changes.some((change) => change.key === "communication_disabled_until");
+  if (isTimeout) mapped = { module: "moderation", category: "moderation", title: "TIMEOUT DE MEMBRO" };
+  const changes = renderAuditDiff(entry.changes, 900);
+  const target = entry.target as { id?: string; name?: string } | null;
+  const targetId = target?.id;
+  const details = {
+    actorId: entry.executorId ?? undefined,
+    targetId,
+    channelId: entry.extra && "channel" in entry.extra ? (entry.extra.channel as { id?: string } | null)?.id : undefined,
+  };
+  const severity = isTimeout || entry.action === AuditLogEvent.MemberBanAdd || entry.action === AuditLogEvent.ChannelDelete
+    ? "warning" as const : "info" as const;
+  const eventType = mapped.title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const diffSummary = changes.map((field) => field.value.replaceAll("**", "")).join(" · ").slice(0, 900);
+  await recordAudit({
+    guildId: guild.id, module: mapped.module, eventType, actorId: details.actorId, targetId, channelId: details.channelId, severity,
+    data: { targetName: target?.name, summary: `${mapped.title}${target?.name ? ` · ${target.name}` : ""}${diffSummary ? ` · ${diffSummary}` : ""}`, changes: entry.changes },
+  });
+  const config = await moduleConfig(guild.id, "logs");
+  const rendered = renderLogEvent({
+    title: mapped.title,
+    description: `${target?.name ?? (targetId ? `<@${targetId}>` : "Evento do servidor")} · ação de auditoria do Discord.`,
+    ...details,
+    at: entry.createdTimestamp,
+    changes: changes.map((field) => field.value).join("\n"),
+  });
+  if (await shouldIgnoreLogEvent(guild, config, details)) return;
+  const burstKey = `${guild.id}:${entry.action}`;
+  const current = auditBursts.get(burstKey);
+  const item = { summary: target?.name ?? (targetId ? `<@${targetId}>` : "evento"), changes: rendered.fields.find((field) => field.name === "Alterações")?.value };
+  if (current) {
+    current.items.push(item);
+    return;
+  }
+  const burst = { items: [item], timer: setTimeout(() => {
+    auditBursts.delete(burstKey);
+    const items = burst.items.slice(0, 10);
+    const compact = items.map((row) => `• ${row.summary}${row.changes ? ` — ${row.changes.replaceAll("\n", "; ")}` : ""}`).join("\n");
+    void logToChannel(guild, mapped.category, {
+      title: items.length > 1 ? `${mapped.title} · ${items.length} eventos` : mapped.title,
+      description: items.length > 1 ? compact.slice(0, 1800) : rendered.description,
+      fields: items.length > 1 ? [] : rendered.fields,
+      accentColor: severity === "warning" ? "#f5a524" : "#7c5cff",
+    }, log, {});
+  }, 1500) };
+  auditBursts.set(burstKey, burst);
+}
+
+const auditBursts = new Map<string, { items: { summary: string; changes?: string }[]; timer: ReturnType<typeof setTimeout> }>();
 
 async function respond(interaction: Interaction, content: string): Promise<void> {
   try {
@@ -320,6 +463,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
 
   client.on(Events.MessageCreate, (message: Message) => {
     if (message.author.bot || !message.guild) return;
+    void recordMessageLog(message, "message_created", "Mensagem enviada", message.content, log);
 
     void handleMessage(message, log).catch((error) =>
       log.error("falha no automod", { error: String(error) })
@@ -336,7 +480,66 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
 
   client.on(Events.MessageDelete, (message) => {
     if (!message.guild || message.author?.bot) return;
+    void recordMessageLog(message, "message_deleted", "Mensagem apagada", message.content ?? "(conteúdo indisponível)", log);
     void handleGhostPing(message, log).catch(() => undefined);
+  });
+
+  client.on(Events.MessageUpdate, (before, after) => {
+    if (!after.guild || after.author?.bot) return;
+    if (before.content === after.content) return;
+    void recordMessageLog(after, "message_edited", "Mensagem editada", `**Antes:** ${before.content || "(vazio)"}\n**Depois:** ${after.content || "(vazio)"}`, log);
+  });
+
+  client.on(Events.GuildMemberAdd, (member) => {
+    void auditAndLog(member.guild, {
+      module: "members", category: "members", eventType: "member_joined", targetId: member.id,
+      title: "MEMBRO ENTROU", description: `<@${member.id}> entrou no servidor.`,
+      fields: [{ name: "Conta criada", value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>` }],
+    }, log);
+  });
+
+  client.on(Events.GuildMemberRemove, (member) => {
+    void auditAndLog(member.guild, {
+      module: "members", category: "members", eventType: "member_left", targetId: member.id,
+      title: "MEMBRO SAIU", description: `<@${member.id}> saiu do servidor.`,
+    }, log);
+  });
+
+  client.on(Events.GuildMemberUpdate, (before, after) => {
+    const changes: string[] = [];
+    if (before.nickname !== after.nickname) changes.push(`Apelido: ${before.nickname ?? "nenhum"} → ${after.nickname ?? "nenhum"}`);
+    const oldRoles = new Set(before.roles.cache.keys());
+    const newRoles = new Set(after.roles.cache.keys());
+    const added = [...newRoles].filter((id) => !oldRoles.has(id));
+    const removed = [...oldRoles].filter((id) => !newRoles.has(id));
+    if (added.length) changes.push(`Cargos adicionados: ${added.map((id) => `<@&${id}>`).join(", ")}`);
+    if (removed.length) changes.push(`Cargos removidos: ${removed.map((id) => `<@&${id}>`).join(", ")}`);
+    if (!changes.length) return;
+    void auditAndLog(after.guild, {
+      module: "members", category: "members", eventType: "member_updated", targetId: after.id,
+      title: "MEMBRO ATUALIZADO", description: `Alterações em <@${after.id}>.`,
+      fields: [{ name: "Antes → depois", value: changes.join("\n").slice(0, 900) }],
+    }, log);
+  });
+
+  client.on(Events.VoiceStateUpdate, (before, after) => {
+    const guild = after.guild;
+    const oldChannel = before.channel;
+    const newChannel = after.channel;
+    if (oldChannel?.id === newChannel?.id) return;
+    const eventType = !oldChannel ? "voice_joined" : !newChannel ? "voice_left" : "voice_moved";
+    const transition = !oldChannel ? `entrou em <#${newChannel!.id}>` : !newChannel ? `saiu de <#${oldChannel.id}>` : `moveu-se de <#${oldChannel.id}> para <#${newChannel.id}>`;
+    void auditAndLog(guild, {
+      module: "voice", category: "voice", eventType, targetId: after.id,
+      title: "ATIVIDADE DE VOZ", description: `<@${after.id}> ${transition}.`,
+      channelId: newChannel?.id ?? oldChannel?.id,
+    }, log);
+  });
+
+  client.on(Events.GuildAuditLogEntryCreate, (entry, guild) => {
+    void recordGatewayAudit(entry, guild, log).catch((error) =>
+      log.warn("falha ao registrar evento do audit log", { guildId: guild.id, error: String(error) })
+    );
   });
 
   // Sem anotacao de tipo: o evento ja carrega a assinatura correta, e
@@ -394,8 +597,8 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   // Poda: auditoria e estatisticas, para os arquivos nao crescerem para sempre.
   const pruneTimer = setInterval(() => {
     void (async () => {
-      await pruneAudit(log).catch(() => 0);
       for (const guild of client.guilds.cache.values()) {
+        await pruneAudit(log, undefined, guild.id).catch(() => 0);
         await pruneStatistics(guild.id, log).catch(() => 0);
       }
     })();

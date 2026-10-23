@@ -40,6 +40,19 @@ test("campos vazios do log sao descartados", () => {
   assert.equal(semCampos.components[0].components.length, comVazio.components[0].components.length);
 });
 
+test("diff longo nao apaga o autor e respeita o teto de 4000 caracteres", () => {
+  const payload = buildLogPayload({
+    title: "CANAL ATUALIZADO",
+    description: "Autor <@123> alterou o canal.",
+    fields: [{ name: "Antes → depois", value: "permissão\n".repeat(1000) }],
+  });
+  const total = (payload.components[0].components as Array<{ type: number; content?: string }>)
+    .filter((item) => item.type === 10)
+    .reduce((sum, item) => sum + (item.content?.length ?? 0), 0);
+  assert.ok(total <= 4000);
+  assert.match((payload.components[0].components[0] as { content: string }).content, /Autor <@123>/);
+});
+
 test("painel sem botoes continua valido", () => {
   const payload = buildPanelPayload({ title: "Aviso", description: "Sem acao aqui." });
   assert.equal(payload.flags, IS_COMPONENTS_V2);

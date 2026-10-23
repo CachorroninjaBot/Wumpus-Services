@@ -10,7 +10,32 @@
 Todo evento relevante do servidor vira uma mensagem detalhada no canal de logs,
 com autor, alvo, antes/depois e link — não uma linha seca.
 
-## Estado atual (verificado)
+## Estado da implementação
+
+- [x] Histórico real do bot na tela de auditoria, com busca, filtro por
+  categoria, severidade, alvo e atualização periódica autenticada por servidor.
+- [x] Mensagens enviadas (quando habilitado), editadas, apagadas e bulk delete;
+  entradas/saídas, apelidos/cargos, timeout, voz e eventos do audit log do
+  Discord para canais, cargos, banimentos, convites, webhooks, integrações,
+  emojis, stickers, threads, AutoMod, onboarding, stages e eventos agendados.
+- [x] Diff do audit log mostra antes/depois e corta os campos excedentes sem
+  eliminar autor e descrição; rajadas do mesmo tipo são agrupadas em uma única
+  mensagem.
+- [x] Filtros por usuário, cargo e canal aplicados antes da renderização;
+  mensagens do bot podem ser ignoradas.
+- [x] Payloads Components V2 não enviam content ou embeds, têm teto de texto
+  de 4000 caracteres, menções controladas e formato compacto configurável.
+- [x] Categorias, retenção por servidor, timestamp e menção em eventos críticos
+  são configuráveis. A poda usa a retenção publicada no runtime.
+- [x] Voice States foi habilitado nos intents. Sem View Audit Log, eventos
+  vindos do audit log do Discord não são entregues pelo gateway; falhas de
+  publicação continuam best-effort e aparecem no logger do bot.
+
+**Verificação manual no Discord:** ainda precisa de um servidor de teste com o
+bot instalado para confirmar mensagens do gateway, permissões e formato visual
+ao vivo. A suíte cobre diffs e limites de payload localmente.
+
+## Implementação anterior (antes desta etapa)
 
 `src/bot/logs.ts` já tem a espinha: `recordAudit` (histórico em `data/audit.json`)
 e `logToChannel` (mensagem no Discord). A auditoria é best-effort — falha de canal
@@ -23,19 +48,16 @@ Categorias declaradas em `CATEGORY_FLAG`:
 | moderation | `logModeration` | ✅ |
 | members | `logMembers` | ✅ |
 | messages | `logMessages` | ✅ |
-| voice | `logVoice` | ❌ **não existe** |
+| voice | `logVoice` | ✅ |
 | roles | `logRoles` | ✅ |
-| channels | `logChannels` | ❌ **não existe** |
+| channels | `logChannels` | ✅ |
 | bans | `logBans` | ✅ |
 | automod | `logAutoMod` | ✅ |
 
-**Bug real encontrado ao escrever este plano:** `logVoice` e `logChannels` são
-lidos pelo bot mas **não existem em `moduleDefaults.logs`**. Dependendo do
-fallback de `bool()`, logs de voz e de canal **nunca disparam** — em silêncio.
-Exatamente o padrão "campo que o bot lê e a UI nunca escreve", invertido.
+Os defaults foram consolidados no core e no painel: flags de voz, canais,
+threads, stages e eventos agendados agora existem e são consumidos.
 
-Conferir também `compactMode` e `retentionDays`: existem no default, mas não
-achei quem os leia. Podem ser decoração.
+`compactMode` altera o formato; `retentionDays` controla a poda por servidor.
 
 ## Cobertura desejada
 

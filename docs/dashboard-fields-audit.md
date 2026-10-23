@@ -11,13 +11,13 @@ Escopo conferido antes de encerrar o plano de dashboard: chaves de `src/lib/wump
 | `forms` | `panelFormat` | O bot publica Components V2 independentemente do valor. |
 | `moderation` | `publicLogging` | Não há leitor no bot. |
 | `security` | `autoBanRepeatOffenders`, `whitelistRoleIds` | Não há leitor no bot. Revisar junto do plano de segurança. |
-| `logs` | `compactMode`, `mentionRoleId` | Não há leitor no bot. Revisar junto do plano de logs. |
+| `logs` | `compactMode`, `mentionRoleId` | Consumidos pelo formato compacto e menções configuradas em alertas críticos. |
 | `staff` | `pingOnClaim`, `autoArchiveDays` | Não há leitor no bot. |
 | `knowledge` | `autoSuggest` | Há controle na tela, mas nenhum consumidor no bot. |
 | `statistics` | `anonymizeUsers` | Não há leitor no bot. |
 | `roles` | `allowAiDrafts` | Não há leitor no bot. |
 
-A checagem foi feita em `src/bot/` com busca de cada chave e inspeção do caminho de configuração. Os itens marcados acima não foram removidos nesta etapa porque alguns pertencem aos planos subsequentes (`logs` e `security`) e a remoção mudaria a configuração persistida dos servidores. Antes de expor novamente um desses controles, implementar e verificar seu consumidor ou removê-lo com migração explícita.
+A checagem foi feita em `src/bot/` com busca de cada chave e inspeção do caminho de configuração. Os campos de `logs` foram concluídos no plano de logs; os de `security` ficam para o plano seguinte. Os outros itens não foram removidos porque isso mudaria a configuração persistida dos servidores. Antes de expor novamente um campo sem consumidor, implementar seu uso ou removê-lo com migração explícita.
 
 ## Estado conectado durante este plano
 

@@ -12,10 +12,10 @@
  * ter efeito nem a auditoria de ser gravada.
  */
 import type { Guild } from "discord.js";
-import { bool, isEnabled, list, moduleConfig, str } from "./config.ts";
+import { bool, isEnabled, list, moduleConfig, num, str } from "./config.ts";
 import type { Logger } from "./logger.ts";
 import { buildLogPayload, type LogField } from "./panels.ts";
-import { resolveChannel, resolveRoles } from "./resolve.ts";
+import { resolveChannel, resolveRole, resolveRoles } from "./resolve.ts";
 import { mutate, nextId } from "./store.ts";
 
 export type Severity = "info" | "warning" | "critical";
@@ -42,7 +42,10 @@ const CATEGORY_FLAG: Record<string, string> = {
   roles: "logRoles",
   channels: "logChannels",
   bans: "logBans",
-  automod: "logAutoMod"
+  automod: "logAutoMod",
+  threads: "logThreadEvents",
+  stages: "logStageEvents",
+  scheduled: "logScheduledEvents",
 };
 
 /**
@@ -84,12 +87,13 @@ export async function shouldIgnoreLogEvent(
   if (details.actorId && ignoredUsers.has(details.actorId)) return true;
   if (details.targetId && ignoredUsers.has(details.targetId)) return true;
 
-  const ignoredMentionInChannel = list(config, "ignoredChannelIds");
+  const ignoredMentionInChannel = [...list(config, "ignoredChannelIds"), ...list(config, "ignoreChannelIds")];
   if (details.channelId && ignoredMentionInChannel.includes(details.channelId)) return true;
 
-  const ignoredRoleIds = new Set(
-    resolveRoles(guild, list(config, "ignoredRoleIds")).map((role) => role.id)
-  );
+  const configuredIgnoredRoles = list(config, "ignoredRoleIds");
+  if (configuredIgnoredRoles.length === 0) return false;
+  const ignoredRoleIds = new Set(resolveRoles(guild, configuredIgnoredRoles).map((role) => role.id));
+  if (ignoredRoleIds.size === 0) return false;
 
   const actorMember = details.actorId ? await guild.members.fetch(details.actorId).catch(() => null) : null;
   const targetMember = details.targetId ? await guild.members.fetch(details.targetId).catch(() => null) : null;
@@ -116,9 +120,27 @@ export async function logToChannel(
     if (await shouldIgnoreLogEvent(guild, config, details)) return false;
 
     const channel = resolveChannel(guild, str(config, "channelId"));
-    if (!channel || !channel.isTextBased()) return false;
+    if (!channel || !channel.isTextBased()) {
+      log.warn("canal de logs ausente ou não aceita mensagens", { guildId: guild.id, channelId: str(config, "channelId") });
+      return false;
+    }
 
-    await channel.send(buildLogPayload(payload) as never);
+    const compact = bool(config, "compactMode", false);
+    const hasTimestamp = (payload.fields ?? []).some((field) => field.name === "Horário");
+    const timestamped = bool(config, "includeTimestamp", true) && !hasTimestamp
+      ? { ...payload, fields: [{ name: "Horário", value: `<t:${Math.floor(Date.now() / 1000)}:F>` }, ...(payload.fields ?? [])] }
+      : payload;
+    const mention = bool(config, "mentionOnCritical", false) && payload.accentColor === "#ff5c6c"
+      ? resolveRole(guild, str(config, "mentionRoleId"))?.id ?? ""
+      : "";
+    await channel.send({
+      ...buildLogPayload({
+        ...timestamped,
+        mention,
+        compact,
+      }),
+      allowedMentions: mention ? { parse: [], roles: [mention] } : { parse: [] },
+    } as never);
     return true;
   } catch (error) {
     log.warn("nao consegui publicar no canal de logs", { guildId: guild.id, category, error: String(error) });
@@ -178,22 +200,24 @@ export async function auditAndLog(
  * Descarta eventos mais antigos que `retentionDays` do modulo de logs.
  * Sem isso o arquivo de auditoria cresce para sempre.
  */
-export async function pruneAudit(log: Logger, retentionDays = 180): Promise<number> {
+export async function pruneAudit(log: Logger, retentionDays?: number, guildId?: string): Promise<number> {
   try {
-    const days = Math.max(7, Math.trunc(retentionDays) || 180);
+    const config = guildId ? await moduleConfig(guildId, "logs") : null;
+    const days = Math.max(7, Math.trunc(retentionDays ?? num(config, "retentionDays", 180)) || 180);
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
     let removed = 0;
     await mutate<AuditEvent>("audit", (rows) => {
       const kept = rows.filter((row) => {
         const at = Date.parse(row.at);
+        if (guildId && row.guildId !== guildId) return true;
         return !Number.isFinite(at) || at >= cutoff;
       });
       removed = rows.length - kept.length;
       return kept;
     });
 
-    if (removed > 0) log.info("auditoria podada", { removed, retentionDays: days });
+    if (removed > 0) log.info("auditoria podada", { removed, retentionDays: days, guildId: guildId ?? "all" });
     return removed;
   } catch {
     return 0;

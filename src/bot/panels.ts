@@ -76,20 +76,28 @@ export function buildLogPayload(input: {
   description: string;
   accentColor?: string;
   fields?: LogField[];
+  mention?: string;
+  compact?: boolean;
 }) {
-  const children: unknown[] = [textDisplay(`## ${input.title}\n${input.description}`)];
-
   const fields = (input.fields ?? []).filter((field) => field.value && field.value.trim());
-  if (fields.length) {
+  const body = `${input.mention ? `<@&${input.mention}>\n` : ""}## ${input.title}\n${input.description}`;
+  const fieldText = input.compact
+    ? fields.map((field) => `**${field.name}:** ${field.value.replaceAll("\n", " ")}`).join(" · ")
+    : fields.map((field) => `**${field.name}**\n${field.value}`).join("\n\n");
+  const bodyBudget = fieldText ? Math.min(2200, body.length) : TEXT_BUDGET;
+  const bodyBlock = body.slice(0, bodyBudget);
+  const fieldBudget = Math.max(0, TEXT_BUDGET - bodyBlock.length - (fieldText ? 2 : 0));
+  const fieldsBlock = fieldText.slice(0, fieldBudget);
+  const children: unknown[] = [textDisplay(bodyBlock)];
+  if (fieldsBlock) {
     children.push(separator());
-    children.push(
-      textDisplay(fields.map((field) => `**${field.name}**\n${field.value}`).join("\n\n"))
-    );
+    children.push(textDisplay(fieldsBlock));
   }
 
   return {
     flags: IS_COMPONENTS_V2,
-    components: [container(input.accentColor ?? "#7c5cff", children)]
+    components: [container(input.accentColor ?? "#7c5cff", children)],
+    ...(input.mention ? { allowedMentions: { roles: [input.mention] } } : {}),
   };
 }
 
