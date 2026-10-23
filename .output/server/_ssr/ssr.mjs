@@ -1,17 +1,25 @@
 import { n as __exportAll } from "../_runtime.mjs";
-import { o as require_react, s as require_jsx_runtime } from "../_libs/@radix-ui/react-collection+[...].mjs";
+import { o as require_jsx_runtime, s as require_react } from "../_libs/@radix-ui/react-collection+[...].mjs";
 import { D as toCrossJSONAsync, F as waitForReason, G as parseRedirect, H as isPromise, I as _getRenderedMatches, K as rootRouteId, L as executeRewriteInput, M as getStylesheetHref, N as resolveManifestAssetLink, O as toCrossJSONStream, P as resolveManifestCssLink, R as invariant, T as fromJSON, V as isDangerousProtocol, W as isRedirect, a as isSsrResponse, c as stripSsrResponseBody, i as disposeSsrResponse, j as getScriptPreloadAttrs, m as RouterProvider, n as bindSsrResponseToRequest, o as normalizeSsrResponse, q as isNotFound, r as defineHandlerCallback, s as replaceSsrResponse, t as renderRouterToStream } from "../_libs/@tanstack/react-router+[...].mjs";
 import { n as createServerHistory } from "../_libs/tanstack__history.mjs";
 import { a as defaultSerovalDeserializerPlugins, i as createRawStreamRPCPlugin, n as attachRouterServerSsrUtils, o as makeSerovalPlugin, r as getNormalizedURL, s as createSerializationAdapter, t as mergeHeaders } from "../_libs/@tanstack/router-core+[...].mjs";
-import { n as toResponse, t as H3Event } from "../_libs/h3-v2+rou3.mjs";
+import { a as setCookie, i as parseCookies, n as deleteCookie, o as toResponse, r as getRequestIP, t as H3Event } from "../_libs/h3-v2+rou3.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 //#region node_modules/.nitro/vite/services/ssr/index.js
 var ssr_exports = /* @__PURE__ */ __exportAll({
+	a: () => getServerFnById,
+	c: () => getRequestIP$1,
 	createServerEntry: () => createServerEntry,
+	d: () => setResponseHeaders,
 	default: () => server_default,
-	n: () => TSS_SERVER_FUNCTION,
-	r: () => getServerFnById,
-	t: () => createServerFn
+	i: () => TSS_SERVER_FUNCTION,
+	l: () => setCookie$1,
+	n: () => createMiddleware,
+	o: () => deleteCookie$1,
+	r: () => createServerFn,
+	s: () => getCookie,
+	t: () => createCsrfMiddleware,
+	u: () => setResponseHeader
 });
 require_react();
 var import_jsx_runtime = require_jsx_runtime();
@@ -74,6 +82,72 @@ function getH3Event() {
 	if (!event) throw new Error(`No StartEvent found in AsyncLocalStorage. Make sure you are using the function within the server runtime.`);
 	return event.h3Event;
 }
+function getRequestIP$1(opts) {
+	return getRequestIP(getH3Event(), opts);
+}
+function setResponseHeaders(headers) {
+	const event = getH3Event();
+	if (event.res.headers === headers) return;
+	let previousName = "";
+	for (const [name, value] of headers) {
+		event.res.headers[name === previousName ? "append" : "set"](name, value);
+		previousName = name;
+	}
+}
+function setResponseHeader(name, value) {
+	const event = getH3Event();
+	if (Array.isArray(value)) {
+		event.res.headers.delete(name);
+		for (const valueItem of value) event.res.headers.append(name, valueItem);
+	} else event.res.headers.set(name, value);
+}
+/**
+* Parse the request to get HTTP Cookie header string and return an object of all cookie name-value pairs.
+* @returns Object of cookie name-value pairs
+* ```ts
+* const cookies = getCookies()
+* ```
+*/
+function getCookies() {
+	const cookies = parseCookies(getH3Event());
+	const definedCookies = Object.create(null);
+	for (const [name, value] of Object.entries(cookies)) if (value !== void 0) definedCookies[name] = value;
+	return definedCookies;
+}
+/**
+* Get a cookie value by name.
+* @param name Name of the cookie to get
+* @returns {*} Value of the cookie (String or undefined)
+* ```ts
+* const authorization = getCookie('Authorization')
+* ```
+*/
+function getCookie(name) {
+	return getCookies()[name];
+}
+/**
+* Set a cookie value by name.
+* @param name Name of the cookie to set
+* @param value Value of the cookie to set
+* @param options {CookieSerializeOptions} Options for serializing the cookie
+* ```ts
+* setCookie('Authorization', '1234567')
+* ```
+*/
+function setCookie$1(name, value, options) {
+	setCookie(getH3Event(), name, value, options);
+}
+/**
+* Remove a cookie by name.
+* @param name Name of the cookie to delete
+* @param serializeOptions {CookieSerializeOptions} Cookie options
+* ```ts
+* deleteCookie('SessionId')
+* ```
+*/
+function deleteCookie$1(name, options) {
+	deleteCookie(getH3Event(), name, options);
+}
 function getResponse() {
 	return getH3Event().res;
 }
@@ -88,7 +162,7 @@ var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 * the dev styles URL for route-scoped CSS collection.
 */
 async function getStartManifest(matchedRoutes) {
-	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-Dk8olsSZ.mjs");
+	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-CSScLwJZ.mjs");
 	const startManifest = tsrStartManifest();
 	let routes = startManifest.routes;
 	routes[rootRouteId];
@@ -108,41 +182,161 @@ async function getStartManifest(matchedRoutes) {
 	};
 }
 var manifest = {
+	"0a9aedbfe06e78b28ed123caf38fa2920978c412f962f7cd5172fe5cbd5cca2e": {
+		functionName: "updateGuildKnowledgeFaqSuggestion_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"204c6d0dc498913bd12eb3699ddf923772258e293049e5fa66d53e02bee5510f": {
+		functionName: "getAdminOverview_createServerFn_handler",
+		importer: () => import("./admin-DMSJtpTx.mjs")
+	},
 	"2100c9bd45e20d4160606b2c28cd31067d4ed526907470941477a8eb4339333d": {
 		functionName: "getDiscordLoginUrl_createServerFn_handler",
-		importer: () => import("./oauth-Bd_iqpaO.mjs")
+		importer: () => import("./oauth-Bo5NsZ1x.mjs")
+	},
+	"24de73364d1f308dec510650818dea2701f12eeeded6485f0ecfb911fff1b468": {
+		functionName: "forceGuildResync_createServerFn_handler",
+		importer: () => import("./admin-DMSJtpTx.mjs")
+	},
+	"258e1c44f287684cfbe21be25fcd1ea359b3a43f52be0a9d6488902d3fb51b00": {
+		functionName: "acknowledgeGuildSecurityIncident_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
 	},
 	"30a37a9ee6e9b3f9bcacb568570cc71457d80b8808ca78d33d208fee7b93418f": {
 		functionName: "publishGuildRuntime_createServerFn_handler",
-		importer: () => import("./runtime-store-Ci8Xb6Vx.mjs")
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"30dda75f3854dd8b6ee6a130550e74ddd6b834b7554cb8af25387a60efad6ad4": {
+		functionName: "getGuildKnowledgeFaqSuggestions_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"4253c6f610e625fb4ebed05a04c5eedcbc5074c7d3aea9bdf9a7de23a0e152e5": {
+		functionName: "manageAdminUser_createServerFn_handler",
+		importer: () => import("./admin-DMSJtpTx.mjs")
+	},
+	"438f9a3eddb494a18f3b6a3fe5e9030fb10aaccb65bb641a0680cb4fe57a1f79": {
+		functionName: "askWumpusAssistant_createServerFn_handler",
+		importer: () => import("./assistant-KsyX80nk.mjs")
+	},
+	"5a310377f10a793a6609a5227d479019ea4831e454e5c1d5317bba33a59172e8": {
+		functionName: "getTicketActionStatus_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"5c5e8c61427dd867557d23d8c3d79fdd7998d07462639b0217af5b79777a6ef9": {
+		functionName: "getGuildPlanUsage_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"606b6fe34d69f69335a74947114d4875fc638b4ec593b8d3ff8db8f8ce0c9ac0": {
+		functionName: "getDiscordGuildResources_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"67674983557718382707e61482f5d459712f482f3ffddc071f57860ebd3afca6": {
+		functionName: "requestSecurityLockdown_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"6e3b4cddbcf99ad6643c7d95b374042c0a891354d1914fe1511e5756ba2d9357": {
+		functionName: "grantAdminAccess_createServerFn_handler",
+		importer: () => import("./admin-DMSJtpTx.mjs")
+	},
+	"71815d92c95a10dec3dab1bc883bc97d48dce18efeb200568eab00b12059a146": {
+		functionName: "getGuildProtectionReadiness_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"782f207f17185c8a85a3eee61e959861cbd0af9c8d1f46f99261b97a2340a731": {
+		functionName: "revokeAdminGrant_createServerFn_handler",
+		importer: () => import("./admin-DMSJtpTx.mjs")
+	},
+	"82dcb7d190fb62369162b71fa08803341f25217c7cc205b4bffe8de747a746d7": {
+		functionName: "heartbeatDashboardSession_createServerFn_handler",
+		importer: () => import("./session-19MrTuLH.mjs")
+	},
+	"91ec17e334fa434f071540e215f473cc9a206c4ed8dbc9c8b95bb1034c1ca535": {
+		functionName: "getGuildActivity_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"981427b878ee377945b2e56067005274e33d26c23d99ea703fd86d70c19f3e8b": {
+		functionName: "getGuildSecurityActionStatus_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"9af265fac887a2955e3de02d1ca3ecfd4454cce0e9ce35902aa498f8816a10ea": {
+		functionName: "getFormReviewStatus_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
 	},
 	"a024cd76e8fb329ddfcdb1c38889490faa45e6108c073941bd702ae77c295ec9": {
 		functionName: "startSession_createServerFn_handler",
-		importer: () => import("./session-BIVzXnjV.mjs")
+		importer: () => import("./session-19MrTuLH.mjs")
+	},
+	"a3cf4b1c0e81389dd1f5eee5a0b6f2b16d615eb7afdaa62f92c4fb55b3e5a056": {
+		functionName: "getPublicBotHealth_createServerFn_handler",
+		importer: () => import("./health-DU0bf93P.mjs")
+	},
+	"b1afee38b841e12e71119496d9c43a906867e6b9295799889ab2fe4296f64950": {
+		functionName: "requestSecurityRestore_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"b256f5c8d8234a219db62b31cdaabd5ffb4657f4558c521b424cd1dab11afe1d": {
+		functionName: "logoutDashboardSession_createServerFn_handler",
+		importer: () => import("./session-19MrTuLH.mjs")
+	},
+	"b2912d9d137371b8041f72110b40a1e239d00eb9d444b1be0358ce299b84c579": {
+		functionName: "getGuildTickets_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
 	},
 	"b5230e82ec52d306c1c899b8f05536cf0e83719f5d257c240dc52d74cb23ad88": {
 		functionName: "requestPanelPublish_createServerFn_handler",
-		importer: () => import("./runtime-store-Ci8Xb6Vx.mjs")
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
 	},
 	"b9a31d924c524dddaf890676d785aa8d2a8d9127a7a46441da06dd50c4eef0e6": {
 		functionName: "getPublishStatus_createServerFn_handler",
-		importer: () => import("./runtime-store-Ci8Xb6Vx.mjs")
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"b9b8e846fa3145d26239c5638788555f03fae8c509bab04f90a095db8d75760c": {
+		functionName: "getMyBilling_createServerFn_handler",
+		importer: () => import("./shardpay-BiXaDHTg.mjs")
+	},
+	"c0334f5407256a1465c25d9206c318c157fd8fc515e41b1efe991259a7c6c018": {
+		functionName: "getGuildAudit_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"c1c5b6a87876396132bce00be187b354cb998ce9a52642b9397b21619e73a017": {
+		functionName: "getServerGroups_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"c426bdfea4bb9fba6f4aa4c70a229423803e276176cec6424f6f0fdc75541995": {
+		functionName: "saveServerGroups_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"c489afc464e3276614b23adecc854fd377eab555a42946d9716a8544cd8a33c3": {
+		functionName: "getOwnerGuildDiagnostics_createServerFn_handler",
+		importer: () => import("./session-19MrTuLH.mjs")
+	},
+	"cc4a9e4381f3f2d3f382e19e42aa705323334bfb602f201c612f903c009c178f": {
+		functionName: "requestFormReview_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
+	},
+	"d0386fb61e627f8b02a36730413f8ccd52802233aa1646da0aa2e141729a1871": {
+		functionName: "getGuildSecurityIncidents_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
 	},
 	"d478b4fac09a04b4fe2c698c93b9e5f8a6a72ed12aa41f680be20557554c9132": {
 		functionName: "getBilling_createServerFn_handler",
-		importer: () => import("./shardpay-BUUX9Utd.mjs")
+		importer: () => import("./shardpay-BiXaDHTg.mjs")
+	},
+	"dc20c917c72887b051d7da702850b045784fb4db13fc576e57e823398f85712b": {
+		functionName: "requestTicketAction_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
 	},
 	"e23c83f0285558e3636ed3183139e0c2c2047f6b3edfcabceda3510897a0ba57": {
 		functionName: "resolveAccess_createServerFn_handler",
-		importer: () => import("./session-BIVzXnjV.mjs")
-	},
-	"e3ff6f93018f69ff6e0fba5a77225b4f52a16d74a6ff0ce6af19cfbbd62e838b": {
-		functionName: "exchangeDiscordCode_createServerFn_handler",
-		importer: () => import("./oauth-Bd_iqpaO.mjs")
+		importer: () => import("./session-19MrTuLH.mjs")
 	},
 	"f34dffdf3ceb3926a04d3a357b73c5534a46b6db3875e1f151de016d002ca894": {
 		functionName: "analyzeWithGrok_createServerFn_handler",
-		importer: () => import("./analyze-C259PSMr.mjs")
+		importer: () => import("./analyze-Daj_d14P.mjs")
+	},
+	"fe44600c6b57dae1222f424222cf46fd327679e11c94de4f51f76375d49a5145": {
+		functionName: "getGuildFormSubmissions_createServerFn_handler",
+		importer: () => import("./runtime-store-oU0bUdd8.mjs")
 	}
 };
 async function getServerFnById(id, access) {
@@ -1536,8 +1730,8 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
 	const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-		import("./router-BRZ_yPpT.mjs").then((n) => n.t),
-		import("./start-5Z2QO8AU.mjs"),
+		import("./router-DlyrBhH9.mjs").then((n) => n.t),
+		import("./start-BHR8e7_z.mjs"),
 		import("./empty-plugin-adapters-D9UWiqvJ.mjs")
 	]);
 	return {
@@ -2001,4 +2195,4 @@ function createServerEntry(entry) {
 }
 var server_default = createServerEntry({ fetch });
 //#endregion
-export { createServerEntry, server_default as default, ssr_exports as i, TSS_SERVER_FUNCTION as n, getServerFnById as r, createServerFn as t };
+export { getServerFnById as a, getRequestIP$1 as c, createServerEntry, setResponseHeaders as d, server_default as default, ssr_exports as f, TSS_SERVER_FUNCTION as i, setCookie$1 as l, createMiddleware as n, deleteCookie$1 as o, createServerFn as r, getCookie as s, createCsrfMiddleware as t, setResponseHeader as u };

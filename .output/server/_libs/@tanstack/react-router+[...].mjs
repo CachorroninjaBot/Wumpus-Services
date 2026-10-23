@@ -1,5 +1,5 @@
 import { i as __toESM, r as __require, t as __commonJSMin } from "../../_runtime.mjs";
-import { o as require_react, s as require_jsx_runtime } from "../@radix-ui/react-collection+[...].mjs";
+import { o as require_jsx_runtime, s as require_react } from "../@radix-ui/react-collection+[...].mjs";
 import { i as parseHref, r as normalizeProtocolRelative } from "../tanstack__history.mjs";
 import { m as require_react_dom } from "../@radix-ui/react-dialog+[...].mjs";
 import { PassThrough, Readable } from "node:stream";
@@ -3525,7 +3525,6 @@ var BaseRootRoute = class extends BaseRoute {
 };
 //#endregion
 //#region node_modules/seroval/dist/index.js
-var import_jsx_runtime = require_jsx_runtime();
 var SYM_ASYNC_ITERATOR = Symbol.asyncIterator;
 var SYM_HAS_INSTANCE = Symbol.hasInstance;
 var SYM_IS_CONCAT_SPREADABLE = Symbol.isConcatSpreadable;
@@ -6189,6 +6188,7 @@ function fromJSON(source, options = {}) {
 }
 //#endregion
 //#region node_modules/@tanstack/react-router/dist/esm/CatchBoundary.js
+var import_jsx_runtime = require_jsx_runtime();
 var CatchBoundary = class extends import_react.Component {
 	constructor(..._args) {
 		super(..._args);

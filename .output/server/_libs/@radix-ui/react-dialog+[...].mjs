@@ -1,5 +1,5 @@
 import { i as __toESM, t as __commonJSMin } from "../../_runtime.mjs";
-import { a as useComposedRefs, i as createSlot, n as createContextScope, o as require_react, s as require_jsx_runtime } from "./react-collection+[...].mjs";
+import { a as useComposedRefs, i as createSlot, n as createContextScope, o as require_jsx_runtime, s as require_react } from "./react-collection+[...].mjs";
 import { t as composeEventHandlers } from "../radix-ui__primitive.mjs";
 import { __assign, __rest, __spreadArray } from "tslib";
 //#region node_modules/react-dom/cjs/react-dom.production.js

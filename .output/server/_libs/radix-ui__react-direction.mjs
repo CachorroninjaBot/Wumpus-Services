@@ -1,5 +1,5 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { o as require_react, s as require_jsx_runtime } from "./@radix-ui/react-collection+[...].mjs";
+import { o as require_jsx_runtime, s as require_react } from "./@radix-ui/react-collection+[...].mjs";
 //#region node_modules/@radix-ui/react-direction/dist/index.mjs
 var import_react = /* @__PURE__ */ __toESM(require_react(), 1);
 require_jsx_runtime();
