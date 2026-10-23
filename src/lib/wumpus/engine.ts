@@ -1,6 +1,7 @@
 import type { AutomodVerdict, Member, RecentMessage, Ticket } from "./types";
 import { moduleDefaults, type ModuleKey, type PresetId, presets } from "./defaults";
-import type { PlanId } from "./catalog";
+export { monthlyOcrLimit, planAllows } from "./plan-features";
+export type { PlanFeature } from "./plan-features";
 
 const INVITE_RE = /(?:discord\.gg|discord\.com\/invite)\/[a-z0-9-]+/i;
 const URL_RE = /https?:\/\/[^\s]+/i;
@@ -219,21 +220,6 @@ export function effectiveStrikes(
     (c) => c.targetId === targetId && c.createdAt < cutoff && (c.action === "warn" || c.action === "timeout"),
   ).length;
   return Math.max(0, stored - expired);
-}
-
-export type PlanFeature = "forms" | "ai" | "multiDepartment" | "antiNuke" | "transcripts";
-
-const PLAN_RANK: Record<PlanId, number> = { essencial: 0, pro: 1, escala: 2, vitalicio: 2 };
-const FEATURE_RANK: Record<PlanFeature, number> = {
-  forms: 0,
-  multiDepartment: 0,
-  antiNuke: 0,
-  ai: 1,
-  transcripts: 1,
-};
-
-export function planAllows(plan: PlanId, feature: PlanFeature): boolean {
-  return PLAN_RANK[plan] >= FEATURE_RANK[feature];
 }
 
 export type SlaState = "ok" | "warning" | "breach";

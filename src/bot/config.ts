@@ -11,6 +11,9 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { PlanId } from "../lib/wumpus/catalog.ts";
+import { isPlanId, planAllows } from "../lib/wumpus/plan-features.ts";
+import { readGuildLicenses, type GuildLicense } from "../lib/wumpus/license-store.server.ts";
 
 export type ModuleConfig = Record<string, unknown>;
 export type GuildConfig = Record<string, ModuleConfig | string | undefined>;
@@ -22,6 +25,7 @@ const TTL_MS = 5_000;
 const EMPTY: Runtime = { updatedAt: 0, guilds: {} };
 
 let cache: { runtime: Runtime; at: number } | null = null;
+let licenseCache: { byGuild: Record<string, GuildLicense>; at: number } | null = null;
 
 function runtimePath(): string {
   return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
@@ -49,19 +53,54 @@ export async function loadRuntime(force = false): Promise<Runtime> {
   }
 }
 
+async function loadLicenses(force = false): Promise<Record<string, GuildLicense>> {
+  if (!force && licenseCache && Date.now() - licenseCache.at < TTL_MS) return licenseCache.byGuild;
+  const licenses = await readGuildLicenses();
+  licenseCache = { byGuild: licenses.byGuild, at: Date.now() };
+  return licenses.byGuild;
+}
+
 /** Config de um modulo num servidor. `null` quando o painel ainda nao publicou esse modulo. */
 export async function moduleConfig(guildId: string, module: string): Promise<ModuleConfig | null> {
   const runtime = await loadRuntime();
-  const saved = runtime.guilds?.[guildId]?.[module];
+  const guild = runtime.guilds?.[guildId];
+  const entitlement = (await loadLicenses())[guildId];
+  if (!entitlement || entitlement.status !== "active" || !isPlanId(entitlement.planId)) return null;
+  const planId = entitlement.planId;
+  if (module === "ocr" && !planAllows(planId, "ocr")) return null;
+  const saved = guild?.[module];
   if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
-  return saved as ModuleConfig;
+  const config = { ...saved } as ModuleConfig;
+  if (!planAllows(planId, "ai")) {
+    if (module === "knowledge") config.useAi = false;
+    if (module === "tickets") config.aiSupportEnabled = false;
+    if (module === "forms") config.useAiPreReview = false;
+  }
+  if (!planAllows(planId, "ocr") && module === "automod") config.scanImages = false;
+  return config;
+}
+
+/** Plano só existe quando foi sincronizado e está ativo para este servidor. */
+export async function guildPlan(guildId: string): Promise<PlanId | null> {
+  const entitlement = await guildEntitlement(guildId);
+  return entitlement?.planId ?? null;
+}
+
+export async function guildEntitlement(guildId: string): Promise<GuildLicense | null> {
+  const entitlement = (await loadLicenses())[guildId];
+  return entitlement && entitlement.status === "active" && isPlanId(entitlement.planId) ? entitlement : null;
+}
+
+export async function guildEntitlementStatus(guildId: string): Promise<"active" | "inactive" | null> {
+  const entitlement = (await loadLicenses())[guildId];
+  return entitlement && (entitlement.status === "active" || entitlement.status === "inactive") ? entitlement.status : null;
 }
 
 /** `true` quando o painel ja publicou alguma coisa para esse servidor. */
 export async function hasPublishedConfig(guildId: string): Promise<boolean> {
   const runtime = await loadRuntime();
   const guild = runtime.guilds?.[guildId];
-  return Boolean(guild && Object.keys(guild).length > 0);
+  return Boolean((await guildEntitlement(guildId)) && guild && Object.keys(guild).length > 0);
 }
 
 export function str(config: ModuleConfig | null, key: string, fallback = ""): string {

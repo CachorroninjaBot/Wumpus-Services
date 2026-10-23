@@ -6,10 +6,15 @@ Painel da comunidade e vitrine dos planos WumPlus. A cobrança e o catálogo vê
 
 | Plano | O que libera |
 | --- | --- |
-| Essencial | 2 servidores, proteção, tickets e formulários. Sem IA. |
+| Essencial | 1 servidor, proteção, tickets e formulários. Sem IA. |
 | Pro | 5 servidores, transcrição, knowledge com IA e 500 OCR/mês. |
 | Escala | Servidores, IA e OCR sem teto. |
 | Vitalício | Pagamento único, mesmo acesso do Escala. |
+
+Os limites de servidor e recursos são revalidados pelo bot na ShardPay a cada
+5 minutos. Dashboard e bot precisam compartilhar `data/wumpus-entitlements.json`
+(ou o caminho definido em `WUMPUS_LICENSE_PATH`) para aplicar a licença. Uma
+instalação nova tem 15 minutos para ser ativada pela conta proprietária.
 
 ## Rodar
 

@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Label, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -11,6 +12,8 @@ import { useBilling } from "@/lib/wumpus/use-billing";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { ServerGroups } from "@/components/server-groups";
+import { getGuildPlanUsage } from "@/lib/wumpus/runtime-store";
+import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 
 export const Route = createFileRoute("/app/settings")({ component: SettingsPage });
 
@@ -36,6 +39,17 @@ function SettingsPage() {
   const catalog = billing.data?.plans?.length ? billing.data.plans : fallbackPlans;
   const current = catalog.find((p) => p.id === guild.plan) ?? planById(guild.plan);
   const cap = serverLimit(guild.plan);
+  const [usage, setUsage] = useState<Awaited<ReturnType<typeof getGuildPlanUsage>> | null>(null);
+
+  useEffect(() => {
+    const token = getStoredSessionToken();
+    if (!token || !gid) { setUsage(null); return; }
+    let active = true;
+    void getGuildPlanUsage({ data: { token, guildId: gid } })
+      .then((result) => { if (active) setUsage(result); })
+      .catch(() => { if (active) setUsage(null); });
+    return () => { active = false; };
+  }, [gid]);
 
   return (
     <div key={gid} className="mx-auto flex max-w-5xl flex-col gap-5">
@@ -55,6 +69,21 @@ function SettingsPage() {
           {cap === null ? "Servidores ilimitados." : `Até ${cap} servidores.`}
           {billing.loading ? " Lendo a loja…" : billing.data?.error ? ` ${billing.data.error}` : ""}
         </p>
+        {usage ? (
+          <div className="grid gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm sm:grid-cols-2">
+            <p className="m-0"><span className="font-medium">Servidores da conta</span><br />
+              {usage.serversUsed}{usage.serverLimit === null ? " · sem limite" : ` de ${usage.serverLimit}`}
+            </p>
+            <p className="m-0"><span className="font-medium">OCR neste mês</span><br />
+              {usage.ocrLimit === null ? `${usage.ocrUsed} · ilimitado` : usage.ocrLimit === 0 ? "Incluído a partir do Pro" : `${usage.ocrUsed} de ${usage.ocrLimit}`}
+            </p>
+          </div>
+        ) : null}
+        {usage?.serversOverLimit.length ? (
+          <p className="m-0 rounded-lg bg-warn/10 px-3 py-2 text-sm text-muted-foreground" role="status">
+            {usage.serversOverLimit.join(", ")} {usage.serversOverLimit.length === 1 ? "está" : "estão"} acima da cota. O Wumpus desativou o acesso e sairá {usage.serversOverLimit.length === 1 ? "desse servidor" : "desses servidores"}.
+          </p>
+        ) : null}
         <div className="grid gap-2">
           {catalog.map((plan) => (
             <div key={plan.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-muted px-3 py-2">
@@ -110,7 +139,7 @@ function SettingsPage() {
             onCheckedChange={(v) => updateConfig("servers", { maintenanceMode: v })}
           />
         </div>
-        {Boolean(servers.config.maintenanceMode) ? (
+        {servers.config.maintenanceMode ? (
           <Textarea
             defaultValue={asString(servers.config.maintenanceMessage)}
             onBlur={(e) => updateConfig("servers", { maintenanceMessage: e.target.value })}

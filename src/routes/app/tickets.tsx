@@ -153,6 +153,8 @@ function TicketsPage() {
   const ticket = list.find((t) => t.id === selectedId) ?? list[0] ?? null;
 
   async function runAi(t: Ticket) {
+    const token = getStoredSessionToken();
+    if (!token) { setAi("Entre novamente com Discord para usar a análise por IA."); return; }
     setAiBusy(true);
     setAi(null);
     const redact = (value: string) => value
@@ -170,16 +172,23 @@ function TicketsPage() {
       ? searchArticles(includeConversation ? `${safeSubject}\n${transcript}` : "", articles.filter((a) => a.guildId === gid), Boolean(kcfg.config.requireApprovedArticles)).slice(0, 3)
       : [];
     const knowledge = related.map((a) => `${a.title}: ${a.body}`).join("\n");
-    const res = await analyzeWithGrok({
-      data: {
-        kind: "ticket",
-        title: `#${t.number} ${safeSubject} (${t.department})`,
-        body: transcript,
-        extra: `SLA ${String(tcfg.config.slaWarningMinutes)} min. Prioridade ${t.priority}.${knowledge ? `\nBase do servidor:\n${knowledge}` : ""}`,
-      },
-    });
-    setAiBusy(false);
-    setAi(res.ok ? res.text : res.error);
+    try {
+      const res = await analyzeWithGrok({
+        data: {
+          token,
+          guildId: gid,
+          kind: "ticket",
+          title: `#${t.number} ${safeSubject} (${t.department})`,
+          body: transcript,
+          extra: `SLA ${String(tcfg.config.slaWarningMinutes)} min. Prioridade ${t.priority}.${knowledge ? `\nBase do servidor:\n${knowledge}` : ""}`,
+        },
+      });
+      setAi(res.ok ? res.text : res.error);
+    } catch (error) {
+      setAi(error instanceof Error ? error.message : "A análise não ficou disponível.");
+    } finally {
+      setAiBusy(false);
+    }
   }
 
   return (

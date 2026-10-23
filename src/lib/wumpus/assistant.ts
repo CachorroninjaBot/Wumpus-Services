@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireGuildAccess } from "./session";
+import { requireGuildFeature } from "./session";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 
 const ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
@@ -14,7 +14,7 @@ export const askWumpusAssistant = createServerFn({ method: "POST" })
     context: z.string().max(7000),
   }).strict().parse(input))
   .handler(async ({ data }) => {
-    await requireGuildAccess(data.token, data.guildId);
+    await requireGuildFeature(data.token, data.guildId, "ai");
     const apiKey = process.env.WUMPUS_GROQ_API_KEY;
     if (!apiKey) return { ok: false as const, error: "A ajuda por IA não está disponível neste ambiente." };
     const controller = new AbortController();

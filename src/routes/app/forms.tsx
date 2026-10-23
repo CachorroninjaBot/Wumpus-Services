@@ -17,7 +17,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { DiscordFormPreview, DiscordPanel } from "@/components/discord-panel";
+import { DiscordFormPreview } from "@/components/discord-panel";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,7 +109,6 @@ function FormsPage() {
   const members = useGuildMembers();
   const user = useWumpus((state) => state.sessionUser);
   const channels = useWumpus((state) => state.channels[state.activeGuildId] ?? []);
-  const roles = useWumpus((state) => state.roles[state.activeGuildId] ?? []);
   const guild = useActiveGuild();
   const fcfg = useModule("forms");
   const updateConfig = useWumpus((state) => state.updateConfig);
@@ -298,10 +297,15 @@ function FormsPage() {
 
   async function runAiReview() {
     if (!selected) return;
+    const token = getStoredSessionToken();
+    if (!token) {
+      setAiNotes((current) => ({ ...current, [selected.id]: "Entre novamente com Discord para usar a análise por IA." }));
+      return;
+    }
     setAiBusy(true);
     try {
       const body = Object.entries(selected.answers).map(([question, answer]) => `${question}: ${answer}`).join("\n");
-      const result = await analyzeWithGrok({ data: { kind: "form", title: asString(fcfg.config.panelTitle, "Formulário"), body } });
+      const result = await analyzeWithGrok({ data: { token, guildId: gid, kind: "form", title: asString(fcfg.config.panelTitle, "Formulário"), body } });
       setAiNotes((current) => ({ ...current, [selected.id]: result.ok ? result.text : result.error }));
     } catch (error) {
       setAiNotes((current) => ({ ...current, [selected.id]: error instanceof Error ? error.message : "A análise não ficou disponível." }));
@@ -427,7 +431,7 @@ function FormsPage() {
                   {aiNotes[selected.id] ? <div className="rounded-lg bg-secondary/70 px-4 py-3 text-sm leading-6"><p className="mb-1 mt-0 font-semibold"><Sparkles className="mr-1 inline size-4" /> Nota de apoio da IA</p><p className="m-0 whitespace-pre-wrap">{aiNotes[selected.id]}</p></div> : null}
                   {selected.status === "pending" ? (
                     <div className="border-t border-border pt-5">
-                      {Boolean(fcfg.config.requireReasonOnReject) ? (
+                      {fcfg.config.requireReasonOnReject ? (
                         <div className="mb-4 space-y-1.5">
                           <Label htmlFor="review-reason">Motivo da decisão <span className="font-normal text-muted-foreground">(exigido ao recusar)</span></Label>
                           <Textarea id="review-reason" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} placeholder="Escreva uma explicação útil para a pessoa…" />

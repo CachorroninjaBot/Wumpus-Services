@@ -20,7 +20,8 @@ import {
   type Message,
   type TextChannel
 } from "discord.js";
-import { bool, isEnabled, list, moduleConfig, num, str } from "./config.ts";
+import { bool, guildPlan, isEnabled, list, moduleConfig, num, str } from "./config.ts";
+import { planAllows } from "../lib/wumpus/plan-features.ts";
 import { id } from "./ids.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
@@ -473,7 +474,10 @@ export async function closeTicket(
     messages
   });
 
-  const transcriptChannel = resolveChannel(guild, str(config, "transcriptChannelId"));
+  const plan = await guildPlan(guild.id);
+  const transcriptChannel = plan && planAllows(plan, "transcripts")
+    ? resolveChannel(guild, str(config, "transcriptChannelId"))
+    : null;
   let transcriptChannelId: string | undefined;
 
   if (transcriptChannel && transcriptChannel.isTextBased()) {
@@ -909,8 +913,14 @@ export async function reopenClosedTicket(
     log
   );
 
-  // O historico anterior viaja como anexo — texto puro, nao depende do canal
-  // antigo (ja apagado) nem do teto de caracteres de mensagem.
+  // Só planos com transcrição exportam o histórico anterior como anexo.
+  const plan = await guildPlan(guild.id);
+  const includeTranscript = Boolean(plan && planAllows(plan, "transcripts"));
+  if (!includeTranscript) {
+    log.info("reabertura sem exportar transcrição pelo plano", { guildId: guild.id, ticketId });
+  }
+
+  // O histórico é exportado como anexo apenas quando o plano inclui transcrições.
   const messages = (await read<TicketMessage>("ticket_messages")).filter((row) => row.ticketId === ticketId);
   const transcript = buildTranscript({
     ticket: {
@@ -926,7 +936,7 @@ export async function reopenClosedTicket(
   });
 
   const channel = guild.channels.cache.get(opened.channelId);
-  if (channel && channel.isTextBased()) {
+  if (includeTranscript && channel && channel.isTextBased()) {
     await (channel as TextChannel)
       .send({
         content: `**Reaberto do atendimento #${ticketId}** — historico em anexo.`,

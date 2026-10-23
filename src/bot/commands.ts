@@ -17,7 +17,8 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction
 } from "discord.js";
-import { list, loadRuntime, moduleConfig, num } from "./config.ts";
+import { guildPlan, list, loadRuntime, moduleConfig, num } from "./config.ts";
+import { planAllows } from "../lib/wumpus/plan-features.ts";
 import {
   adviseConfig,
   analyzeLogs,
@@ -506,6 +507,11 @@ type StoredAudit = AuditLite & { guildId?: string; targetId?: string | null };
 async function handleAssistant(interaction: ChatInputCommandInteraction, log: Logger): Promise<void> {
   const guild = interaction.guild;
   if (!guild) return;
+  const plan = await guildPlan(guild.id);
+  if (!plan || !planAllows(plan, "ai")) {
+    await interaction.reply({ content: "O assistente por IA está disponível a partir do plano Pro.", ephemeral: true });
+    return;
+  }
 
   const sub = interaction.options.getSubcommand();
   await interaction.deferReply({ ephemeral: true });

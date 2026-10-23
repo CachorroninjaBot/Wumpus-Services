@@ -1,11 +1,17 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { requireGuildFeature } from "./session";
+import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 
-type AnalyzeInput = {
-  kind: "ticket" | "form";
-  title: string;
-  body: string;
-  extra?: string;
-};
+const analyzeInputSchema = z.object({
+  token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+  guildId: z.string().regex(/^\d{17,20}$/),
+  kind: z.enum(["ticket", "form"]),
+  title: z.string().trim().min(1).max(200),
+  body: z.string().max(12_000),
+  extra: z.string().max(8_000).optional(),
+}).strict();
+type AnalyzeInput = z.infer<typeof analyzeInputSchema>;
 
 /**
  * Analise de IA do painel — Groq (endpoint compativel com OpenAI).
@@ -27,8 +33,9 @@ const SYSTEM: Record<AnalyzeInput["kind"], string> = {
 };
 
 export const analyzeWithGrok = createServerFn({ method: "POST" })
-  .validator((input: AnalyzeInput) => input)
+  .validator((input: unknown) => analyzeInputSchema.parse(input))
   .handler(async ({ data }) => {
+    await requireGuildFeature(data.token, data.guildId, "ai");
     const apiKey = process.env.WUMPUS_GROQ_API_KEY;
     if (!apiKey) {
       return { ok: false as const, error: "IA indisponível neste ambiente." };

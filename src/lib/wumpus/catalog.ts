@@ -37,9 +37,9 @@ export const plans: CatalogPlan[] = [
     priceCents: 1490,
     recurring: true,
     price: brl(1490, true),
-    blurb: "Dois servidores, proteção completa e atendimento. Sem IA.",
+    blurb: "Um servidor, proteção completa e atendimento. Sem IA.",
     features: [
-      "2 servidores",
+      "1 servidor",
       "AutoMod, anti-raid e anti-nuke",
       "Moderação, logs, tickets e formulários",
       "Automações",
@@ -129,7 +129,7 @@ export function planById(id: PlanId): CatalogPlan {
 }
 
 export function serverLimit(plan: PlanId): number | null {
-  if (plan === "essencial") return 2;
+  if (plan === "essencial") return 1;
   if (plan === "pro") return 5;
   return null;
 }

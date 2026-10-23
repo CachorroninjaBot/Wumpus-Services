@@ -12,8 +12,10 @@
  * forma tolerante a varios formatos, e QUALQUER falha devolve `null` em vez de
  * lancar: OCR indisponivel nao pode impedir o automod de agir no texto.
  */
-import { bool, isEnabled, moduleConfig, num, str } from "./config.ts";
+import { bool, guildEntitlement, isEnabled, moduleConfig, num, str } from "./config.ts";
 import type { Logger } from "./logger.ts";
+import { isPlanId, monthlyOcrLimit, planAllows } from "../lib/wumpus/plan-features.ts";
+import { mutate } from "./store.ts";
 
 export type OcrResult = { text: string; confidence: number | null };
 
@@ -21,8 +23,30 @@ export type OcrResult = { text: string; confidence: number | null };
 const cache = new Map<string, { result: OcrResult | null; at: number }>();
 const CACHE_MAX = 300;
 
-function cacheKey(url: string): string {
-  return url;
+function cacheKey(url: string, accountId: string): string {
+  return `${accountId}:${url}`;
+}
+
+type OcrUsage = { accountId: string; month: string; count: number };
+
+export async function reserveOcrRequest(accountId: string, limit: number | null): Promise<boolean> {
+  const month = new Date().toISOString().slice(0, 7);
+  let allowed = false;
+  await mutate<OcrUsage>("ocr-usage", (rows) => {
+    const current = rows.find((row) => row.accountId === accountId && row.month === month);
+    if (limit !== null && (current?.count ?? 0) >= limit) return rows;
+    if (current) current.count += 1;
+    else rows.push({ accountId, month, count: 1 });
+    allowed = true;
+    return rows.filter((row) => row.month >= month || monthDiff(row.month, month) <= 2);
+  });
+  return allowed;
+}
+
+function monthDiff(previous: string, current: string): number {
+  const [py, pm] = previous.split("-").map(Number);
+  const [cy, cm] = current.split("-").map(Number);
+  return (cy! - py!) * 12 + cm! - pm!;
 }
 
 function cacheGet(key: string, ttlMinutes: number): OcrResult | null | undefined {
@@ -80,6 +104,8 @@ export async function readImage(
   imageUrl: string,
   options: { sizeBytes?: number; log?: Logger } = {}
 ): Promise<OcrResult | null> {
+  const entitlement = await guildEntitlement(guildId);
+  if (!entitlement || !isPlanId(entitlement.planId) || !planAllows(entitlement.planId, "ocr")) return null;
   const config = await moduleConfig(guildId, "ocr");
   if (!isEnabled(config)) return null;
 
@@ -96,10 +122,17 @@ export async function readImage(
 
   const useCache = bool(config, "cacheResults", true);
   const ttlMinutes = Math.max(1, Math.trunc(num(config, "cacheTtlMinutes", 60)));
+  const key = cacheKey(imageUrl, entitlement.accountId);
 
   if (useCache) {
-    const hit = cacheGet(cacheKey(imageUrl), ttlMinutes);
+    const hit = cacheGet(key, ttlMinutes);
     if (hit !== undefined) return hit;
+  }
+
+  const monthlyLimit = monthlyOcrLimit(entitlement.planId);
+  if (monthlyLimit === 0 || !(await reserveOcrRequest(entitlement.accountId, monthlyLimit))) {
+    options.log?.warn("limite mensal de OCR atingido", { guildId, limit: monthlyLimit });
+    return null;
   }
 
   const controller = new AbortController();
@@ -124,7 +157,7 @@ export async function readImage(
 
     if (!res.ok) {
       options.log?.warn("OCR respondeu com erro", { guildId, status: res.status });
-      if (useCache) cacheSet(cacheKey(imageUrl), null);
+      if (useCache) cacheSet(key, null);
       return null;
     }
 
@@ -135,15 +168,15 @@ export async function readImage(
       const threshold = num(config, "confidenceThreshold", 0.7);
       if (result.confidence < threshold) {
         options.log?.info("OCR abaixo da confianca minima", { guildId, confidence: result.confidence, threshold });
-        if (useCache) cacheSet(cacheKey(imageUrl), null);
+        if (useCache) cacheSet(key, null);
         return null;
       }
     }
 
-    if (useCache) cacheSet(cacheKey(imageUrl), result);
+    if (useCache) cacheSet(key, result);
     return result;
   } catch {
-    if (useCache) cacheSet(cacheKey(imageUrl), null);
+    if (useCache) cacheSet(key, null);
     return null;
   } finally {
     clearTimeout(timer);

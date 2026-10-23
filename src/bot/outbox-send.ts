@@ -17,6 +17,7 @@ import type { Logger } from "./logger.ts";
 import type { OutboxJob, RuntimeFile } from "../lib/wumpus/runtime.server.ts";
 import { setupVerification, restoreVerification, setLockdown } from "./security.ts";
 import { id } from "./ids.ts";
+import { guildPlan } from "./config.ts";
 
 function runtimePath(): string {
   return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
@@ -122,6 +123,16 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
   const runtime = await readRuntimeFile();
   const pending = pendingJobs(runtime.outbox, guild.id);
   if (!pending.length) return 0;
+
+  if (!(await guildPlan(guild.id))) {
+    const outbox = (runtime.outbox ?? []).map((job) =>
+      job.guildId === guild.id && job.status === "queued"
+        ? { ...job, status: "failed" as const, detail: "Este servidor não tem uma licença ativa no plano atual." , at: Date.now() }
+        : job,
+    );
+    await writeRuntimeFile({ ...runtime, outbox: pruneOutbox(outbox), updatedAt: Date.now() });
+    return pending.length;
+  }
 
   let outbox = runtime.outbox ?? [];
 

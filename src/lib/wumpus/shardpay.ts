@@ -15,6 +15,7 @@ export type BillingSubscription = {
   productName: string;
   planId: PlanId | null;
   discordUsername: string | null;
+  discordUserId: string | null;
   billingCycle: string;
   nextBillingDate: string;
   priceCents: number;
@@ -167,6 +168,7 @@ export async function loadBilling(): Promise<BillingSnapshot> {
         productName,
         planId: planIdFromName(productName),
         discordUsername: typeof sub.discord_username === "string" ? sub.discord_username : null,
+        discordUserId: typeof sub.discord_user_id === "string" ? sub.discord_user_id : typeof sub.discordUserId === "string" ? sub.discordUserId : null,
         billingCycle: String(sub.billing_cycle ?? ""),
         nextBillingDate: String(sub.next_billing_date ?? ""),
         priceCents: typeof sub.price_cents === "number" ? sub.price_cents : 0,

@@ -155,7 +155,7 @@ export async function readRuntime(): Promise<RuntimeFile> {
 }
 
 /** Bot collections shared on disk; malformed or missing files return empty lists. */
-export async function readBotCollection<T>(name: "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms"): Promise<T[]> {
+export async function readBotCollection<T>(name: "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage"): Promise<T[]> {
   try {
     const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
     const parsed: unknown = JSON.parse(await readFile(join(directory, `${name}.json`), "utf8"));

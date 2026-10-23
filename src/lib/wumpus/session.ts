@@ -22,6 +22,8 @@ import { resolveEntitlements, type Entitlements, type SubscriptionLite } from ".
 import { loadBilling } from "./shardpay";
 import { isPlatformOwner } from "./owner";
 import { recordDashboardLogin } from "./admin-store.server";
+import { planAllows, type PlanFeature } from "./engine";
+import { syncGuildEntitlements } from "./license-store.server";
 import {
   sessionSecret,
   signSession,
@@ -43,7 +45,16 @@ export type AccessResult =
   | { ok: true; session: SessionUserView; guilds: SessionGuild[]; entitlements: Entitlements }
   | { ok: false; error: string };
 
-let guildAccessCache: { userId: string; guildIds: Set<string>; expiresAt: number } | null = null;
+let guildAccessCache: { userId: string; guildIds: Set<string>; entitlements: Entitlements; expiresAt: number } | null = null;
+
+function subscriptionRows(billing: Awaited<ReturnType<typeof loadBilling>>): SubscriptionLite[] {
+  return billing.subscriptions.map((sub) => ({
+    status: sub.status,
+    planId: sub.planId,
+    discordUsername: sub.discordUsername,
+    discordUserId: sub.discordUserId,
+  }));
+}
 
 /** Entra com o `code` do Discord e devolve um token assinado. */
 export const startSession = createServerFn({ method: "POST" })
@@ -103,11 +114,7 @@ export const resolveAccess = createServerFn({ method: "POST" })
       loadBilling(),
     ]);
 
-    const subscriptions: SubscriptionLite[] = billing.subscriptions.map((sub) => ({
-      status: sub.status,
-      planId: sub.planId,
-      discordUsername: sub.discordUsername,
-    }));
+    const subscriptions = subscriptionRows(billing);
 
     const entitlements = resolveEntitlements({
       discordUserId: payload.userId,
@@ -117,6 +124,19 @@ export const resolveAccess = createServerFn({ method: "POST" })
       botGuildIds,
       subscriptions,
     });
+
+    // Se a ShardPay respondeu, publica a decisão atual para o processo do bot.
+    // Em indisponibilidade temporária, preserva a última licença conhecida.
+    if (billing.ok || entitlements.isOwner) {
+      await syncGuildEntitlements({
+        accountId: payload.userId,
+        discordUsername: payload.username,
+        planId: entitlements.plan,
+        botGuildIds,
+        ownedGuildIds: payload.guilds.filter((guild) => guild.owner).map((guild) => guild.id),
+        allowedGuildIds: entitlements.guildIds,
+      });
+    }
 
     return {
       ok: true,
@@ -149,18 +169,14 @@ export async function requireAdminSession(token: string): Promise<SessionPayload
   return payload;
 }
 
-export async function requireGuildAccess(token: string, guildId: string): Promise<SessionPayload> {
+export async function requireGuildAccess(token: string, guildId: string): Promise<SessionPayload & { entitlements: Entitlements }> {
   const payload = await verifySignedSession(token);
   const ownsGuild = payload.guilds.some((guild) => guild.id === guildId && guild.owner);
   if (!ownsGuild) throw new Error("Você não é proprietário deste servidor no Discord.");
 
   if (!guildAccessCache || guildAccessCache.userId !== payload.userId || guildAccessCache.expiresAt < Date.now()) {
     const [botGuildIds, billing] = await Promise.all([loadBotGuildIds(), loadBilling()]);
-    const subscriptions: SubscriptionLite[] = billing.subscriptions.map((sub) => ({
-      status: sub.status,
-      planId: sub.planId,
-      discordUsername: sub.discordUsername,
-    }));
+    const subscriptions = subscriptionRows(billing);
     const access = resolveEntitlements({
       discordUserId: payload.userId,
       discordUsername: payload.username,
@@ -168,7 +184,7 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
       botGuildIds,
       subscriptions,
     });
-    guildAccessCache = { userId: payload.userId, guildIds: new Set(access.guildIds), expiresAt: Date.now() + 30_000 };
+    guildAccessCache = { userId: payload.userId, guildIds: new Set(access.guildIds), entitlements: access, expiresAt: Date.now() + 30_000 };
   }
 
   if (!guildAccessCache.guildIds.has(guildId) && !isPlatformOwner(payload.userId)) {
@@ -177,5 +193,24 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
   if (!guildAccessCache.guildIds.has(guildId)) {
     throw new Error("O Wumpus não está instalado neste servidor.");
   }
-  return payload;
+  return { ...payload, entitlements: guildAccessCache.entitlements };
+}
+
+/** Valida a licença também para chamadas diretas, sem depender do bloqueio visual. */
+export async function requireGuildFeature(token: string, guildId: string, feature: PlanFeature): Promise<SessionPayload> {
+  const session = await requireGuildAccess(token, guildId);
+  const plan = session.entitlements.plan;
+  if (!plan || !planAllows(plan, feature)) {
+    const names: Record<PlanFeature, string> = {
+      forms: "formulários",
+      ai: "recursos de IA",
+      multiDepartment: "múltiplos departamentos",
+      antiNuke: "anti-nuke",
+      transcripts: "transcrições",
+      ocr: "OCR",
+      webhooks: "webhooks",
+    };
+    throw new Error(`Seu plano não inclui ${names[feature]}. Faça upgrade para continuar.`);
+  }
+  return session;
 }

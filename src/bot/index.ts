@@ -35,7 +35,8 @@ import {
 } from "discord.js";
 import { handleGhostPing, handleImageContent, handleMessage } from "./automod.ts";
 import { handleCommand, registerCommands } from "./commands.ts";
-import { bool, isEnabled, list, moduleConfig } from "./config.ts";
+import { bool, guildEntitlement, guildEntitlementStatus, guildPlan, isEnabled, list, moduleConfig } from "./config.ts";
+import { syncBotPlanLicenses } from "./license-sync.ts";
 import { buildFormModal, handleFormSelect, openForm, parseFields, readDraft, reviewForm, submitForm } from "./forms.ts";
 import { id, parseId } from "./ids.ts";
 import { handleKnowledgeMessage } from "./knowledge.ts";
@@ -591,6 +592,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   const client = new Client({ intents: INTENTS, partials: [Partials.Channel, Partials.Message] });
 
   let healthTimer: ReturnType<typeof setInterval> | null = null;
+  let licenseSyncTimer: ReturnType<typeof setInterval> | null = null;
   const reportHealth = (status: "online" | "offline") =>
     writeBotHealth({
       status,
@@ -622,6 +624,9 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
 
   client.once(Events.ClientReady, async () => {
     log.info("bot conectado ao Discord", { servidores: client.guilds.cache.size });
+    void syncBotPlanLicenses(log);
+    licenseSyncTimer = setInterval(() => void syncBotPlanLicenses(log), 5 * 60_000);
+    licenseSyncTimer.unref();
     await reportHealth("online").catch((error) => log.error("falha ao publicar saúde do bot", { error: String(error) }));
     healthTimer = setInterval(() => {
       void reportHealth("online").catch((error) => log.error("falha ao publicar saúde do bot", { error: String(error) }));
@@ -632,11 +637,36 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   client.on(Events.GuildCreate, (guild: Guild) => {
     log.info("entrou em servidor", { guildId: guild.id, name: guild.name, members: guild.memberCount });
     void reportHealth("online").catch((error) => log.error("falha ao sincronizar servidores do bot", { error: String(error) }));
+    const activationTimer = setTimeout(() => {
+      void (async () => {
+        if (await guildPlan(guild.id)) return;
+        log.warn("servidor sem licença ativa após o período de ativação; saindo", { guildId: guild.id });
+        await guild.leave().catch((error) => log.warn("não foi possível sair do servidor sem licença", { guildId: guild.id, error: String(error) }));
+      })();
+    }, 15 * 60_000);
+    activationTimer.unref();
   });
 
   client.on(Events.GuildDelete, () => {
     void reportHealth("online").catch((error) => log.error("falha ao sincronizar servidores do bot", { error: String(error) }));
   });
+
+  const licenseSweepTimer = setInterval(() => {
+    void (async () => {
+      for (const guild of client.guilds.cache.values()) {
+        const license = await guildEntitlement(guild.id);
+        const status = await guildEntitlementStatus(guild.id);
+        if (status !== "inactive" && !(license && license.accountId !== guild.ownerId)) continue;
+        log.warn("licença inativa ou fora do limite do plano; saindo do servidor", { guildId: guild.id });
+        const owner = await guild.fetchOwner().catch(() => null);
+        if (owner) {
+          await owner.send("O Wumpus saiu deste servidor porque ele está sem licença ativa ou acima do limite do plano. Entre na dashboard com a conta Discord proprietária para conferir o plano e a cota; depois, se necessário, adicione o bot novamente.").catch(() => undefined);
+        }
+        await guild.leave().catch((error) => log.warn("não foi possível sair do servidor sem licença", { guildId: guild.id, error: String(error) }));
+      }
+    })();
+  }, 60_000);
+  licenseSweepTimer.unref();
 
   client.on(Events.GuildMemberAdd, (member) => {
     void handleMemberWelcome(member, log);

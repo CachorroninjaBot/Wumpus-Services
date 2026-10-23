@@ -19,6 +19,7 @@ import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 import { readBotHealth } from "./health.server";
 import { markSecurityEventReviewed, readReviewedSecurityEvents } from "./security-reviews.server";
+import { monthlyOcrLimit, planAllows } from "./engine";
 
 export const getDiscordGuildResources = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/) }).strict().parse(input))
@@ -49,6 +50,33 @@ export const getGuildProtectionReadiness = createServerFn({ method: "POST" })
       pingMs: health.pingMs,
       permissions: installed ? health.guildResources?.[data.guildId]?.permissions ?? null : null,
       lockdown,
+    };
+  });
+
+/** Uso mensal do plano, calculado no servidor e agregado pela assinatura. */
+export const getGuildPlanUsage = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildAccess(data.token, data.guildId);
+    const plan = session.entitlements.plan;
+    if (!plan) throw new Error("Não há plano ativo para esta conta.");
+    const accountId = session.userId;
+    const month = new Date().toISOString().slice(0, 7);
+    const rows = await readBotCollection<{ accountId: string; month: string; count: number }>("ocr-usage");
+    const ocrUsed = rows.find((row) => row.accountId === accountId && row.month === month)?.count ?? 0;
+    return {
+      planId: plan,
+      serversUsed: session.entitlements.guildIds.length,
+      serverLimit: session.entitlements.limit,
+      serversOverLimit: session.guilds
+        .filter((guild) => guild.owner && session.entitlements.overLimitGuildIds.includes(guild.id))
+        .map((guild) => guild.name),
+      ocrUsed,
+      ocrLimit: monthlyOcrLimit(plan),
+      month,
     };
   });
 
@@ -172,13 +200,30 @@ export type PublishInput = {
 export const publishGuildRuntime = createServerFn({ method: "POST" })
   .validator((input: unknown) => publishInputSchema.parse(input))
   .handler(async ({ data }) => {
-    await requireGuildAccess(data.token, data.guildId);
+    const session = await requireGuildAccess(data.token, data.guildId);
     const current = await readRuntime();
+    const plan = session.entitlements.plan;
+    const modules = structuredClone(data.modules);
+
+    // A UI desabilitada nao e controle de acesso: recursos premium sao
+    // removidos tambem no servidor antes da configuracao chegar ao bot.
+    if (!planAllows(plan ?? "essencial", "ai")) {
+      if (modules.tickets) modules.tickets.aiSupportEnabled = false;
+      if (modules.forms) modules.forms.useAiPreReview = false;
+      if (modules.knowledge) modules.knowledge.useAi = false;
+    }
+    if (!planAllows(plan ?? "essencial", "ocr")) {
+      if (modules.automod) modules.automod.scanImages = false;
+      if (modules.ocr) modules.ocr.enabled = false;
+    }
+    if (!planAllows(plan ?? "essencial", "webhooks") && modules.integrations) {
+      modules.integrations.allowIncoming = false;
+    }
 
     current.guilds[data.guildId] = {
       ...current.guilds[data.guildId],
-      ...data.modules,
-      ...(data.name ? { name: data.name } : {})
+      ...modules,
+      ...(data.name ? { name: data.name } : {}),
     };
 
     // Os artigos viajam junto: sem eles o modulo de conhecimento nao teria o

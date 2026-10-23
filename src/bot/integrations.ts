@@ -12,7 +12,8 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Guild } from "discord.js";
-import { bool, isEnabled, list, moduleConfig, num } from "./config.ts";
+import { bool, guildPlan, isEnabled, list, moduleConfig, num } from "./config.ts";
+import { planAllows } from "../lib/wumpus/plan-features.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
 
@@ -32,6 +33,10 @@ export async function authorizeIncoming(
   guildId: string,
   origin: string
 ): Promise<IncomingDecision> {
+  const plan = await guildPlan(guildId);
+  if (!plan || !planAllows(plan, "webhooks")) {
+    return { allowed: false, status: 403, reason: "Webhooks de entrada estão disponíveis no plano Escala." };
+  }
   const config = await moduleConfig(guildId, "integrations");
 
   if (!isEnabled(config)) {

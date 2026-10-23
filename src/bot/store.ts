@@ -12,7 +12,8 @@
  * Seam para Postgres: este arquivo e o UNICO ponto que toca disco. Migrar para
  * SQL significa reimplementar so estas funcoes — nenhum handler muda.
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 const DIR = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
@@ -49,9 +50,20 @@ export async function read<T>(name: string): Promise<T[]> {
 async function persist(name: string, rows: unknown[]): Promise<void> {
   await mkdir(DIR, { recursive: true });
   const target = fileFor(name);
-  const tmp = `${target}.tmp`;
+  const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tmp, JSON.stringify(rows, null, 2));
-  await rename(tmp, target);
+  try {
+    await rename(tmp, target);
+  } catch (error) {
+    // No Windows, rename nao substitui um destino existente. Remove o arquivo
+    // antigo e tenta novamente; em outros erros, preserva a falha original.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EPERM" && code !== "EEXIST" && code !== "EACCES") throw error;
+    await rm(target, { force: true });
+    await rename(tmp, target);
+  } finally {
+    await rm(tmp, { force: true });
+  }
 }
 
 /**

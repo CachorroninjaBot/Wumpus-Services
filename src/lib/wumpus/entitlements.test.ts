@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OWNER_DISCORD_ID, isPlatformOwner } from "./owner.ts";
 import { canAddServer, planForUser, resolveEntitlements, type SubscriptionLite } from "./entitlements.ts";
+import { monthlyOcrLimit, planAllows } from "./plan-features.ts";
 
 const ME = { id: "111", username: "cliente" };
 const OTHER = { id: "222", username: "outro" };
@@ -118,7 +119,7 @@ test("sem assinatura, nenhum servidor e liberado", () => {
 
 /* --------------------------------------------------------------- limites --- */
 
-test("essencial libera no maximo 2 servidores", () => {
+test("essencial libera no maximo 1 servidor", () => {
   const result = resolveEntitlements(
     input({
       ownedGuildIds: ["a", "b", "c", "d"],
@@ -126,8 +127,8 @@ test("essencial libera no maximo 2 servidores", () => {
       subscriptions: [sub({ planId: "essencial" })],
     })
   );
-  assert.equal(result.guildIds.length, 2);
-  assert.equal(result.limit, 2);
+  assert.equal(result.guildIds.length, 1);
+  assert.equal(result.limit, 1);
 });
 
 test("o excedente e informado, nao escondido", () => {
@@ -138,8 +139,8 @@ test("o excedente e informado, nao escondido", () => {
       subscriptions: [sub({ planId: "essencial" })],
     })
   );
-  assert.deepEqual(result.guildIds, ["a", "b"]);
-  assert.deepEqual(result.overLimitGuildIds, ["c"]);
+  assert.deepEqual(result.guildIds, ["a"]);
+  assert.deepEqual(result.overLimitGuildIds, ["b", "c"]);
 });
 
 test("escala nao tem teto de servidores", () => {
@@ -191,7 +192,7 @@ test("quem nao tem plano nao adiciona servidor", () => {
   assert.equal(canAddServer(result, 0), false);
 });
 
-test("limite do plano barra o servidor a mais", () => {
+test("limite do plano barra servidor adicional", () => {
   const result = resolveEntitlements(
     input({
       ownedGuildIds: ["a", "b"],
@@ -199,8 +200,18 @@ test("limite do plano barra o servidor a mais", () => {
       subscriptions: [sub({ planId: "essencial" })],
     })
   );
-  assert.equal(canAddServer(result, 2), false);
-  assert.equal(canAddServer(result, 1), true);
+  assert.equal(canAddServer(result, 1), false);
+  assert.equal(canAddServer(result, 0), true);
+});
+
+test("recursos premium acompanham o nível do plano", () => {
+  assert.equal(planAllows("essencial", "ai"), false);
+  assert.equal(planAllows("pro", "ai"), true);
+  assert.equal(planAllows("pro", "webhooks"), false);
+  assert.equal(planAllows("escala", "webhooks"), true);
+  assert.equal(monthlyOcrLimit("essencial"), 0);
+  assert.equal(monthlyOcrLimit("pro"), 500);
+  assert.equal(monthlyOcrLimit("vitalicio"), null);
 });
 
 test("o dono sempre pode adicionar", () => {
