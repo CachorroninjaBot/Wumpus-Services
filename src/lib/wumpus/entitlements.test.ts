@@ -192,6 +192,18 @@ test("o dono tambem so ve servidor onde o bot esta", () => {
   assert.deepEqual(result.guildIds, ["a"]);
 });
 
+test("o dono da plataforma ve servidores que administra mesmo sem ser proprietario", () => {
+  const result = resolveEntitlements(input({
+    discordUserId: OWNER_DISCORD_ID,
+    discordUsername: "dono",
+    ownedGuildIds: [],
+    manageableGuildIds: ["a", "b"],
+    botGuildIds: ["a"],
+    subscriptions: [],
+  }));
+  assert.deepEqual(result.guildIds, ["a"]);
+});
+
 /* ------------------------------------------------------------ addServer --- */
 
 test("quem nao tem plano nao adiciona servidor", () => {

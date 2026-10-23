@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { setOAuthStateCookie } from "@/lib/wumpus/session-cookie.server";
 import { enforceRequestLimit } from "@/lib/wumpus/request-limits.server";
+import { canManageDiscordGuild } from "./permissions.ts";
 
 const CLIENT_ID = () => process.env.DISCORD_CLIENT_ID || "1187601667559002225";
 const CLIENT_SECRET = () => process.env.DISCORD_CLIENT_SECRET || "";
@@ -99,7 +100,7 @@ export async function exchangeDiscordCodeDirect(code: string) {
       return [];
     }
   });
-  const managed = guilds.filter((guild) => guild.owner || (guild.permissions & 0x20n) === 0x20n);
+  const managed = guilds.filter((guild) => guild.owner || canManageDiscordGuild(guild.permissions.toString()));
 
   return {
     ok: true as const,
