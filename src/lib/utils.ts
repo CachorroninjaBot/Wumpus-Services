@@ -1,18 +1,21 @@
 import { twMerge } from "tailwind-merge";
 
+const relativeTimeFormatter = new Intl.RelativeTimeFormat("pt-BR", {
+  numeric: "always",
+  style: "short",
+});
+
 export function cn(...inputs: Array<string | false | null | undefined>) {
   return twMerge(inputs.filter(Boolean).join(" "));
 }
 
 export function formatRelative(ts: number, now = Date.now()): string {
   const diff = Math.max(0, now - ts);
-  const min = Math.floor(diff / 60_000);
-  if (min < 1) return "agora";
-  if (min < 60) return `há ${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `há ${h}h`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `há ${d}d`;
+  if (diff < 60_000) return "agora";
+  if (diff < 3_600_000) return relativeTimeFormatter.format(-Math.floor(diff / 60_000), "minute");
+  if (diff < 86_400_000) return relativeTimeFormatter.format(-Math.floor(diff / 3_600_000), "hour");
+  if (diff < 7 * 86_400_000)
+    return relativeTimeFormatter.format(-Math.floor(diff / 86_400_000), "day");
   return new Date(ts).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 }
 

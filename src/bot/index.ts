@@ -445,7 +445,7 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "form" && action === "open") {
     // Duas etapas: se o formulario tem selecoes, elas vem antes do modal.
-    await openForm(interaction, log);
+    await openForm(interaction);
     return;
   }
 

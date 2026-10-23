@@ -1,6 +1,9 @@
 node_modules
 dist
+.output
 .nitro
+.tanstack
+.deps_cache
 .secrets
 .env
 .env.*

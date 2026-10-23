@@ -25,6 +25,7 @@ import {
   StringSelectMenuOptionBuilder,
   TextInputBuilder,
   TextInputStyle,
+  type ButtonInteraction,
   type Guild,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction
@@ -80,8 +81,6 @@ const DEFAULT_QUESTIONS = [
   "Por que quer fazer parte da equipe?",
   "Qual a sua experiencia relevante?"
 ];
-
-const TYPES: FieldType[] = ["short", "paragraph", "select"];
 
 function normalizeType(value: unknown): FieldType {
   const text = String(value ?? "").trim().toLowerCase();
@@ -571,8 +570,7 @@ export async function buildFormPanel(guild: Guild) {
  * Quem chama isto e o handler do botao "Candidatar-se".
  */
 export async function openForm(
-  interaction: { guild: Guild | null; user: { id: string }; reply: Function; showModal: Function },
-  log: Logger
+  interaction: ButtonInteraction
 ): Promise<void> {
   const guild = interaction.guild;
   if (!guild) return;

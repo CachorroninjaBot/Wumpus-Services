@@ -171,7 +171,7 @@ test("sem findings, a formatacao diz que esta normal", () => {
 });
 
 test("formatacao respeita o teto de caracteres do Discord", () => {
-  const many = Array.from({ length: 5 }, (_, i) => ({
+  const many = Array.from({ length: 5 }, () => ({
     title: "t".repeat(120),
     detail: "d".repeat(600),
     severity: "urgent",
