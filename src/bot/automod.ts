@@ -14,7 +14,7 @@ import type { Message, PartialMessage } from "discord.js";
 import { bool, isEnabled, list, moduleConfig, num, str } from "./config.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
-import { extractTextFromAttachments } from "./ocr.ts";
+import { extractTextFromAttachments, OCR_MAX_IMAGES_PER_MESSAGE } from "./ocr.ts";
 import { asSendable, resolveChannel, resolveRoles } from "./resolve.ts";
 
 export type AutomodHit = { rule: string; action: string };
@@ -26,7 +26,11 @@ const URL_RE = /https?:\/\/[^\s<>]+/i;
 const recent = new Map<string, { at: number; content: string }[]>();
 const MAX_TRACKED = 2_000;
 
-function track(key: string, content: string, windowMs: number): { count: number; duplicates: number } {
+function track(
+  key: string,
+  content: string,
+  windowMs: number,
+): { count: number; duplicates: number } {
   const now = Date.now();
   const entries = (recent.get(key) ?? []).filter((entry) => now - entry.at <= windowMs);
   entries.push({ at: now, content });
@@ -60,7 +64,11 @@ function domainOf(url: string): string {
 
 function domainAllowed(domain: string, allowed: string[]): boolean {
   return allowed.some((entry) => {
-    const clean = entry.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    const clean = entry
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/.*$/, "");
     return clean && (domain === clean || domain.endsWith(`.${clean}`));
   });
 }
@@ -96,7 +104,11 @@ export function scanMessage(input: {
   for (const url of urls) {
     const domain = domainOf(url);
     if (!domain) continue;
-    if (blockedDomains.some((entry) => domain === entry.toLowerCase() || domain.endsWith(`.${entry.toLowerCase()}`))) {
+    if (
+      blockedDomains.some(
+        (entry) => domain === entry.toLowerCase() || domain.endsWith(`.${entry.toLowerCase()}`),
+      )
+    ) {
       return { rule: `dominio:${domain}`, action };
     }
     if (bool(config, "blockLinks", false) && !domainAllowed(domain, allowedDomains)) {
@@ -110,7 +122,8 @@ export function scanMessage(input: {
   if (maxLength > 0 && text.length > maxLength) return { rule: "muito-longo", action };
 
   const capsThreshold = Math.trunc(num(config, "capsThresholdPercent", 70));
-  if (capsThreshold < 100 && capsRatio(text) * 100 >= capsThreshold) return { rule: "caps", action };
+  if (capsThreshold < 100 && capsRatio(text) * 100 >= capsThreshold)
+    return { rule: "caps", action };
 
   const mentionLimit = Math.trunc(num(config, "mentionLimit", 8));
   const mentions = (text.match(/<@!?\d+>/g) ?? []).length;
@@ -148,18 +161,26 @@ export async function handleMessage(message: Message, log: Logger): Promise<void
   }
 
   const windowMs = Math.max(1, Math.trunc(num(config, "windowSeconds", 10))) * 1000;
-  const { count, duplicates } = track(`${message.channelId}:${message.author.id}`, message.content, windowMs);
+  const { count, duplicates } = track(
+    `${message.channelId}:${message.author.id}`,
+    message.content,
+    windowMs,
+  );
 
   const hit = scanMessage({
     content: message.content,
     config,
     windowMs,
     floodCount: count,
-    duplicateCount: duplicates
+    duplicateCount: duplicates,
   });
   if (!hit) return;
 
-  const warnMessage = str(config, "warnMessage", "Sua mensagem foi removida pelo filtro automatico.");
+  const warnMessage = str(
+    config,
+    "warnMessage",
+    "Sua mensagem foi removida pelo filtro automatico.",
+  );
 
   try {
     if (hit.action !== "warn") {
@@ -180,7 +201,11 @@ export async function handleMessage(message: Message, log: Logger): Promise<void
       if (warning) setTimeout(() => void warning.delete().catch(() => undefined), 8_000);
     }
   } catch (error) {
-    log.warn("falha ao aplicar automod", { guildId: guild.id, rule: hit.rule, error: String(error) });
+    log.warn("falha ao aplicar automod", {
+      guildId: guild.id,
+      rule: hit.rule,
+      error: String(error),
+    });
   }
 
   await auditAndLog(
@@ -198,21 +223,29 @@ export async function handleMessage(message: Message, log: Logger): Promise<void
       fields: [
         { name: "Regra", value: hit.rule },
         { name: "Acao", value: hit.action },
-        { name: "Mensagem", value: message.content.slice(0, 1000) }
+        { name: "Mensagem", value: message.content.slice(0, 1000) },
       ],
-      data: { rule: hit.rule, action: hit.action }
+      data: { rule: hit.rule, action: hit.action },
     },
-    log
+    log,
   );
 
-  log.info("automod aplicado", { guildId: guild.id, userId: message.author.id, rule: hit.rule, action: hit.action });
+  log.info("automod aplicado", {
+    guildId: guild.id,
+    userId: message.author.id,
+    rule: hit.rule,
+    action: hit.action,
+  });
 }
 
 /**
  * Anti-ghost-ping: avisa quando alguem apaga a mensagem logo depois de marcar
  * outra pessoa — o mencionado nao ve notificacao nenhuma e fica sem contexto.
  */
-export async function handleGhostPing(message: Message | PartialMessage, log: Logger): Promise<void> {
+export async function handleGhostPing(
+  message: Message | PartialMessage,
+  log: Logger,
+): Promise<void> {
   const guild = message.guild;
   if (!guild) return;
 
@@ -232,7 +265,7 @@ export async function handleGhostPing(message: Message | PartialMessage, log: Lo
 
   try {
     await target.send(
-      `👻 <@${message.author?.id}> marcou ${mentioned.map((user) => `<@${user.id}>`).join(", ")} e apagou a mensagem.`
+      `👻 <@${message.author?.id}> marcou ${mentioned.map((user) => `<@${user.id}>`).join(", ")} e apagou a mensagem.`,
     );
   } catch {
     // Sem permissao para falar: nao ha o que fazer.
@@ -254,12 +287,28 @@ export async function handleImageContent(message: Message, log: Logger): Promise
 
   const config = await moduleConfig(guild.id, "automod");
   if (!isEnabled(config) || !bool(config, "scanImages", true)) return;
+  const retainExtractedText = bool(
+    await moduleConfig(guild.id, "ocr"),
+    "retainExtractedText",
+    false,
+  );
 
   const images = [...message.attachments.values()]
-    .filter((attachment) => (attachment.contentType ?? "").startsWith("image/"))
+    .filter((attachment) =>
+      ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"].includes(
+        (attachment.contentType ?? "").split(";")[0]!.trim().toLowerCase(),
+      ),
+    )
     .map((attachment) => ({ url: attachment.url, size: attachment.size }));
 
   if (!images.length) return;
+  if (images.length > OCR_MAX_IMAGES_PER_MESSAGE) {
+    log.info("anexos de imagem ignorados pelo limite do OCR", {
+      guildId: guild.id,
+      count: images.length,
+      limit: OCR_MAX_IMAGES_PER_MESSAGE,
+    });
+  }
 
   const ignoredChannels = list(config, "ignoredChannelIds")
     .map((ref) => resolveChannel(guild, ref)?.id)
@@ -274,19 +323,24 @@ export async function handleImageContent(message: Message, log: Logger): Promise
     config,
     windowMs: 0,
     floodCount: 0,
-    duplicateCount: 0
+    duplicateCount: 0,
   });
   if (!hit) return;
 
+  const ruleType = hit.rule.split(":")[0]!;
   const member = message.member;
-  const warnMessage = str(config, "warnMessage", "Sua mensagem foi removida pelo filtro automatico.");
+  const warnMessage = str(
+    config,
+    "warnMessage",
+    "Sua mensagem foi removida pelo filtro automatico.",
+  );
 
   try {
     if (hit.action !== "warn") await message.delete().catch(() => undefined);
 
     if (hit.action === "timeout" || hit.action === "mute") {
       const minutes = Math.max(1, Math.trunc(num(config, "timeoutMinutes", 10)));
-      await member?.timeout(minutes * 60_000, `automod-imagem:${hit.rule}`).catch(() => undefined);
+      await member?.timeout(minutes * 60_000, `automod-imagem:${ruleType}`).catch(() => undefined);
     }
 
     if (hit.action === "warn") {
@@ -297,7 +351,11 @@ export async function handleImageContent(message: Message, log: Logger): Promise
       if (warning) setTimeout(() => void warning.delete().catch(() => undefined), 8_000);
     }
   } catch (error) {
-    log.warn("falha ao aplicar automod em imagem", { guildId: guild.id, rule: hit.rule, error: String(error) });
+    log.warn("falha ao aplicar automod em imagem", {
+      guildId: guild.id,
+      rule: ruleType,
+      error: String(error),
+    });
   }
 
   await auditAndLog(
@@ -305,27 +363,27 @@ export async function handleImageContent(message: Message, log: Logger): Promise
     {
       module: "automod",
       category: "automod",
-      eventType: `automod_imagem_${hit.rule.split(":")[0]}`,
+      eventType: `automod_imagem_${ruleType}`,
       targetId: message.author.id,
       channelId: message.channelId,
       severity: "warning",
-      title: `AUTOMOD (IMAGEM) · ${hit.rule}`,
+      title: `AUTOMOD (IMAGEM) · ${ruleType}`,
       description: `<@${message.author.id}> em <#${message.channelId}>`,
       accentColor: "#f5a524",
       fields: [
-        { name: "Regra", value: hit.rule },
+        { name: "Regra", value: ruleType },
         { name: "Acao", value: hit.action },
-        { name: "Texto lido", value: text.slice(0, 1000) }
+        ...(retainExtractedText ? [{ name: "Texto lido", value: text.slice(0, 1000) }] : []),
       ],
-      data: { rule: hit.rule, action: hit.action, source: "ocr" }
+      data: { rule: ruleType, action: hit.action, source: "ocr" },
     },
-    log
+    log,
   );
 
   log.info("automod aplicado em imagem", {
     guildId: guild.id,
     userId: message.author.id,
-    rule: hit.rule,
-    action: hit.action
+    rule: ruleType,
+    action: hit.action,
   });
 }
