@@ -7,6 +7,7 @@ export type BotHealthRecord = {
   startedAt: number;
   guildCount: number;
   guildIds: string[];
+  guildResources?: Record<string, { channels: Array<{ id: string; name: string; type: "text" | "category" }>; roles: Array<{ id: string; name: string; color: string; position: number }> }>;
   pingMs: number | null;
 };
 
@@ -48,6 +49,7 @@ export async function readBotHealth(): Promise<BotHealthRecord | null> {
     startedAt: record.startedAt,
     guildCount: record.guildCount,
     guildIds: Array.isArray(record.guildIds) ? record.guildIds.filter((id): id is string => typeof id === "string" && /^\d{17,20}$/.test(id)) : [],
+    guildResources: record.guildResources && typeof record.guildResources === "object" ? record.guildResources : {},
     pingMs: record.pingMs,
   };
 }

@@ -3,7 +3,7 @@ import { uid } from "@/lib/utils";
 import { channelNameFor, effectiveStrikes, evaluateNuke, evaluateRaid, nextModerationAction, planAllows, renderTemplate, scanBurst, scanMessage, shouldAutoClose } from "./engine";
 import { defaultsFor, presets, type ModuleKey, type PresetId } from "./defaults";
 import { mergeModuleDefaults } from "./merge-modules";
-import { publishGuildRuntime } from "./runtime-store";
+import { getDiscordGuildResources, publishGuildRuntime } from "./runtime-store";
 import type { PlanId } from "./catalog";
 import { normalizePlan } from "./catalog";
 import { getStoredSessionToken } from "./session-token";
@@ -276,10 +276,28 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       });
       persist(pick(get()));
       publishModules(get());
+      void refreshGuildResources(activeGuildId);
     } catch (error) {
       console.error("Não foi possível validar o acesso; a configuração não foi sincronizada.", error);
     } finally {
       accessRefreshPending = false;
+    }
+  };
+
+  const refreshGuildResources = async (guildId: string) => {
+    const token = getStoredSessionToken();
+    if (!token || !guildId) return;
+    try {
+      const resources = await getDiscordGuildResources({ data: { token, guildId } });
+      if (get().activeGuildId !== guildId) return;
+      const current = get();
+      const channels = resources.channels.map((channel) => ({ ...channel, parentId: null }));
+      const roles = resources.roles.map((role) => ({ ...role, staff: false }));
+      const next = { channels: { ...current.channels, [guildId]: channels }, roles: { ...current.roles, [guildId]: roles } };
+      set(next);
+      persist(pick(get()));
+    } catch (error) {
+      console.error("Não foi possível carregar os canais e cargos deste servidor.", error);
     }
   };
 
@@ -385,7 +403,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       write({ theme });
     },
 
-    setActiveGuild: (id) => write({ activeGuildId: id }),
+    setActiveGuild: (id) => { write({ activeGuildId: id }); void refreshGuildResources(id); },
 
     // `isAdmin` nao pode ser ligado por qualquer um: so o dono da plataforma.
     // Sem esta trava, bastava chamar setAdmin(true) (ou editar o estado salvo)

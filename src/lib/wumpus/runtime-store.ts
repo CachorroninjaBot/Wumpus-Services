@@ -17,6 +17,16 @@ import { enqueueOutbox, readBotCollection, readRuntime, writeRuntime, type BotFo
 import { requireGuildAccess } from "./session";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
+import { readBotHealth } from "./health.server";
+
+export const getDiscordGuildResources = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/) }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const health = await readBotHealth();
+    if (!health || health.status !== "online" || Date.now() - health.at > 90_000) return { channels: [], roles: [] };
+    return health.guildResources?.[data.guildId] ?? { channels: [], roles: [] };
+  });
 
 const groupSchema = z.array(z.object({
   id: z.string().min(1).max(80),

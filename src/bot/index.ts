@@ -16,6 +16,7 @@ import {
   TextInputStyle,
   Client,
   AuditLogEvent,
+  ChannelType,
   Events,
   GatewayIntentBits,
   Partials,
@@ -488,6 +489,16 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
       startedAt,
       guildCount: client.guilds.cache.size,
       guildIds: [...client.guilds.cache.keys()],
+      guildResources: Object.fromEntries([...client.guilds.cache.values()].map((guild) => [guild.id, {
+        channels: [...guild.channels.cache.values()].flatMap((channel): Array<{ id: string; name: string; type: "text" | "category" }> =>
+          channel.type === ChannelType.GuildCategory
+            ? [{ id: channel.id, name: channel.name, type: "category" as const }]
+            : channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement
+              ? [{ id: channel.id, name: channel.name, type: "text" as const }]
+              : [],
+        ),
+        roles: [...guild.roles.cache.values()].filter((role) => role.id !== guild.id && !role.managed).map((role) => ({ id: role.id, name: role.name, color: role.hexColor, position: role.position })),
+      }])),
       pingMs: client.ws.ping >= 0 ? client.ws.ping : null,
     });
   const startedAt = Date.now();
