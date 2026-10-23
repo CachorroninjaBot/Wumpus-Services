@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowRight,
@@ -810,7 +810,7 @@ function ProtectPage() {
                 <ListField
                   id="blocked-terms"
                   label="Termos bloqueados"
-                  hint="Digite um termo e pressione Enter. Também são procurados no texto lido pelo OCR."
+                  hint="Digite um termo e pressione Enter para adicionar. Também são procurados no texto lido pelo OCR."
                   placeholder="Adicionar termo..."
                   value={asList(automod.config.blockedTerms)}
                   onChange={(blockedTerms) => updateConfig("automod", { blockedTerms })}
@@ -1869,7 +1869,6 @@ function ListField({
   onChange: (value: string[]) => void;
   disabled?: boolean;
 }) {
-  const rootRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
 
   function addItems(items: string[]) {
@@ -1888,7 +1887,7 @@ function ListField({
 
   function commitDraft() {
     if (!draft.trim()) return;
-    addItems(draft.split(/[\n,]/));
+    addItems([draft]);
     setDraft("");
   }
 
@@ -1901,7 +1900,6 @@ function ListField({
   return (
     <Field id={id} label={label} hint={hint}>
       <div
-        ref={rootRef}
         role="group"
         aria-label={label}
         className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg border border-input bg-card px-2 py-1.5 transition-[box-shadow,border-color] duration-150 focus-within:ring-2 focus-within:ring-ring has-[:disabled]:opacity-50"
@@ -1932,38 +1930,15 @@ function ListField({
           disabled={disabled}
           autoComplete="off"
           className="h-8 min-w-28 flex-1 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
-          onChange={(event) => {
-            const entered = event.target.value;
-            if (entered.includes(",") || entered.includes("\n")) {
-              const parts = entered.split(/[\n,]/);
-              setDraft(parts.pop() ?? "");
-              addItems(parts);
-            } else {
-              setDraft(entered);
-            }
-          }}
+          onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
-            if (event.key === "Enter" || event.key === ",") {
+            if (event.key === "Enter") {
               event.preventDefault();
               commitDraft();
             } else if (event.key === "Backspace" && !draft && value.length) {
               removeItem(value[value.length - 1]!);
             }
-          }}
-          onPaste={(event) => {
-            const pasted = event.clipboardData.getData("text");
-            if (!/[\n,]/.test(pasted)) return;
-            event.preventDefault();
-            const parts = pasted.split(/[\n,]/);
-            const trailing = parts.pop() ?? "";
-            addItems(parts);
-            setDraft((current) => `${current}${trailing}`);
-          }}
-          onBlur={(event) => {
-            const nextFocus = event.relatedTarget;
-            if (nextFocus instanceof Node && rootRef.current?.contains(nextFocus)) return;
-            commitDraft();
           }}
         />
       </div>
