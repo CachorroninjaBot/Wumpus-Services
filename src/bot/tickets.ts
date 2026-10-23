@@ -41,6 +41,7 @@ export type Ticket = {
   guildId: string;
   channelId: string;
   openerId: string;
+  subject?: string;
   department: string | null;
   status: TicketStatus;
   claimedBy: string | null;
@@ -106,6 +107,9 @@ export async function recordTicketMessage(message: Message): Promise<void> {
     if (!row) return all;
     row.lastActivityAt = at;
     if (firstResponse) row.firstResponseAt = firstResponse;
+    if (message.author.id === ticket.openerId && !row.subject) {
+      row.subject = message.content.trim().slice(0, 80);
+    }
     return all;
   });
 

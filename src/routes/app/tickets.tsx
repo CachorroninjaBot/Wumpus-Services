@@ -14,7 +14,7 @@ import { analyzeWithGrok } from "@/lib/wumpus/analyze";
 import { asList, asString, planAllows, searchArticles, shouldAutoClose, ticketSla, type SlaState } from "@/lib/wumpus/engine";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
-import { getGuildTickets, getTicketActionStatus, requestTicketAction } from "@/lib/wumpus/runtime-store";
+import { getGuildTicketMessages, getGuildTickets, getTicketActionStatus, requestTicketAction } from "@/lib/wumpus/runtime-store";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import type { Ticket, TicketPriority } from "@/lib/wumpus/types";
 import { cn, formatRelative, formatTime } from "@/lib/utils";
@@ -65,20 +65,44 @@ function TicketsPage() {
 
   useEffect(() => {
     let stopped = false;
+    let inFlight = false;
     const refresh = async () => {
-      const token = getStoredSessionToken();
-      if (!token || !gid) {
-        if (!stopped) {
-          setTickets([]);
-          setTicketLoadError("Entre com Discord para consultar os tickets deste servidor.");
-          setTicketsLoaded(true);
-        }
-        return;
-      }
+      if (inFlight) return;
+      inFlight = true;
       try {
+        const token = getStoredSessionToken();
+        if (!token || !gid) {
+          if (!stopped) {
+            setTickets([]);
+            setTicketLoadError("Entre com Discord para consultar os tickets deste servidor.");
+            setTicketsLoaded(true);
+          }
+          return;
+        }
         const rows = await getGuildTickets({ data: { token, guildId: gid } });
         if (!stopped) {
-          setTickets(rows);
+          setTickets((current) => {
+            const currentById = new Map(current.map((ticket) => [ticket.id, ticket]));
+            const next = rows.map((row) => ({
+              ...row,
+              messages: currentById.get(row.id)?.messages ?? row.messages,
+            }));
+            return next.length === current.length && next.every((row, index) => {
+              const previous = current[index];
+              return previous
+                && previous.id === row.id
+                && previous.subject === row.subject
+                && previous.status === row.status
+                && previous.priority === row.priority
+                && previous.claimedBy === row.claimedBy
+                && previous.department === row.department
+                && previous.createdAt === row.createdAt
+                && previous.firstResponseAt === row.firstResponseAt
+                && previous.closedAt === row.closedAt
+                && previous.feedback?.rating === row.feedback?.rating
+                && previous.feedback?.comment === row.feedback?.comment;
+            }) ? current : next;
+          });
           setTicketLoadError(null);
           setTicketsLoaded(true);
           const requestedTicket = new URLSearchParams(window.location.search).get("ticket");
@@ -90,6 +114,8 @@ function TicketsPage() {
         }
       } catch (error) {
         if (!stopped) { setTicketLoadError(error instanceof Error ? error.message : "Não foi possível carregar os atendimentos reais."); setTicketsLoaded(true); }
+      } finally {
+        inFlight = false;
       }
     };
     setTickets([]);
@@ -112,7 +138,10 @@ function TicketsPage() {
         if (result.status === "done" || result.status === "failed") {
           setNotice(result.detail ?? (result.status === "done" ? "Concluído." : "O bot não conseguiu executar a ação."));
           const rows = await getGuildTickets({ data: { token, guildId: gid } });
-          setTickets(rows);
+          setTickets((current) => {
+            const currentById = new Map(current.map((item) => [item.id, item]));
+            return rows.map((row) => ({ ...row, messages: currentById.get(row.id)?.messages ?? row.messages }));
+          });
           return result.status === "done";
         }
       }
@@ -151,6 +180,28 @@ function TicketsPage() {
   }, [tickets, filter, departmentFilter, priorityFilter, query, memberById]);
 
   const ticket = list.find((t) => t.id === selectedId) ?? list[0] ?? null;
+  const selectedTicketId = ticket?.id;
+  const selectedTicketNumber = ticket?.number;
+  const selectedTicketMessageCount = ticket?.messages.length;
+
+  useEffect(() => {
+    if (!selectedTicketId || !selectedTicketNumber || !gid || selectedTicketMessageCount) return;
+    let stopped = false;
+    const token = getStoredSessionToken();
+    if (!token) return;
+
+    void getGuildTicketMessages({ data: { token, guildId: gid, ticketId: selectedTicketNumber } })
+      .then((detail) => {
+        if (stopped) return;
+        setTickets((current) => current.map((row) => row.id === selectedTicketId
+          ? { ...row, subject: detail.subject, messages: detail.messages }
+          : row));
+      })
+      .catch((error) => {
+        if (!stopped) setNotice(error instanceof Error ? error.message : "Não foi possível carregar a conversa.");
+      });
+    return () => { stopped = true; };
+  }, [gid, selectedTicketId, selectedTicketNumber, selectedTicketMessageCount]);
 
   async function runAi(t: Ticket) {
     const token = getStoredSessionToken();

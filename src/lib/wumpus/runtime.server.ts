@@ -100,6 +100,7 @@ export type BotTicketRecord = {
   guildId: string;
   channelId: string;
   openerId: string;
+  subject?: string;
   department: string | null;
   status: "open" | "claimed" | "closed";
   claimedBy: string | null;

@@ -413,10 +413,7 @@ export const getGuildTickets = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
-    const [tickets, messages] = await Promise.all([
-      readBotCollection<BotTicketRecord>("tickets"),
-      readBotCollection<BotTicketMessage>("ticket_messages"),
-    ]);
+    const tickets = await readBotCollection<BotTicketRecord>("tickets");
     return tickets
       .filter((ticket) => ticket.guildId === data.guildId)
       .sort((a, b) => b.id - a.id)
@@ -428,7 +425,7 @@ export const getGuildTickets = createServerFn({ method: "POST" })
         openerId: ticket.openerId,
         claimedBy: ticket.claimedBy,
         department: ticket.department ?? "Geral",
-        subject: messages.find((message) => message.ticketId === ticket.id && message.authorId === ticket.openerId)?.content.slice(0, 80) || `Atendimento #${ticket.id}`,
+        subject: ticket.subject?.slice(0, 80) || `Atendimento #${ticket.id}`,
         status: ticket.status,
         priority: ticket.priority,
         tags: [] as string[],
@@ -438,18 +435,39 @@ export const getGuildTickets = createServerFn({ method: "POST" })
         closedAt: ticket.closedAt ? Date.parse(ticket.closedAt) || null : null,
         feedback: ticket.feedback,
         transcript: null as string | null,
-        messages: messages
-          .filter((message) => message.ticketId === ticket.id)
-          .slice(-500)
-          .map((message, index) => ({
-            id: `${ticket.id}-${index}`,
-            authorId: message.authorId,
-            authorName: message.authorName,
-            content: message.content,
-            at: Date.parse(message.at) || 0,
-            kind: message.authorId === ticket.openerId ? "user" as const : "staff" as const,
-          })),
+        messages: [] as { id: string; authorId: string; authorName: string; content: string; at: number; kind: "user" | "staff" }[],
       }));
+  });
+
+/** Conversation history is loaded only for the ticket currently being viewed. */
+export const getGuildTicketMessages = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    ticketId: z.number().int().positive(),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const tickets = await readBotCollection<BotTicketRecord>("tickets");
+    const ticket = tickets.find((row) => row.guildId === data.guildId && row.id === data.ticketId);
+    if (!ticket) return { subject: `Atendimento #${data.ticketId}`, messages: [] };
+
+    const messages = (await readBotCollection<BotTicketMessage>("ticket_messages"))
+      .filter((message) => message.ticketId === ticket.id)
+      .slice(-500);
+    return {
+      subject: ticket.subject?.slice(0, 80)
+        || messages.find((message) => message.authorId === ticket.openerId)?.content.slice(0, 80)
+        || `Atendimento #${ticket.id}`,
+      messages: messages.map((message, index) => ({
+        id: `${ticket.id}-${index}`,
+        authorId: message.authorId,
+        authorName: message.authorName,
+        content: message.content,
+        at: Date.parse(message.at) || 0,
+        kind: message.authorId === ticket.openerId ? "user" as const : "staff" as const,
+      })),
+    };
   });
 
 /** Formulários recebidos de verdade pelo bot, convertidos para o modelo da caixa. */
