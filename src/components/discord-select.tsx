@@ -1,4 +1,4 @@
-import { NativeSelect } from "@/components/ui/input";
+import { SearchSelect } from "@/components/search-select";
 import { useWumpus } from "@/lib/wumpus/store";
 
 type Props = {
@@ -20,12 +20,7 @@ export function DiscordSelect({ id, value, onChange, kind, placeholder = "Seleci
     : channels.filter((channel) => channel.type === kind).map((channel) => ({ id: channel.id, name: `${kind === "text" ? "#" : ""}${channel.name}` }));
 
   const selected = options.find((option) => option.id === value || option.name.replace(/^[#▰@ ]+/, "") === value.replace(/^[#▰@ ]+/, ""));
-  return (
-    <NativeSelect id={id} value={selected?.id ?? ""} onChange={(event) => onChange(event.target.value)} className={className}>
-      <option value="">{placeholder}</option>
-      {options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-    </NativeSelect>
-  );
+  return <SearchSelect id={id} value={selected?.id ?? ""} options={options.map((option) => ({ id: option.id, label: option.name }))} onChange={onChange} placeholder={placeholder} className={className} />;
 }
 
 export function DiscordMultiSelect({ value, onChange, kind = "role", placeholder }: {
@@ -42,10 +37,7 @@ export function DiscordMultiSelect({ value, onChange, kind = "role", placeholder
         const entity = entities.find((item) => item.id === ref || item.name === ref);
         return <button type="button" key={ref} onClick={() => onChange(value.filter((item) => item !== ref))} className="rounded-full border border-border px-3 py-1 text-xs hover:bg-muted" aria-label={`Remover ${kind === "role" ? "cargo" : "canal"} ${entity?.name ?? ref}`}>{kind === "role" ? "@" : "#"}{entity?.name ?? ref} ×</button>;
       })}</div>
-      <NativeSelect value="" onChange={(event) => { if (event.target.value) onChange([...value, event.target.value]); }}>
-        <option value="">{available.length ? placeholder ?? (kind === "role" ? "Adicionar cargo…" : "Adicionar canal…") : value.length ? "Todos selecionados" : "Nenhuma opção disponível"}</option>
-        {available.map((entity) => <option key={entity.id} value={entity.id}>{kind === "role" ? "@" : "#"}{entity.name}</option>)}
-      </NativeSelect>
+      <SearchSelect value="" options={available.map((entity) => ({ id: entity.id, label: `${kind === "role" ? "@" : "#"}${entity.name}` }))} onChange={(id) => onChange([...value, id])} placeholder={available.length ? placeholder ?? (kind === "role" ? "Adicionar cargo…" : "Adicionar canal…") : value.length ? "Todos selecionados" : "Nenhuma opção disponível"} disabled={!available.length} />
     </div>
   );
 }

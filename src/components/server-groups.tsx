@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Label, NativeSelect } from "@/components/ui/input";
+import { Label } from "@/components/ui/input";
+import { SearchSelect } from "@/components/search-select";
 import { useWumpus } from "@/lib/wumpus/store";
 import { getServerGroups, saveServerGroups } from "@/lib/wumpus/runtime-store";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
@@ -96,7 +97,7 @@ export function ServerGroups() {
   return <section className="space-y-4 rounded-xl border border-border p-4">
     <div><h2 className="m-0 text-base font-semibold">Grupos de servidores</h2><p className="m-0 mt-1 text-sm text-muted-foreground">Agrupe servidores administrados por você e sincronize a configuração atual. Cada servidor resolve os nomes de canais e cargos na própria estrutura.</p></div>
     <div className="grid gap-3 sm:grid-cols-2">
-      <div><Label>Grupo existente</Label><NativeSelect value={selected} onChange={(event) => { setSelected(event.target.value); setStatus(""); }}><option value="">Escolha um grupo</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name} · {group.guildIds.length} servidores</option>)}</NativeSelect></div>
+      <div><Label>Grupo existente</Label><SearchSelect value={selected} onChange={(id) => { setSelected(id); setStatus(""); }} placeholder="Escolha um grupo" options={groups.map((group) => ({ id: group.id, label: group.name, description: `${group.guildIds.length} servidores` }))} /></div>
       <div><Label>Novo grupo</Label><div className="flex gap-2"><input value={name} onChange={(event) => setName(event.target.value)} className="h-11 min-w-0 flex-1 rounded-lg border border-input bg-card px-3 text-sm" placeholder="Ex.: Comunidades parceiras" /><Button onClick={create} disabled={!name.trim()}>Criar</Button></div></div>
     </div>
     {!activeGroup && availableGuilds.length ? <div className="flex flex-wrap gap-2">{availableGuilds.map((guild) => <label key={guild.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm"><input type="checkbox" checked={targets.includes(guild.id)} onChange={(event) => setTargets(event.target.checked ? [...new Set([...targets, guild.id])] : targets.filter((id) => id !== guild.id))} />{guild.name}</label>)}</div> : null}

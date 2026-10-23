@@ -20,7 +20,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { BrandMark, GuildBadge } from "@/components/brand";
 import { Button } from "@/components/ui/button";
-import { NativeSelect } from "@/components/ui/input";
+import { SearchSelect } from "@/components/search-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { brand, groupLabels, navItems, type ModuleGroupId, type NavId } from "@/lib/wumpus/brand";
 import { SESSION_TOKEN_KEY } from "@/lib/wumpus/session-token";
@@ -61,21 +61,8 @@ function GuildPicker({ onChange }: { onChange?: () => void }) {
   const guild = guilds.find((item) => item.id === activeId) ?? guilds[0];
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5">
-      <GuildBadge tag={guild?.tag ?? "W"} iconUrl={guild?.iconUrl} size={38} />
-      <div className="min-w-0 flex-1">
-        <label htmlFor="guild-picker" className="block text-[11px] font-medium text-muted-foreground">Servidor Discord</label>
-        <NativeSelect
-          id="guild-picker"
-          value={guild?.id ?? ""}
-          onChange={(event) => { setActive(event.target.value); onChange?.(); }}
-          className="mt-0.5 h-auto min-w-0 border-0 bg-transparent px-0 py-0 text-sm font-semibold shadow-none focus-visible:ring-0"
-        >
-          {guilds.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </NativeSelect>
-        <p className="m-0 mt-0.5 truncate text-[11px] text-muted-foreground">Plano {guild?.plan ?? "—"}</p>
-      </div>
-    </div>
+    <SearchSelect id="guild-picker" value={guild?.id ?? ""} eyebrow="Servidor Discord" placeholder="Selecione um servidor" onChange={(id) => { setActive(id); onChange?.(); }}
+      className="min-h-[58px] rounded-2xl px-3" options={guilds.map((item) => ({ id: item.id, label: item.name, description: `Plano ${item.plan}`, icon: <GuildBadge tag={item.tag ?? "W"} iconUrl={item.iconUrl} size={34} /> }))} />
   );
 }
 
