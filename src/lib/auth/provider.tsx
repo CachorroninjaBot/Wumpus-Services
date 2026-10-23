@@ -29,7 +29,11 @@ function SessionPresence() {
     if (!pathname.startsWith("/app") && pathname !== "/admin") return;
     const heartbeat = () => {
       if (document.visibilityState === "visible") {
-        void heartbeatDashboardSession({ data: {} }).catch(() => undefined);
+        void heartbeatDashboardSession({ data: {} }).then((result) => {
+          if (result.ok) return;
+          localStorage.removeItem("wumpus-demo-v2");
+          window.location.replace("/entrar?motivo=sessao-expirada");
+        }).catch(() => undefined);
       }
     };
     heartbeat();

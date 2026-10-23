@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -10,6 +10,11 @@ export const Route = createFileRoute("/entrar")({ component: EntrarPage });
 function EntrarPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(() => {
+    setSessionExpired(new URLSearchParams(window.location.search).get("motivo") === "sessao-expirada");
+  }, []);
 
   return (
     <main className="grid min-h-dvh place-items-center bg-background px-4 text-foreground">
@@ -19,6 +24,7 @@ function EntrarPage() {
           <h1 className="m-0 text-xl font-semibold">Entrar no painel</h1>
           <p className="mt-1 text-sm text-muted-foreground">Login oficial com a tua conta Discord. Só servidores que tu administra aparecem.</p>
         </div>
+        {sessionExpired ? <p role="status" className="m-0 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">Sua sessão encerrou após um período sem atividade. Entre novamente para continuar.</p> : null}
         <Button
           className="w-full"
           disabled={busy}

@@ -3,7 +3,8 @@ import { deleteCookie, getCookie, getRequestUrl, setCookie, setResponseHeaders }
 
 export const SESSION_COOKIE = "wumpus_session";
 export const OAUTH_STATE_COOKIE = "wumpus_oauth_state";
-const SESSION_MAX_AGE = 60 * 60 * 24 * 7;
+// Persistent browser session: up to 30 days, with a shorter server-side idle timeout.
+const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 
 function cookieOptions(maxAge: number) {
   return {

@@ -184,9 +184,17 @@ export const resolveAccess = createServerFn({ method: "POST" })
 export const heartbeatDashboardSession = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({}).strict().parse(input))
   .handler(async () => {
-    const payload = await verifySignedSession("");
-    await recordDashboardActivity(payload.sessionId);
-    return { ok: true as const };
+    try {
+      const payload = await verifySignedSession("");
+      await recordDashboardActivity(payload.sessionId);
+      return { ok: true as const };
+    } catch (error) {
+      if (error instanceof Error && /sessão inválida|encerrada ou revogada/i.test(error.message)) {
+        clearDashboardSessionCookie();
+        return { ok: false as const, reason: "expired" as const };
+      }
+      throw error;
+    }
   });
 
 export const logoutDashboardSession = createServerFn({ method: "POST" })

@@ -97,6 +97,8 @@ const grantSchema = z.object({
 let writes: Promise<unknown> = Promise.resolve();
 let cache: { state: DashboardAdminState; at: number } | null = null;
 const CACHE_MS = 2_000;
+const SESSION_IDLE_TIMEOUT_MS = 14 * 24 * 60 * 60_000;
+const SESSION_ABSOLUTE_TIMEOUT_MS = 30 * 24 * 60 * 60_000;
 
 function storePath(): string {
   return process.env.WUMPUS_MEMBERS_PATH || join(process.cwd(), "data", "wumpus-dashboard-members.json");
@@ -238,7 +240,18 @@ export async function dashboardSessionIsUsable(sessionId: string, userId: string
   const state = await readState();
   const session = state.sessions.find((row) => row.id === sessionId && row.userId === userId);
   if (!session || session.endedAt || session.revokedAt) return false;
-  return !state.members.find((row) => row.id === userId)?.suspended;
+  if (state.members.find((row) => row.id === userId)?.suspended) return false;
+
+  const now = Date.now();
+  const idleExpired = now - session.lastSeenAt >= SESSION_IDLE_TIMEOUT_MS;
+  const absoluteExpired = now - session.startedAt >= SESSION_ABSOLUTE_TIMEOUT_MS;
+  if (!idleExpired && !absoluteExpired) return true;
+
+  await mutateState((current) => {
+    const expired = current.sessions.find((row) => row.id === sessionId && row.userId === userId);
+    if (expired && !expired.endedAt) expired.endedAt = now;
+  });
+  return false;
 }
 
 export async function isDashboardAccountSuspended(userId: string): Promise<boolean> {

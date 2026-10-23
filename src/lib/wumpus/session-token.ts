@@ -6,7 +6,7 @@
  * o campo `id` para o do dono e a checagem passava. Revalidar na leitura nao
  * resolve: o dado continua vindo do cliente.
  *
- * O servidor assina (HMAC-SHA256, via `jose`) um retrato de curta duração do
+ * O servidor assina (HMAC-SHA256, via `jose`) um retrato temporário do
  * usuário vindo do Discord. A credencial trafega somente em cookie HttpOnly;
  * o navegador não consegue lê-la nem escolher a identidade assinada.
  */
@@ -31,7 +31,7 @@ export type SessionPayload = {
 };
 
 const ALG = "HS256";
-const TTL = "7d";
+const TTL = "30d";
 
 /** Chave antiga removida durante a migração para cookie HttpOnly. */
 export const SESSION_TOKEN_KEY = "wumpus-session-token";
