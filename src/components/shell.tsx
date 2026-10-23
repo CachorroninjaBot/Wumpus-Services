@@ -26,6 +26,7 @@ import { brand, groupLabels, navItems, type ModuleGroupId, type NavId } from "@/
 import { SESSION_TOKEN_KEY } from "@/lib/wumpus/session-token";
 import { useWumpus } from "@/lib/wumpus/store";
 import { cn } from "@/lib/utils";
+import { ModuleAssistant } from "@/components/module-assistant";
 
 const iconByNav: Record<NavId, typeof LayoutDashboard> = {
   overview: LayoutDashboard,
@@ -235,6 +236,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+      <ModuleAssistant />
     </div>
   );
 }

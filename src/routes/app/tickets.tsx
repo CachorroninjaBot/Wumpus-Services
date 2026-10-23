@@ -18,6 +18,7 @@ import { getGuildTickets, getTicketActionStatus, requestTicketAction } from "@/l
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import type { Ticket, TicketPriority } from "@/lib/wumpus/types";
 import { cn, formatRelative, formatTime } from "@/lib/utils";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const Route = createFileRoute("/app/tickets")({ component: TicketsPage });
 
@@ -35,9 +36,8 @@ function TicketsPage() {
   const [ticketsLoaded, setTicketsLoaded] = useState(false);
   const [ticketLoadError, setTicketLoadError] = useState<string | null>(null);
   const members = useGuildMembers();
-  const channels = useWumpus((state) => state.channels[state.activeGuildId] ?? []);
-  const roles = useWumpus((state) => state.roles[state.activeGuildId] ?? []);
   const tcfg = useModule("tickets");
+  const staffConfig = useModule("staff");
   const updateConfig = useWumpus((s) => s.updateConfig);
   const setEnabled = useWumpus((s) => s.setModuleEnabled);
   const articles = useWumpus((s) => s.articles);
@@ -52,7 +52,7 @@ function TicketsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(tickets[0]?.id ?? null);
   const [showTicketOnMobile, setShowTicketOnMobile] = useState(false);
   const [reply, setReply] = useState("");
-  const [settings, setSettings] = useState(false);
+  const [activeView, setActiveView] = useState<"queue" | "panel">("queue");
   const [ai, setAi] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
@@ -157,13 +157,17 @@ function TicketsPage() {
       <div key={gid} className="mx-auto flex max-w-7xl flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="mr-auto">
-          <h1 className="m-0 text-2xl font-semibold tracking-tight">Fila de atendimento</h1>
-          <p className="m-0 mt-1 text-sm text-muted-foreground">Tickets abertos, prioridade, responsável e prazo.</p>
+          <h1 className="m-0 text-2xl font-semibold tracking-tight">Atendimento</h1>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">Configure o painel e acompanhe cada conversa com sua equipe.</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setSettings(true)}>
-          Configurar atendimento
-        </Button>
       </div>
+
+      <Tabs value={activeView} onValueChange={(value) => setActiveView(value as "queue" | "panel")}>
+        <TabsList aria-label="Área de atendimento">
+          <TabsTrigger value="queue">Fila de tickets</TabsTrigger>
+          <TabsTrigger value="panel">Painel e regras</TabsTrigger>
+        </TabsList>
+        <TabsContent value="queue" className="mt-4 space-y-4">
 
       <p role="note" className="m-0 rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
         Esta fila lê os atendimentos persistidos pelo bot. As ações são encaminhadas ao Discord pelo bot.
@@ -233,7 +237,7 @@ function TicketsPage() {
                 </p>
               </div>
               {tickets.length === 0 ? (
-                <Button size="sm" onClick={() => setSettings(true)}>Configurar o fluxo</Button>
+                <Button size="sm" onClick={() => setActiveView("panel")}>Configurar o painel de atendimento</Button>
               ) : null}
             </div>
           ) : (
@@ -383,10 +387,9 @@ function TicketsPage() {
         )}
       </div>
 
-      <Dialog open={settings} onOpenChange={setSettings}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto">
-          <DialogTitle>Painel e fluxo</DialogTitle>
-          <DialogDesc>Defina o caminho do atendimento. As opções avançadas ficam recolhidas.</DialogDesc>
+        </TabsContent>
+        <TabsContent value="panel" className="mt-4 space-y-5">
+          <div><h2 className="m-0 text-xl font-semibold tracking-tight">Configure seu atendimento</h2><p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Tudo sobre abertura, equipe, prazos e encerramento fica nesta aba. A prévia acompanha as opções escolhidas.</p></div>
           <div className="mt-4 space-y-2">
             <p className="m-0 text-sm font-semibold">Prévia do painel · atualiza ao salvar cada campo</p>
             <DiscordPanel
@@ -398,22 +401,25 @@ function TicketsPage() {
             />
           </div>
           <div className="mt-4 space-y-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3">
               <Label>Atendimento ligado</Label>
               <Switch checked={tcfg.enabled} onCheckedChange={(v) => setEnabled("tickets", v)} />
             </div>
-            <Field label="Onde o painel de atendimento aparece">
+            <Field label="Canal do painel de atendimento">
               <DiscordSelect kind="text" value={asString(tcfg.config.panelChannelId)} onChange={(panelChannelId) => updateConfig("tickets", { panelChannelId })} placeholder="Selecione um canal" />
-              <datalist id="ticket-text-channels">{channels.filter((channel) => channel.type === "text").flatMap((channel) => [<option key={channel.id} value={channel.name} />, <option key={`${channel.id}-hash`} value={`#${channel.name}`} />, <option key={`${channel.id}-id`} value={channel.id} />])}</datalist>
             </Field>
             <Field label="Categoria onde os canais privados serão criados">
               <DiscordSelect kind="category" value={asString(tcfg.config.categoryId)} onChange={(categoryId) => updateConfig("tickets", { categoryId })} placeholder="Selecione uma categoria" />
-              <datalist id="ticket-category-channels">{channels.filter((channel) => channel.type === "category").flatMap((channel) => [<option key={channel.id} value={channel.name} />, <option key={`${channel.id}-id`} value={channel.id} />])}</datalist>
             </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Formato do painel"><NativeSelect value={asString(tcfg.config.panelFormat, "components_v2")} onChange={(e) => updateConfig("tickets", { panelFormat: e.target.value })}><option value="components_v2">Componentes modernos</option><option value="embed">Incorporado clássico</option></NativeSelect></Field>
+              <Field label="Cor de destaque"><Input type="color" className="h-11 p-1" value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => updateConfig("tickets", { panelAccentColor: e.target.value })} /></Field>
+            </div>
+            <Field label="Título do painel"><Input value={asString(tcfg.config.panelTitle)} onChange={(e) => updateConfig("tickets", { panelTitle: e.target.value })} /></Field>
+            <Field label="Descrição do painel"><Textarea value={asString(tcfg.config.panelDescription)} onChange={(e) => updateConfig("tickets", { panelDescription: e.target.value })} /></Field>
             <Field label="Quem atende">
               <DiscordMultiSelect value={asList(tcfg.config.staffRoleIds)} onChange={(staffRoleIds) => updateConfig("tickets", { staffRoleIds })} />
-              <datalist id="ticket-staff-roles">{roles.flatMap((role) => [<option key={role.id} value={role.name} />, <option key={`${role.id}-id`} value={role.id} />])}</datalist>
-              <p className="m-0 text-xs text-muted-foreground">Digite o nome do cargo ou escolha uma sugestão. A equipe terá acesso privado aos canais.</p>
+              <p className="m-0 text-xs text-muted-foreground">Esses cargos terão acesso aos canais privados dos tickets.</p>
             </Field>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Máximo de tickets abertos por pessoa">
@@ -442,27 +448,7 @@ function TicketsPage() {
                 onCheckedChange={(v) => updateConfig("tickets", { feedbackEnabled: v })}
               />
             </div>
-            <details className="rounded-xl border border-border px-3 py-2">
-              <summary className="cursor-pointer py-1 text-sm font-medium">Avançado: aparência, categorias e automações</summary>
-              <div className="mt-4 space-y-4">
-                <Field label="Título do painel">
-                  <Input
-                    defaultValue={asString(tcfg.config.panelTitle)}
-                    onBlur={(e) => updateConfig("tickets", { panelTitle: e.target.value })}
-                  />
-                </Field>
-                <Field label="Descrição">
-                  <Textarea
-                    defaultValue={asString(tcfg.config.panelDescription)}
-                    onBlur={(e) => updateConfig("tickets", { panelDescription: e.target.value })}
-                  />
-                </Field>
-                <Field label="Mensagem de boas-vindas">
-                  <Textarea
-                    defaultValue={asString(tcfg.config.welcomeMessage)}
-                    onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })}
-                  />
-                </Field>
+              <div className="space-y-4">
                 <Field label="Categorias de atendimento (uma por linha)">
                   <Textarea
                     rows={3}
@@ -486,26 +472,24 @@ function TicketsPage() {
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Permitir reabertura</Label><p className="m-0 text-xs text-muted-foreground">A pessoa pode voltar ao canal.</p></div><Switch checked={Boolean(tcfg.config.reopenEnabled)} onCheckedChange={(value) => updateConfig("tickets", { reopenEnabled: value })} /></div>
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Prioridade</Label><p className="m-0 text-xs text-muted-foreground">A equipe classifica urgência.</p></div><Switch checked={Boolean(tcfg.config.priorityEnabled)} onCheckedChange={(value) => updateConfig("tickets", { priorityEnabled: value })} /></div>
                   <Field label="Prazo para fechar automaticamente (horas; 0 desliga)"><Input type="number" min={0} max={8760} defaultValue={Number(tcfg.config.closeAfterHours ?? 48)} onBlur={(e) => updateConfig("tickets", { closeAfterHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
+                  <Field label="Prazo de inatividade (horas; 0 desliga)"><Input type="number" min={0} max={8760} defaultValue={Number(tcfg.config.autoCloseInactiveHours ?? 24)} onBlur={(e) => updateConfig("tickets", { autoCloseInactiveHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <Label>IA de apoio à equipe</Label>
-                    <p className="m-0 text-xs text-muted-foreground">Gera sugestões privadas para a equipe.</p>
-                  </div>
-                  <Switch
-                    checked={Boolean(tcfg.config.aiSupportEnabled)}
-                    onCheckedChange={(value) => updateConfig("tickets", { aiSupportEnabled: value })}
-                  />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Meta para primeira resposta (minutos)">
+                    <Input type="number" min={5} max={10080} defaultValue={Number(staffConfig.config.responseTimeGoalMinutes ?? 30)} onBlur={(e) => updateConfig("staff", { responseTimeGoalMinutes: Math.max(5, Math.min(10080, Number(e.target.value) || 30)) })} />
+                  </Field>
+                  <Field label="Tickets simultâneos por atendente">
+                    <Input type="number" min={1} max={100} defaultValue={Number(staffConfig.config.maxConcurrentTickets ?? 5)} onBlur={(e) => updateConfig("staff", { maxConcurrentTickets: Math.max(1, Math.min(100, Number(e.target.value) || 5)) })} />
+                  </Field>
                 </div>
-                <Field label="Encerrar por inatividade (horas; 0 desliga)">
-                  <Input
-                    type="number"
-                    min={0}
-                    max={8760}
-                    defaultValue={Number(tcfg.config.autoCloseInactiveHours ?? 24)}
-                    onBlur={(e) => updateConfig("tickets", { autoCloseInactiveHours: Math.max(0, Number(e.target.value) || 0) })}
-                  />
+                <Field label="Mensagem de boas-vindas no canal privado">
+                  <Textarea rows={3} defaultValue={asString(tcfg.config.welcomeMessage)} onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })} />
+                  <p className="m-0 text-xs text-muted-foreground">Enviada automaticamente quando o atendimento é aberto.</p>
                 </Field>
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-3">
+                  <div><Label>IA de apoio à equipe</Label><p className="m-0 text-xs text-muted-foreground">Gera sugestões privadas para os atendentes.</p></div>
+                  <Switch checked={Boolean(tcfg.config.aiSupportEnabled)} onCheckedChange={(value) => updateConfig("tickets", { aiSupportEnabled: value })} />
+                </div>
                 <Button
                   variant="outline"
                   disabled={pubBusy || !asString(tcfg.config.panelChannelId).trim()}
@@ -529,10 +513,9 @@ function TicketsPage() {
                   {pubBusy ? "Aguardando o bot…" : "Publicar painel no Discord"}
                 </Button>
               </div>
-            </details>
           </div>
-        </DialogContent>
-      </Dialog>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
         <DialogContent>
