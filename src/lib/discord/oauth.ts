@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { setOAuthStateCookie } from "@/lib/wumpus/session-cookie.server";
 import { enforceRequestLimit } from "@/lib/wumpus/request-limits.server";
-import { canManageDiscordGuild } from "./permissions.ts";
+import { parseDiscordGuilds } from "./guilds.ts";
 
 const CLIENT_ID = () => process.env.DISCORD_CLIENT_ID || "1187601667559002225";
 const CLIENT_SECRET = () => process.env.DISCORD_CLIENT_SECRET || "";
@@ -87,20 +87,20 @@ export async function exchangeDiscordCodeDirect(code: string) {
     headers: { Authorization: `Bearer ${token.access_token}` },
     signal: AbortSignal.timeout(10_000),
   });
-  if (!guildsRes.ok) return { ok: false as const, error: "Não foi possível validar os servidores da conta Discord." };
-  const guildRows = await guildsRes.json() as unknown;
-  if (!Array.isArray(guildRows)) return { ok: false as const, error: "O Discord retornou uma lista de servidores inválida." };
-  const guilds = guildRows.flatMap((value) => {
-    if (!value || typeof value !== "object") return [];
-    const guild = value as Record<string, unknown>;
-    if (typeof guild.id !== "string" || !/^\d{17,20}$/.test(guild.id) || typeof guild.name !== "string" || typeof guild.permissions !== "string") return [];
-    try {
-      return [{ id: guild.id, name: guild.name.slice(0, 100), icon: typeof guild.icon === "string" ? guild.icon : null, owner: guild.owner === true, permissions: BigInt(guild.permissions) }];
-    } catch {
-      return [];
-    }
-  });
-  const managed = guilds.filter((guild) => guild.owner || canManageDiscordGuild(guild.permissions.toString()));
+  if (!guildsRes.ok) {
+    console.error("[discord-oauth-guilds] Discord recusou a consulta de servidores.", JSON.stringify({ status: guildsRes.status }));
+    return { ok: false as const, error: "Não foi possível validar os servidores da conta Discord." };
+  }
+  const parsedGuilds = parseDiscordGuilds(await guildsRes.json() as unknown);
+  if (!parsedGuilds) {
+    console.error("[discord-oauth-guilds] Discord retornou uma lista de servidores inválida.");
+    return { ok: false as const, error: "O Discord retornou uma lista de servidores inválida." };
+  }
+  const managed = parsedGuilds.guilds;
+  console.info("[discord-oauth-guilds]", JSON.stringify({
+    ...parsedGuilds.stats,
+    manageable: managed.length,
+  }));
 
   return {
     ok: true as const,
