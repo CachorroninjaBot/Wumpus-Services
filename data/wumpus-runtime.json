@@ -1,5 +1,5 @@
 {
-  "updatedAt": 1790901260305,
+  "updatedAt": 1790931671862,
   "guilds": {
     "1014633471790022667": {
       "servers": {
@@ -15,7 +15,7 @@
         "enabled": true
       },
       "tickets": {
-        "panelChannelId": "ch_atendimento",
+        "panelChannelId": "",
         "categoryId": "cat_tickets",
         "panelFormat": "components_v2",
         "panelTitle": "Central de atendimento",
@@ -46,6 +46,7 @@
         "enabled": true
       },
       "forms": {
+        "panelChannelId": "",
         "reviewerRoleIds": [
           "role_staff"
         ],
@@ -168,6 +169,10 @@
         ],
         "lockdownMessage": "O servidor está em modo de proteção. Aguarde a equipe resolver.",
         "lockdown": false,
+        "autoBanRepeatOffenders": false,
+        "whitelistRoleIds": [],
+        "alertOnMassBan": true,
+        "alertOnMassChannelDelete": true,
         "enabled": true
       },
       "logs": {
@@ -177,10 +182,16 @@
         "logModeration": true,
         "logMembers": true,
         "logMessages": false,
+        "logVoice": false,
         "logRoles": true,
+        "logChannels": true,
         "logBans": true,
         "logAutoMod": true,
         "ignoreBotMessages": true,
+        "ignoredUserIds": [],
+        "ignoredRoleIds": [],
+        "ignoredChannelIds": [],
+        "mentionRoleId": "",
         "enabled": true
       },
       "staff": {
