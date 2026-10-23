@@ -11,7 +11,16 @@
  * nome com snowflake e nunca dava match, ou seja: o ignore nunca funcionou.
  */
 import type { Message, PartialMessage } from "discord.js";
-import { bool, isEnabled, list, moduleConfig, num, str } from "./config.ts";
+import {
+  bool,
+  guildEntitlementStatus,
+  isEnabled,
+  list,
+  loadRuntime,
+  moduleConfig,
+  num,
+  str,
+} from "./config.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
 import { extractTextFromAttachments, OCR_MAX_IMAGES_PER_MESSAGE } from "./ocr.ts";
@@ -329,8 +338,26 @@ export async function handleImageContent(message: Message, log: Logger): Promise
   });
 
   const config = await moduleConfig(guild.id, "automod");
+  if (!config) {
+    const [entitlementStatus, runtime] = await Promise.all([
+      guildEntitlementStatus(guild.id),
+      loadRuntime(),
+    ]);
+    const publishedModule = runtime.guilds[guild.id]?.automod;
+    log.warn("OCR ignorado: configuração do AutoMod indisponível para o bot", {
+      guildId: guild.id,
+      entitlementStatus: entitlementStatus ?? "missing",
+      runtimeConfigPresent: Boolean(publishedModule && typeof publishedModule === "object"),
+      runtimeUpdatedAt: runtime.updatedAt || "missing",
+    });
+    return;
+  }
   if (!isEnabled(config)) {
-    log.info("OCR ignorado", { guildId: guild.id, reason: "automod_module_disabled" });
+    log.warn("OCR ignorado: AutoMod está desativado no runtime do bot", {
+      guildId: guild.id,
+      runtimeEnabled: config.enabled ?? "missing",
+      runtimeUpdatedAt: (await loadRuntime()).updatedAt || "missing",
+    });
     return;
   }
   if (!bool(config, "scanImages", true)) {
