@@ -57,8 +57,9 @@ export async function loadManualSubscriptionRows(): Promise<SubscriptionLite[]> 
 export async function requireGuildAccess(token: string, guildId: string): Promise<SessionPayload & { entitlements: Entitlements }> {
   const payload = await verifySignedSession(token);
   enforceRequestLimit("guild-api", 300, 60_000, payload.userId);
-  const ownsGuild = payload.guilds.some((guild) => guild.id === guildId && guild.owner);
-  if (!ownsGuild) throw new Error("Você não é proprietário deste servidor no Discord.");
+  const canManageGuild = payload.guilds.some((guild) => guild.id === guildId && guild.owner);
+  const platformOwnerCanManageGuild = isPlatformOwner(payload.userId) && payload.guilds.some((guild) => guild.id === guildId);
+  if (!canManageGuild && !platformOwnerCanManageGuild) throw new Error("Você não administra este servidor no Discord.");
 
   if (!guildAccessCache || guildAccessCache.userId !== payload.userId || guildAccessCache.expiresAt < Date.now()) {
     const [botGuildIds, billing, manualSubscriptions] = await Promise.all([loadBotGuildIds(), loadBilling(), loadManualSubscriptionRows()]);
@@ -66,6 +67,7 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
       discordUserId: payload.userId,
       discordUsername: payload.username,
       ownedGuildIds: payload.guilds.filter((guild) => guild.owner).map((guild) => guild.id),
+      manageableGuildIds: payload.guilds.map((guild) => guild.id),
       botGuildIds,
       subscriptions: [...subscriptionsFor(billing), ...manualSubscriptions],
     });

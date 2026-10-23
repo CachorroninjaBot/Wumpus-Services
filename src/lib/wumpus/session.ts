@@ -149,6 +149,7 @@ export const resolveAccess = createServerFn({ method: "POST" })
       discordUsername: payload.username,
       // Ser dono vem do Discord, dentro do token assinado.
       ownedGuildIds: payload.guilds.filter((guild) => guild.owner).map((guild) => guild.id),
+      manageableGuildIds: payload.guilds.map((guild) => guild.id),
       botGuildIds,
       subscriptions,
     });

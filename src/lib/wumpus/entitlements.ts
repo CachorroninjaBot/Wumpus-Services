@@ -110,6 +110,13 @@ export type EntitlementInput = {
    * da acesso ao painel. Um cargo de staff nao pode configurar o produto.
    */
   ownedGuildIds: string[];
+  /**
+   * Servidores onde a pessoa tem `Gerenciar servidor` no Discord. O OAuth já
+   * restringe esta lista a servidores administrados. É usada apenas pelo
+   * dono da plataforma para suporte operacional; assinantes continuam
+   * limitados aos servidores de que são proprietários.
+   */
+  manageableGuildIds?: string[];
   /** Servidores onde o BOT esta de fato presente. */
   botGuildIds: string[];
   subscriptions: SubscriptionLite[];
@@ -144,13 +151,14 @@ export function resolveEntitlements(input: EntitlementInput): Entitlements {
   const isOwner = isPlatformOwner(input.discordUserId);
   const bot = new Set(input.botGuildIds);
   const eligible = input.ownedGuildIds.filter((id) => bot.has(id));
+  const ownerEligible = (input.manageableGuildIds ?? input.ownedGuildIds).filter((id) => bot.has(id));
 
   if (isOwner) {
     return {
       isOwner: true,
       plan: "escala",
       planName: planById("escala").name,
-      guildIds: eligible,
+      guildIds: ownerEligible,
       overLimitGuildIds: [],
       limit: null,
       reason: "owner",

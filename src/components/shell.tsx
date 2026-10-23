@@ -159,7 +159,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <h1 className="mb-2 mt-6 text-2xl font-semibold">Vamos preparar seu servidor</h1>
           <p className="mb-6 mt-0 text-sm leading-6 text-muted-foreground">
             {isOwner
-              ? "Seu acesso de dono da plataforma está ativo. Adicione o Wumpus a um servidor que você administra para começar."
+              ? "Seu acesso de dono da plataforma está ativo. Para aparecer aqui, o Wumpus precisa estar em um servidor onde sua conta tenha permissão de Gerenciar servidor."
               : "Instale o Wumpus em um servidor que você administra e conecte seu plano para começar a configurar."}
           </p>
           <a href={brand.invite} target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
