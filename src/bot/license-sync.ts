@@ -1,5 +1,5 @@
 import { planIdFromName, serverLimit, type PlanId } from "../lib/wumpus/catalog.ts";
-import { planForUser, type SubscriptionLite } from "../lib/wumpus/entitlements.ts";
+import { configuredLifetimeSubscriptions, planForUser, type SubscriptionLite } from "../lib/wumpus/entitlements.ts";
 import { isPlatformOwner } from "../lib/wumpus/owner.ts";
 import { mutateGuildLicenses, readGuildLicenses, type GuildLicense } from "../lib/wumpus/license-store.server.ts";
 import type { Logger } from "./logger.ts";
@@ -67,7 +67,8 @@ async function loadSubscriptions(): Promise<Subscription[] | null> {
   const payload = asObject(structured(result.json));
   if (!Array.isArray(payload?.subscriptions)) return null;
   const rows = payload.subscriptions;
-  return rows.flatMap((raw): Subscription[] => {
+  return [
+    ...rows.flatMap((raw): Subscription[] => {
     const row = asObject(raw);
     const productName = String(asObject(row?.product)?.name ?? "");
     const planId = planIdFromName(productName);
@@ -79,7 +80,9 @@ async function loadSubscriptions(): Promise<Subscription[] | null> {
       discordUserId: typeof row.discord_user_id === "string" ? row.discord_user_id : typeof row.discordUserId === "string" ? row.discordUserId : null,
       productName,
     }];
-  });
+    }),
+    ...configuredLifetimeSubscriptions().map((sub) => ({ ...sub, productName: "Wumpus Vitalício" })),
+  ];
 }
 
 function accountPlan(records: GuildLicense[], subscriptions: Subscription[]): PlanId | null {

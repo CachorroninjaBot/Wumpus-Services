@@ -31,6 +31,17 @@ export type SubscriptionLite = {
   discordUserId?: string | null;
 };
 
+/** IDs de compradores Vitalício verificados manualmente no painel da loja. */
+export function configuredLifetimeSubscriptions(value = process.env.WUMPUS_LIFETIME_DISCORD_IDS): SubscriptionLite[] {
+  const ids = (value ?? "").split(/[\s,;]+/).filter((id) => /^\d{17,20}$/.test(id));
+  return [...new Set(ids)].map((discordUserId) => ({
+    status: "active",
+    planId: "vitalicio",
+    discordUsername: null,
+    discordUserId,
+  }));
+}
+
 /**
  * Status que dao direito de uso.
  *

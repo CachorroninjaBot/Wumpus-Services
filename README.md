@@ -15,6 +15,10 @@ Os limites de servidor e recursos são revalidados pelo bot na ShardPay a cada
 5 minutos. Dashboard e bot precisam compartilhar `data/wumpus-entitlements.json`
 (ou o caminho definido em `WUMPUS_LICENSE_PATH`) para aplicar a licença. Uma
 instalação nova tem 15 minutos para ser ativada pela conta proprietária.
+Como a consulta MCP atual da ShardPay lista assinaturas recorrentes, compradores
+Vitalício precisam ser verificados na loja e incluídos em
+`WUMPUS_LIFETIME_DISCORD_IDS` (IDs Discord separados por vírgula). O Vitalício
+recebe os mesmos limites do Escala.
 
 ## Rodar
 

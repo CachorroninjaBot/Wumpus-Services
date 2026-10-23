@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OWNER_DISCORD_ID, isPlatformOwner } from "./owner.ts";
-import { canAddServer, planForUser, resolveEntitlements, type SubscriptionLite } from "./entitlements.ts";
+import { canAddServer, configuredLifetimeSubscriptions, planForUser, resolveEntitlements, type SubscriptionLite } from "./entitlements.ts";
 import { monthlyOcrLimit, planAllows } from "./plan-features.ts";
 
 const ME = { id: "111", username: "cliente" };
@@ -56,6 +56,13 @@ test("qualquer outro id nao e dono", () => {
 
 test("sem assinatura ativa nao ha plano", () => {
   assert.equal(planForUser([], ME.id, ME.username), null);
+});
+
+test("Vitalício exige ID Discord verificado e ignora entradas inválidas", () => {
+  const rows = configuredLifetimeSubscriptions("12345678901234567, 12345678901234567; desconhecido");
+  assert.equal(rows.length, 1);
+  assert.equal(planForUser(rows, "12345678901234567", "cliente")?.plan, "vitalicio");
+  assert.equal(planForUser(rows, "76543210987654321", "outro"), null);
 });
 
 test("assinatura cancelada nao da plano", () => {

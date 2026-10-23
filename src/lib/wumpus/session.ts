@@ -18,7 +18,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { exchangeDiscordCodeDirect } from "@/lib/discord/oauth";
 import { loadBotGuildIds } from "./bot-guilds";
-import { resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
+import { configuredLifetimeSubscriptions, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
 import { loadBilling } from "./shardpay";
 import { isPlatformOwner } from "./owner";
 import { recordDashboardLogin } from "./admin-store.server";
@@ -48,12 +48,12 @@ export type AccessResult =
 let guildAccessCache: { userId: string; guildIds: Set<string>; entitlements: Entitlements; expiresAt: number } | null = null;
 
 function subscriptionRows(billing: Awaited<ReturnType<typeof loadBilling>>): SubscriptionLite[] {
-  return billing.subscriptions.map((sub) => ({
+  return [...billing.subscriptions.map((sub) => ({
     status: sub.status,
     planId: sub.planId,
     discordUsername: sub.discordUsername,
     discordUserId: sub.discordUserId,
-  }));
+  })), ...configuredLifetimeSubscriptions()];
 }
 
 /** Entra com o `code` do Discord e devolve um token assinado. */
@@ -127,7 +127,7 @@ export const resolveAccess = createServerFn({ method: "POST" })
 
     // Se a ShardPay respondeu, publica a decisão atual para o processo do bot.
     // Em indisponibilidade temporária, preserva a última licença conhecida.
-    if (billing.ok || entitlements.isOwner) {
+    if (billing.ok || entitlements.isOwner || configuredLifetimeSubscriptions().some((sub) => sub.discordUserId === payload.userId)) {
       await syncGuildEntitlements({
         accountId: payload.userId,
         discordUsername: payload.username,
