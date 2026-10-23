@@ -278,7 +278,7 @@ export async function openTicket(
           type: 1,
           components: [
             { type: 2, style: 2, label: "Assumir", custom_id: id("ticket", "claim", ticketId) },
-            { type: 2, style: 4, label: "Encerrar", custom_id: id("ticket", "close", ticketId) },
+            { type: 2, style: 4, label: "Encerrar", custom_id: id("ticket", "close_reason", ticketId) },
             ...(bool(config, "priorityEnabled", true)
               ? [
                   { type: 2, style: 2, label: "Baixa", custom_id: id("ticket", "prio", ticketId, "low") },
@@ -288,9 +288,10 @@ export async function openTicket(
               : [])
           ]
         },
-        ...(bool(config, "priorityEnabled", true)
-          ? [{ type: 1, components: [{ type: 2, style: 2, label: "Urgente", custom_id: id("ticket", "prio", ticketId, "urgent") }] }]
-          : [])
+        { type: 1, components: [
+          ...(bool(config, "priorityEnabled", true) ? [{ type: 2, style: 2, label: "Escalar", custom_id: id("ticket", "escalate", ticketId) }] : []),
+          { type: 2, style: 2, label: "Transferir", custom_id: id("ticket", "transfer_pick", ticketId) }
+        ] }
       ]
     });
 
@@ -375,6 +376,57 @@ export async function claimTicket(
   );
 
   log.info("atendimento assumido", { guildId: guild.id, ticketId, staffId });
+  return { ok: true };
+}
+
+/** Transfere o responsável para outro membro que tenha um cargo da equipe. */
+export async function transferTicket(
+  guild: Guild,
+  ticketId: number,
+  actorId: string,
+  targetStaffId: string,
+  log: Logger
+): Promise<{ ok: boolean; error?: string }> {
+  const ticket = await getTicket(guild.id, ticketId);
+  if (!ticket || ticket.status === "closed") return { ok: false, error: "Atendimento inexistente ou encerrado." };
+  if (ticket.claimedBy === targetStaffId) return { ok: false, error: "Este atendente já está responsável pelo atendimento." };
+  const [ticketConfig, staffConfig, target, actor] = await Promise.all([
+    moduleConfig(guild.id, "tickets"),
+    moduleConfig(guild.id, "staff"),
+    guild.members.fetch(targetStaffId).catch(() => null),
+    guild.members.fetch(actorId).catch(() => null),
+  ]);
+  const staffRoles = resolveRoles(guild, [...list(ticketConfig, "staffRoleIds"), ...list(staffConfig, "staffRoleIds")]);
+  if (!target) return { ok: false, error: "Não encontrei esse membro no servidor." };
+  if (!actor || (!actor.permissions.has(PermissionFlagsBits.ManageGuild) && !actor.roles.cache.some((role) => staffRoles.some((staffRole) => staffRole.id === role.id)))) {
+    return { ok: false, error: "Somente a equipe configurada pode transferir atendimentos." };
+  }
+  if (!staffRoles.length || !target.roles.cache.some((role) => staffRoles.some((staffRole) => staffRole.id === role.id))) {
+    return { ok: false, error: "A pessoa escolhida não possui um cargo de atendimento configurado." };
+  }
+  const transferredAt = new Date().toISOString();
+  let changed = false;
+  await mutate<Ticket>("tickets", (rows) => {
+    const row = rows.find((entry) => entry.guildId === guild.id && entry.id === ticketId);
+    if (!row || row.status === "closed") return rows;
+    row.claimedBy = targetStaffId;
+    row.claimedAt = transferredAt;
+    row.status = "claimed";
+    changed = true;
+    return rows;
+  });
+  if (!changed) return { ok: false, error: "O atendimento foi encerrado antes da transferência." };
+  const actorName = await displayName(guild, actorId);
+  await auditAndLog(guild, {
+    module: "tickets", category: "members", eventType: "ticket_transferred", actorId,
+    targetId: targetStaffId, channelId: ticket.channelId, severity: "info",
+    title: `ATENDIMENTO #${ticketId} TRANSFERIDO`,
+    description: `${actorName} transferiu o atendimento para <@${targetStaffId}>.`,
+    fields: [{ name: "Novo responsável", value: `<@${targetStaffId}>` }],
+  }, log);
+  const channel = await guild.channels.fetch(ticket.channelId).catch(() => null);
+  if (channel?.isTextBased() && "send" in channel) await channel.send({ content: `Atendimento transferido para <@${targetStaffId}>.`, allowedMentions: { users: [targetStaffId], parse: [] } }).catch(() => undefined);
+  log.info("atendimento transferido", { guildId: guild.id, ticketId, actorId, targetStaffId });
   return { ok: true };
 }
 

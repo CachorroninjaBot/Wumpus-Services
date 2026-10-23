@@ -22,13 +22,15 @@ import {
   Partials,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
+  UserSelectMenuBuilder,
   type ButtonInteraction,
   type Guild,
   type Interaction,
   type Message,
   type PartialMessage,
   type ModalSubmitInteraction,
-  type StringSelectMenuInteraction
+  type StringSelectMenuInteraction,
+  type UserSelectMenuInteraction
 } from "discord.js";
 import { handleGhostPing, handleImageContent, handleMessage } from "./automod.ts";
 import { handleCommand, registerCommands } from "./commands.ts";
@@ -40,6 +42,7 @@ import { consoleLogger, type Logger } from "./logger.ts";
 import { auditAndLog, logToChannel, pruneAudit, recordAudit, shouldIgnoreLogEvent } from "./logs.ts";
 import { renderAuditDiff } from "./log-diff.ts";
 import { renderLogEvent } from "./log-render.ts";
+import { resolveRoles } from "./resolve.ts";
 import { applyDefaultRole, removeManagedRolesOnLeave } from "./roles.ts";
 import { checkInactivity, checkOverload } from "./staff.ts";
 import { bump, maybeSendDigest, pruneStatistics } from "./statistics.ts";
@@ -52,7 +55,8 @@ import {
   recordFeedback,
   recordTicketMessage,
   reopenClosedTicket,
-  setTicketPriority
+  setTicketPriority,
+  transferTicket
 } from "./tickets.ts";
 import { clearPersistedSecurityWindow, gateNewChannel, handleAuditLogEntry, handleMassMention, handleMemberAdd, grantVerifiedRole, isVerificationActive, readPersistedSecurityWindow, setLockdown } from "./security.ts";
 import { processOutbox } from "./outbox-send.ts";
@@ -345,6 +349,7 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "ticket" && action === "claim") {
     const ticketId = Number(args[0]);
+    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode assumir tickets.", ephemeral: true }); return; }
     await interaction.deferReply({ ephemeral: true });
     const result = await claimTicket(guild, ticketId, interaction.user.id, log);
 
@@ -356,9 +361,37 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "ticket" && action === "close") {
     const ticketId = Number(args[0]);
-    await interaction.deferReply({ ephemeral: true });
-    const result = await closeTicket(guild, ticketId, interaction.user.id, log);
-    await interaction.editReply(result.ok ? "Atendimento encerrado." : "Este atendimento ja estava encerrado.");
+    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode encerrar tickets.", ephemeral: true }); return; }
+    const modal = new ModalBuilder().setCustomId(id("ticket", "close_reason_submit", ticketId)).setTitle(`Encerrar atendimento #${ticketId}`);
+    const reason = new TextInputBuilder().setCustomId("motivo").setLabel("Motivo do encerramento").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder("Ex.: dúvida resolvida, solicitação concluída…");
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (kind === "ticket" && action === "close_reason") {
+    const ticketId = Number(args[0]);
+    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode encerrar tickets.", ephemeral: true }); return; }
+    const modal = new ModalBuilder().setCustomId(id("ticket", "close_reason_submit", ticketId)).setTitle(`Encerrar atendimento #${ticketId}`);
+    const reason = new TextInputBuilder().setCustomId("motivo").setLabel("Motivo do encerramento").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder("Ex.: dúvida resolvida, solicitação concluída…");
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (kind === "ticket" && action === "transfer_pick") {
+    const ticketId = Number(args[0]);
+    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode transferir tickets.", ephemeral: true }); return; }
+    const picker = new UserSelectMenuBuilder().setCustomId(id("ticket", "transfer", ticketId)).setPlaceholder("Escolha um atendente").setMinValues(1).setMaxValues(1);
+    await interaction.reply({ content: "Escolha quem assumirá este atendimento. O Wumpus confirma o cargo antes de transferir.", components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(picker)], ephemeral: true });
+    return;
+  }
+
+  if (kind === "ticket" && action === "escalate") {
+    const ticketId = Number(args[0]);
+    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode escalar tickets.", ephemeral: true }); return; }
+    const applied = await setTicketPriority(guild, ticketId, "urgent", interaction.user.id, log);
+    await interaction.reply({ content: applied ? `Atendimento **#${ticketId}** escalado para urgente.` : "O atendimento já está urgente, foi encerrado ou não existe.", ephemeral: true });
     return;
   }
 
@@ -372,6 +405,7 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "ticket" && action === "prior") {
     const ticketId = Number(args[0]);
+    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode alterar prioridades.", ephemeral: true }); return; }
     const priority = args[1] ?? "normal";
     const applied = await setTicketPriority(guild, ticketId, priority, interaction.user.id, log);
     await interaction.reply({
@@ -480,6 +514,16 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
 
   const { kind, action, args } = parsed;
 
+  if (kind === "ticket" && action === "close_reason_submit") {
+    const ticketId = Number(args[0]);
+    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode encerrar tickets.", ephemeral: true }); return; }
+    const reason = interaction.fields.getTextInputValue("motivo").trim();
+    await interaction.deferReply({ ephemeral: true });
+    const result = await closeTicket(guild, ticketId, interaction.user.id, log, reason);
+    await interaction.editReply(result.ok ? `Atendimento encerrado. Motivo: ${reason.slice(0, 400)}` : "Este atendimento já estava encerrado ou não existe.");
+    return;
+  }
+
   if (kind === "form" && action === "submit") {
     await interaction.deferReply({ ephemeral: true });
     const maintenance = await maintenanceNotice(guild.id);
@@ -500,6 +544,33 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
     const result = await reviewForm(guild, submissionId, interaction.user.id, "rejected", reason, log);
     await interaction.editReply(result.ok ? "Candidatura recusada." : (result.error ?? "Falhou."));
   }
+}
+
+async function handleTicketTransferSelect(interaction: UserSelectMenuInteraction, log: Logger): Promise<void> {
+  const parsed = parseId(interaction.customId);
+  const guild = interaction.guild;
+  if (!guild || parsed?.kind !== "ticket" || parsed.action !== "transfer") return;
+  const ticketId = Number(parsed.args[0]);
+  const targetStaffId = interaction.values[0];
+  if (!targetStaffId) {
+    await interaction.reply({ content: "Escolha uma pessoa da equipe.", ephemeral: true });
+    return;
+  }
+  await interaction.deferReply({ ephemeral: true });
+  const result = await transferTicket(guild, ticketId, interaction.user.id, targetStaffId, log);
+  await interaction.editReply(result.ok ? `Atendimento **#${ticketId}** transferido para <@${targetStaffId}>.` : result.error ?? "Não foi possível transferir o atendimento.");
+}
+
+async function canManageTicket(guild: Guild, userId: string): Promise<boolean> {
+  const [member, tickets, staff] = await Promise.all([
+    guild.members.fetch(userId).catch(() => null),
+    moduleConfig(guild.id, "tickets"),
+    moduleConfig(guild.id, "staff"),
+  ]);
+  if (!member) return false;
+  if (member.permissions.has("ManageGuild")) return true;
+  const roles = resolveRoles(guild, [...list(tickets, "staffRoleIds"), ...list(staff, "staffRoleIds")]);
+  return roles.some((role) => member.roles.cache.has(role.id));
 }
 
 export function createBot(token: string, log: Logger = consoleLogger): BotHandle {
@@ -670,6 +741,10 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
           } else if (parsed?.kind === "ticket" && parsed.action === "dept") {
             await handleDepartmentSelect(interaction, log);
           }
+          return;
+        }
+        if (interaction.isUserSelectMenu()) {
+          await handleTicketTransferSelect(interaction, log);
           return;
         }
         if (interaction.isModalSubmit()) {

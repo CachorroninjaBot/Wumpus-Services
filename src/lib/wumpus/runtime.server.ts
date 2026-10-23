@@ -60,11 +60,12 @@ export type OutboxJob = {
   target: string;
   /** Referencia de canal da config (nome como "ch_atendimento" ou snowflake). */
   channelRef: string;
-  action?: "claim" | "reply" | "close" | "priority" | "approve_form" | "reject_form" | "security_restore" | "security_lockdown_on" | "security_lockdown_off";
+  action?: "claim" | "reply" | "close" | "priority" | "transfer" | "escalate" | "approve_form" | "reject_form" | "security_restore" | "security_lockdown_on" | "security_lockdown_off";
   verificationRoleId?: string;
   ticketId?: number;
   formId?: number;
   actorId?: string;
+  targetStaffId?: string;
   content?: string;
   reason?: string;
   priority?: "low" | "normal" | "high" | "urgent";

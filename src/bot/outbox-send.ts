@@ -11,7 +11,7 @@ import type { Guild } from "discord.js";
 import { pendingJobs, pruneOutbox, settleActionJob, settleJob } from "./outbox.ts";
 import { buildPanelPayload } from "./panels.ts";
 import { buildFormPanel, reviewForm } from "./forms.ts";
-import { buildTicketPanel, claimTicket, closeTicket, sendTicketReply, setTicketPriority } from "./tickets.ts";
+import { buildTicketPanel, claimTicket, closeTicket, sendTicketReply, setTicketPriority, transferTicket } from "./tickets.ts";
 import { asSendable, resolveChannel } from "./resolve.ts";
 import type { Logger } from "./logger.ts";
 import type { OutboxJob, RuntimeFile } from "../lib/wumpus/runtime.server.ts";
@@ -170,7 +170,7 @@ async function processFormAction(guild: Guild, job: OutboxJob, log: Logger): Pro
 async function processTicketAction(guild: Guild, job: OutboxJob, log: Logger): Promise<{ ok: boolean; detail: string }> {
   if (job.action === "security_restore") return restoreVerification(guild);
   if (job.action === "security_lockdown_on" || job.action === "security_lockdown_off") return { ok: true, detail: `Lockdown aplicado em ${await setLockdown(guild, job.action === "security_lockdown_on", log)} canais.` };
-  if (job.action !== "claim" && job.action !== "reply" && job.action !== "close" && job.action !== "priority") {
+  if (job.action !== "claim" && job.action !== "reply" && job.action !== "close" && job.action !== "priority" && job.action !== "transfer" && job.action !== "escalate") {
     return { ok: false, detail: "Ação de atendimento inválida." };
   }
   if (!job.ticketId || !job.actorId) return { ok: false, detail: "Pedido de atendimento incompleto." };
@@ -189,6 +189,15 @@ async function processTicketAction(guild: Guild, job: OutboxJob, log: Logger): P
     const result = await setTicketPriority(guild, job.ticketId, job.priority, job.actorId, log);
     return { ok: result, detail: result ? "Prioridade atualizada." : "Ticket encerrado, inexistente ou já está nessa prioridade." };
   }
-  const result = await closeTicket(guild, job.ticketId, job.actorId, log);
+  if (job.action === "transfer") {
+    if (!job.targetStaffId) return { ok: false, detail: "Escolha um atendente para receber o ticket." };
+    const result = await transferTicket(guild, job.ticketId, job.actorId, job.targetStaffId, log);
+    return { ok: result.ok, detail: result.ok ? "Atendimento transferido." : result.error ?? "Não foi possível transferir o atendimento." };
+  }
+  if (job.action === "escalate") {
+    const result = await setTicketPriority(guild, job.ticketId, "urgent", job.actorId, log);
+    return { ok: result, detail: result ? "Atendimento escalado para urgente." : "Atendimento inexistente, encerrado ou já está urgente." };
+  }
+  const result = await closeTicket(guild, job.ticketId, job.actorId, log, job.reason ?? null);
   return { ok: result.ok, detail: result.ok ? "Atendimento encerrado." : "Atendimento inexistente ou já encerrado." };
 }

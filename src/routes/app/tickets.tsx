@@ -52,6 +52,8 @@ function TicketsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(tickets[0]?.id ?? null);
   const [showTicketOnMobile, setShowTicketOnMobile] = useState(false);
   const [reply, setReply] = useState("");
+  const [transferStaffInput, setTransferStaffInput] = useState("");
+  const [closeReason, setCloseReason] = useState("");
   const [activeView, setActiveView] = useState<"queue" | "panel">("queue");
   const [ai, setAi] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
@@ -97,7 +99,7 @@ function TicketsPage() {
     return () => { stopped = true; window.clearInterval(timer); };
   }, [gid]);
 
-  async function runTicketAction(action: "claim" | "reply" | "close" | "priority", input: { content?: string; priority?: TicketPriority } = {}) {
+  async function runTicketAction(action: "claim" | "reply" | "close" | "priority" | "transfer" | "escalate", input: { content?: string; priority?: TicketPriority; reason?: string; targetStaffId?: string } = {}) {
     if (!ticket) return false;
     const token = getStoredSessionToken();
     if (!token) { setNotice("Entre novamente com Discord para atender tickets."); return false; }
@@ -342,6 +344,9 @@ function TicketsPage() {
                     <Button size="sm" variant="secondary" disabled={actionBusy} onClick={() => void runTicketAction("claim")}>
                       Assumir
                     </Button>
+                    <Button size="sm" variant="outline" disabled={actionBusy || ticket.priority === "urgent"} onClick={() => void runTicketAction("escalate")}>
+                      Escalar
+                    </Button>
                     <Button size="sm" variant="outline" disabled={actionBusy} onClick={() => setCloseOpen(true)}>
                       Encerrar
                     </Button>
@@ -353,6 +358,15 @@ function TicketsPage() {
                   </>
                 ) : null}
               </div>
+              {ticket.status !== "closed" ? <form className="mt-3 flex flex-wrap gap-2" onSubmit={(event) => {
+                event.preventDefault();
+                const match = transferStaffInput.trim().match(/^(?:<@!?(\d{17,20})>|(\d{17,20}))$/);
+                const targetStaffId = match?.[1] ?? match?.[2];
+                if (targetStaffId) void runTicketAction("transfer", { targetStaffId }).then((ok) => { if (ok) setTransferStaffInput(""); });
+              }}>
+                <Input className="min-w-48 flex-1" value={transferStaffInput} onChange={(event) => setTransferStaffInput(event.target.value)} placeholder="ID ou menção do novo atendente" aria-label="Atendente para transferência" />
+                <Button size="sm" variant="outline" type="submit" disabled={actionBusy || !/^(?:<@!?\d{17,20}>|\d{17,20})$/.test(transferStaffInput.trim())}>Transferir</Button>
+              </form> : null}
             </header>
 
             <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
@@ -562,11 +576,14 @@ function TicketsPage() {
       <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
         <DialogContent>
           <DialogTitle>Encerrar atendimento</DialogTitle>
-          <DialogDesc>O bot encerrará o canal e enviará a pesquisa de satisfação configurada.</DialogDesc>
+          <DialogDesc>Informe um motivo para manter o histórico consistente. O bot encerrará o canal e enviará a pesquisa configurada.</DialogDesc>
+          <Field label="Motivo do encerramento">
+            <Textarea rows={3} maxLength={500} value={closeReason} onChange={(event) => setCloseReason(event.target.value)} placeholder="Ex.: dúvida resolvida, solicitação concluída…" />
+          </Field>
           <Button
             className="mt-4 w-full"
-            disabled={actionBusy}
-            onClick={() => void runTicketAction("close").then((ok) => { if (ok) setCloseOpen(false); })}
+            disabled={actionBusy || !closeReason.trim()}
+            onClick={() => void runTicketAction("close", { reason: closeReason.trim() }).then((ok) => { if (ok) { setCloseOpen(false); setCloseReason(""); } })}
           >
             Encerrar e gerar transcrição
           </Button>
