@@ -7,7 +7,18 @@ export type BotHealthRecord = {
   startedAt: number;
   guildCount: number;
   guildIds: string[];
-  guildResources?: Record<string, { channels: Array<{ id: string; name: string; type: "text" | "category" }>; roles: Array<{ id: string; name: string; color: string; position: number }> }>;
+  guildResources?: Record<string, {
+    channels: Array<{ id: string; name: string; type: "text" | "category" }>;
+    roles: Array<{ id: string; name: string; color: string; position: number }>;
+    permissions?: {
+      manageMessages: boolean;
+      manageChannels: boolean;
+      manageRoles: boolean;
+      moderateMembers: boolean;
+      viewAuditLog: boolean;
+      banMembers: boolean;
+    } | null;
+  }>;
   pingMs: number | null;
 };
 

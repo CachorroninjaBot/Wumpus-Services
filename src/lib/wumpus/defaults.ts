@@ -160,6 +160,7 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     alertOnMassInviteCreate: true,
     alertOnEveryoneMentions: true,
     autoResponseConfirmed: false,
+    autoBanRepeatOffendersConfirmed: false,
     verificationChannelId: "",
     verifiedRoleId: "",
     verificationEnabled: false,

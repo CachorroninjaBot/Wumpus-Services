@@ -147,7 +147,7 @@ export async function readRuntime(): Promise<RuntimeFile> {
       guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {},
       serverGroups: Array.isArray(parsed?.serverGroups) ? parsed.serverGroups : [],
       articles: parsed?.articles && typeof parsed.articles === "object" ? parsed.articles : {},
-      outbox: Array.isArray(parsed?.outbox) ? parsed.outbox : []
+      outbox: Array.isArray(parsed?.outbox) ? parsed.outbox : [],
     };
   } catch {
     return { updatedAt: 0, guilds: {}, serverGroups: [], articles: {}, outbox: [] };

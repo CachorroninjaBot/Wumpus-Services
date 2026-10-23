@@ -141,6 +141,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     alertOnMassChannelDelete: true,
     lockdownMessage: "O servidor está em modo de proteção. Aguarde a equipe resolver.",
     autoResponseConfirmed: false,
+    autoBanRepeatOffendersConfirmed: false,
     verificationChannelId: "",
     verifiedRoleId: "",
     verificationEnabled: false,

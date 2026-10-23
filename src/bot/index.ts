@@ -20,6 +20,7 @@ import {
   Events,
   GatewayIntentBits,
   Partials,
+  PermissionFlagsBits,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
   UserSelectMenuBuilder,
@@ -606,6 +607,14 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
               : [],
         ),
         roles: [...guild.roles.cache.values()].filter((role) => role.id !== guild.id && !role.managed).map((role) => ({ id: role.id, name: role.name, color: role.hexColor, position: role.position })),
+        permissions: guild.members.me ? {
+          manageMessages: guild.members.me.permissions.has(PermissionFlagsBits.ManageMessages),
+          manageChannels: guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels),
+          manageRoles: guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles),
+          moderateMembers: guild.members.me.permissions.has(PermissionFlagsBits.ModerateMembers),
+          viewAuditLog: guild.members.me.permissions.has(PermissionFlagsBits.ViewAuditLog),
+          banMembers: guild.members.me.permissions.has(PermissionFlagsBits.BanMembers),
+        } : null,
       }])),
       pingMs: client.ws.ping >= 0 ? client.ws.ping : null,
     });

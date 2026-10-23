@@ -162,7 +162,8 @@ export async function handleMemberAdd(member: GuildMember, log: Logger): Promise
           fields: [
             { name: "Idade minima", value: `${minAgeHours}h` },
             { name: "Criada em", value: member.user.createdAt.toISOString() }
-          ]
+          ],
+          data: { accountAgeHours: Math.round(ageHours * 10) / 10, minAccountAgeHours: minAgeHours }
         },
         log
       );
@@ -386,7 +387,7 @@ export async function handleAuditLogEntry(
   );
 
   await sendSecurityAlert(guild, action.title, `<@${executorId}> executou ${count} ações em ${Math.round(windowMs / 1000)} segundos. Revise os registros antes de tomar uma ação.`, log, false, "", "nuke-cooldown");
-  if (bool(config, "autoBanRepeatOffenders", false) && bool(config, "autoResponseConfirmed", false)) {
+  if (bool(config, "autoBanRepeatOffenders", false) && bool(config, "autoBanRepeatOffendersConfirmed", false)) {
     if (!member?.bannable) {
       log.error("ban automático do anti-nuke indisponível por hierarquia ou falta do membro", { guildId: guild.id, executorId });
       await auditAndLog(guild, {

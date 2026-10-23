@@ -18,6 +18,7 @@ import { requireGuildAccess } from "./session";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 import { readBotHealth } from "./health.server";
+import { markSecurityEventReviewed, readReviewedSecurityEvents } from "./security-reviews.server";
 
 export const getDiscordGuildResources = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/) }).strict().parse(input))
@@ -26,6 +27,101 @@ export const getDiscordGuildResources = createServerFn({ method: "POST" })
     const health = await readBotHealth();
     if (!health || health.status !== "online" || Date.now() - health.at > 90_000) return { channels: [], roles: [] };
     return health.guildResources?.[data.guildId] ?? { channels: [], roles: [] };
+  });
+
+export const getGuildProtectionReadiness = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/) }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    type LockdownEvent = { id: number; guildId: string; eventType: string; at: string };
+    const [health, audit] = await Promise.all([readBotHealth().catch(() => null), readBotCollection<LockdownEvent>("audit")]);
+    const lastLockdownEvent = audit
+      .filter((row) => row.guildId === data.guildId && (row.eventType === "security_lockdown_on" || row.eventType === "security_lockdown_off"))
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+    const lockdown = lastLockdownEvent ? lastLockdownEvent.eventType === "security_lockdown_on" : null;
+    if (!health) return { status: "unknown" as const, lastSeenAt: null, pingMs: null, permissions: null, lockdown };
+    const fresh = health.status === "online" && Date.now() - health.at <= 90_000;
+    const installed = health.guildIds.includes(data.guildId);
+    const status = !fresh ? "offline" as const : installed ? "online" as const : "not_installed" as const;
+    return {
+      status,
+      lastSeenAt: health.at,
+      pingMs: health.pingMs,
+      permissions: installed ? health.guildResources?.[data.guildId]?.permissions ?? null : null,
+      lockdown,
+    };
+  });
+
+const SECURITY_INCIDENT_TITLES: Record<string, string> = {
+  security_raid_suspected: "Possível raid detectada",
+  security_young_account: "Conta nova entrou no servidor",
+  security_quarantine_failed: "Não foi possível isolar uma conta nova",
+  security_mass_ban: "Banimentos em sequência",
+  security_mass_channel_delete: "Canais apagados em sequência",
+  security_mass_role_delete: "Cargos apagados em sequência",
+  security_mass_webhook_create: "Webhooks criados em sequência",
+  security_mass_invite_create: "Convites criados em sequência",
+  security_mass_everyone_mentions: "Menções @everyone em sequência",
+  security_auto_timeout_failed: "Timeout automático falhou",
+  security_auto_timeout: "Timeout automático aplicado",
+  security_repeat_offender_auto_ban_failed: "Banimento automático falhou",
+  security_repeat_offender_auto_ban: "Autor de ações destrutivas banido",
+  security_auto_response_unconfirmed: "Resposta automática aguarda confirmação",
+  security_lockdown_on: "Lockdown ativado",
+  security_lockdown_off: "Lockdown encerrado",
+};
+
+export const getGuildSecurityIncidents = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    limit: z.number().int().min(1).max(200).default(100),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    type AuditRecord = { id: number; guildId: string; module: string; eventType: string; actorId?: string; targetId?: string; channelId?: string; severity: string; at: string; data?: Record<string, unknown> };
+    const [records, reviewedIds] = await Promise.all([readBotCollection<AuditRecord>("audit"), readReviewedSecurityEvents(data.guildId)]);
+    const acknowledged = new Set(reviewedIds);
+    return records
+      .filter((row) => row.guildId === data.guildId && (row.module === "automod" || (row.eventType.startsWith("security_") && row.severity !== "info")))
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+      .slice(0, data.limit)
+      .map((row) => ({
+        id: row.id,
+        module: row.module,
+        eventType: row.eventType,
+        severity: row.severity,
+        title: SECURITY_INCIDENT_TITLES[row.eventType] ?? (row.module === "automod" ? "AutoMod removeu uma mensagem" : row.eventType.replace(/^security_/, "").replaceAll("_", " ")),
+        detail: row.module === "automod"
+          ? `Regra ${String(row.data?.rule ?? row.eventType.replace(/^automod_/, "").replaceAll("_", " "))} · ação ${String(row.data?.action ?? "registrada")}`
+          : row.eventType === "security_raid_suspected" && typeof row.data?.count === "number"
+            ? `${row.data.count} entradas em ${typeof row.data.windowMs === "number" ? Math.round(row.data.windowMs / 1000) : "—"}s. Revise quem entrou recentemente e confirme se o lockdown é necessário.`
+            : row.eventType === "security_young_account" && typeof row.data?.accountAgeHours === "number"
+              ? `Conta com ${row.data.accountAgeHours}h; mínimo configurado: ${String(row.data.minAccountAgeHours ?? "—")}h.`
+              : typeof row.data?.count === "number" && typeof row.data.threshold === "number"
+                ? `${row.data.count} ações detectadas; o alerta começa em ${row.data.threshold}. Revise o autor e o registro de auditoria.`
+            : row.eventType.replace(/^security_/, "").replaceAll("_", " "),
+        actorId: row.actorId ?? null,
+        targetId: row.targetId ?? null,
+        channelId: row.channelId ?? null,
+        at: Date.parse(row.at) || 0,
+        acknowledged: acknowledged.has(row.id),
+      }));
+  });
+
+export const acknowledgeGuildSecurityIncident = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    eventId: z.number().int().positive(),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const exists = (await readBotCollection<{ id: number; guildId: string }>("audit"))
+      .some((event) => event.guildId === data.guildId && event.id === data.eventId);
+    if (!exists) throw new Error("O alerta não existe mais no histórico deste servidor.");
+    await markSecurityEventReviewed(data.guildId, data.eventId);
+    return { ok: true as const };
   });
 
 const groupSchema = z.array(z.object({
@@ -159,6 +255,18 @@ export const requestSecurityLockdown = createServerFn({ method: "POST" })
     const job: OutboxJob = { id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, guildId: data.guildId, kind: "ticket_action", target: "security", channelRef: "", action: data.enabled ? "security_lockdown_on" : "security_lockdown_off", createdAt: Date.now(), status: "queued" };
     await enqueueOutbox(job);
     return { ok: true as const, jobId: job.id };
+  });
+
+export const getGuildSecurityActionStatus = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    jobId: z.string().min(1).max(100),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const job = (await readRuntime()).outbox?.find((entry) => entry.id === data.jobId && entry.guildId === data.guildId && (entry.target === "security" || entry.target === "security-verification"));
+    return job ? { status: job.status, detail: job.detail ?? null, at: job.at ?? null } : { status: "missing" as const, detail: null, at: null };
   });
 
 /**

@@ -11,4 +11,5 @@ dist
 .impeccable/questions/
 .impeccable/review/
 data/wumpus-health.json
+data/wumpus-security-reviews.json
 data/wumpus-dashboard-members.json
