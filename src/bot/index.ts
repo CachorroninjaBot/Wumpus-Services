@@ -48,6 +48,7 @@ import {
   checkSla,
   closeTicket,
   openTicket,
+  pruneTicketContent,
   recordFeedback,
   recordTicketMessage,
   reopenClosedTicket,
@@ -56,6 +57,7 @@ import {
 import { clearPersistedSecurityWindow, gateNewChannel, handleAuditLogEntry, handleMassMention, handleMemberAdd, grantVerifiedRole, isVerificationActive, readPersistedSecurityWindow, setLockdown } from "./security.ts";
 import { processOutbox } from "./outbox-send.ts";
 import { writeBotHealth } from "../lib/wumpus/health.server.ts";
+import { handleMemberLeave, handleMemberWelcome, maintenanceNotice } from "./guild-events.ts";
 
 export type BotHandle = {
   client: Client;
@@ -235,6 +237,12 @@ async function promptDepartment(interaction: ButtonInteraction, log: Logger): Pr
   const guild = interaction.guild;
   if (!guild) return;
 
+  const maintenance = await maintenanceNotice(guild.id);
+  if (maintenance) {
+    await interaction.reply({ content: maintenance, ephemeral: true });
+    return;
+  }
+
   const config = await moduleConfig(guild.id, "tickets");
   const departments = list(config, "departments").filter(Boolean).slice(0, 25);
 
@@ -272,6 +280,12 @@ async function handleDepartmentSelect(
 ): Promise<void> {
   const guild = interaction.guild;
   if (!guild) return;
+
+  const maintenance = await maintenanceNotice(guild.id);
+  if (maintenance) {
+    await interaction.reply({ content: maintenance, ephemeral: true });
+    return;
+  }
 
   const department = interaction.values[0] ?? null;
 
@@ -387,6 +401,11 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "form" && action === "continue") {
     // Terminou de escolher: abre o modal levando as escolhas do rascunho.
+    const maintenance = await maintenanceNotice(guild.id);
+    if (maintenance) {
+      await interaction.reply({ content: maintenance, ephemeral: true });
+      return;
+    }
     const config = await moduleConfig(guild.id, "forms");
     const draft = await readDraft(guild.id, interaction.user.id);
     await interaction.showModal(buildFormModal(parseFields(config), id("form", "submit"), draft?.values ?? {}));
@@ -463,6 +482,11 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
 
   if (kind === "form" && action === "submit") {
     await interaction.deferReply({ ephemeral: true });
+    const maintenance = await maintenanceNotice(guild.id);
+    if (maintenance) {
+      await interaction.editReply(maintenance);
+      return;
+    }
     const result = await submitForm(interaction, log);
     await interaction.editReply(result.ok ? "Candidatura enviada. Boa sorte!" : result.error);
     return;
@@ -522,6 +546,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   });
 
   client.on(Events.GuildMemberAdd, (member) => {
+    void handleMemberWelcome(member, log);
     void handleMemberAdd(member, log).then(async () => {
       // Não atribuir cargos padrão que possam contornar a barreira de verificação.
       if (!(await isVerificationActive(member.guild.id))) await applyDefaultRole(member, log);
@@ -530,6 +555,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   });
 
   client.on(Events.GuildMemberRemove, (member) => {
+    void handleMemberLeave(member, log);
     void removeManagedRolesOnLeave(member.guild, member, log).catch(() => undefined);
     void bump(member.guild.id, "leaves").catch(() => undefined);
   });
@@ -678,6 +704,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
       for (const guild of client.guilds.cache.values()) {
         await pruneAudit(log, undefined, guild.id).catch(() => 0);
         await pruneStatistics(guild.id, log).catch(() => 0);
+        await pruneTicketContent(guild, log).catch((error) => log.warn("falha ao aplicar retenção de tickets", { guildId: guild.id, error: String(error).slice(0, 250) }));
       }
     })();
   }, PRUNE_INTERVAL_MS);

@@ -90,6 +90,8 @@ export type BotTicketRecord = {
   priority: "low" | "normal" | "high" | "urgent";
   firstResponseAt: string | null;
   feedback: { rating: number; comment: string | null } | null;
+  transcriptChannelId?: string | null;
+  transcriptMessageId?: string | null;
 };
 
 export type BotTicketMessage = {
@@ -118,7 +120,13 @@ export type BotFormRecord = {
 export type RuntimeFile = {
   updatedAt: number;
   guilds: Record<string, RuntimeGuild>;
-  serverGroups?: Array<{ id: string; name: string; guildIds: string[] }>;
+  serverGroups?: Array<{
+    id: string;
+    name: string;
+    guildIds: string[];
+    /** Discord resource IDs are mapped per target server, keyed by kind + source resource ID. */
+    resourceMappings?: Record<string, Record<string, string>>;
+  }>;
   /** Artigos da base de conhecimento, por servidor. */
   articles?: Record<string, RuntimeArticle[]>;
   /** Pedidos de publicacao aguardando o bot. */

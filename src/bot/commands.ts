@@ -10,6 +10,7 @@
  * que era exatamente o ponto cego que ninguem conseguia enxergar.
  */
 import {
+  ChannelType,
   PermissionFlagsBits,
   REST,
   Routes,
@@ -36,6 +37,7 @@ import { buildTicketPanel, type Ticket, type TicketMessage } from "./tickets.ts"
 import { reportLines, ticketStaffReport } from "./tickets-metrics.ts";
 import type { FormSubmission } from "./forms.ts";
 import type { ModerationOccurrence } from "./moderation.ts";
+import { scanMessage } from "./automod.ts";
 
 export const COMMANDS = [
   new SlashCommandBuilder().setName("ping").setDescription("O Wumpus esta no ar?"),
@@ -55,6 +57,21 @@ export const COMMANDS = [
     .setDescription("Estado da configuracao do Wumpus neste servidor")
     .addSubcommand((sub) => sub.setName("status").setDescription("O bot esta lendo o que foi salvo?"))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+  new SlashCommandBuilder()
+    .setName("diagnostico")
+    .setDescription("Verificar bot, configuração e permissões do Wumpus neste servidor")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+  new SlashCommandBuilder()
+    .setName("automod-teste")
+    .setDescription("Simular uma mensagem nas regras do AutoMod sem tomar nenhuma ação")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption((option) => option
+      .setName("mensagem")
+      .setDescription("Texto de exemplo; será testado em privado e não será publicado")
+      .setRequired(true)
+      .setMaxLength(2000)),
 
   new SlashCommandBuilder()
     .setName("stats")
@@ -265,6 +282,118 @@ async function handleConfigStatus(interaction: ChatInputCommandInteraction, log:
   log.info("config status consultado", { guildId: guild.id, modules: modules.length });
 }
 
+/** Diagnóstico acionável; cada alerta explica onde corrigir o problema. */
+async function handleDiagnostics(interaction: ChatInputCommandInteraction, log: Logger): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) return;
+  await interaction.deferReply({ ephemeral: true });
+
+  const runtime = await loadRuntime(true);
+  const published = runtime.guilds?.[guild.id];
+  const modules = published
+    ? Object.entries(published).filter((entry): entry is [string, Record<string, unknown>] =>
+      Boolean(entry[1]) && typeof entry[1] === "object" && !Array.isArray(entry[1]))
+    : [];
+  const issues: string[] = [];
+  const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+
+  if (!interaction.client.isReady()) issues.push("🔴 Bot desconectado do Discord. Confira o processo e o token do bot.");
+  else issues.push(`✅ Bot conectado · ${Math.max(0, Math.round(interaction.client.ws.ping))} ms de latência.`);
+  if (!published || modules.length === 0) {
+    issues.push("🟡 Nenhuma configuração foi publicada para este servidor. Salve um módulo na dashboard e sincronize novamente.");
+  } else {
+    const age = runtime.updatedAt ? Math.max(0, Math.floor((Date.now() - runtime.updatedAt) / 60_000)) : null;
+    issues.push(`✅ Configuração recebida · ${modules.length} módulo(s)${age === null ? "" : ` · publicada há ${age} min`}.`);
+  }
+  if (!botMember) issues.push("🔴 Não consegui consultar o membro do bot neste servidor. Remova e convide o Wumpus novamente.");
+
+  const references = new Set<string>();
+  for (const [moduleName, config] of modules) {
+    for (const [key, value] of Object.entries(config)) {
+      if (typeof value === "string" && value.trim()) references.add(`${moduleName}.${key}\0${value}`);
+      else if (Array.isArray(value)) {
+        for (const item of value) if (typeof item === "string" && item.trim()) references.add(`${moduleName}.${key}\0${item}`);
+      }
+    }
+  }
+  let checkedReferences = 0;
+  for (const reference of references) {
+    const [path, value] = reference.split("\0");
+    const key = path!.slice(path!.indexOf(".") + 1).toLowerCase();
+    if (key.includes("channel") || key.includes("category")) {
+      checkedReferences++;
+      const channel = resolveChannel(guild, value);
+      if (!channel) {
+        issues.push(`🟡 Canal ausente: **${path}** aponta para “${value}”. Escolha um canal existente na dashboard e publique a configuração.`);
+        continue;
+      }
+      const isCategoryOnly = key.includes("category");
+      if (!isCategoryOnly && channel.type !== ChannelType.GuildCategory && botMember) {
+        const permissions = channel.permissionsFor(botMember);
+        const missing = [
+          !permissions?.has(PermissionFlagsBits.ViewChannel) ? "Ver canal" : "",
+          !permissions?.has(PermissionFlagsBits.SendMessages) ? "Enviar mensagens" : "",
+        ].filter(Boolean);
+        if (missing.length) issues.push(`🟡 Sem ${missing.join(" e ")} em <#${channel.id}>. Ajuste as permissões do canal para o cargo do Wumpus.`);
+      }
+    } else if (key.includes("role")) {
+      checkedReferences++;
+      const role = resolveRoles(guild, [value!])[0];
+      if (!role) {
+        issues.push(`🟡 Cargo ausente: **${path}** aponta para “${value}”. Selecione um cargo existente e publique novamente.`);
+      } else if (botMember && role.position >= botMember.roles.highest.position) {
+        issues.push(`🟡 O cargo **${role.name}** está acima do Wumpus. Mova o cargo do bot para cima dele em Configurações do servidor → Cargos.`);
+      }
+    }
+  }
+
+  const config = Object.fromEntries(modules) as Record<string, Record<string, unknown>>;
+  const needs = new Set<bigint>();
+  if (config.tickets?.enabled !== false) needs.add(PermissionFlagsBits.ManageChannels);
+  if ((Array.isArray(config.servers?.defaultRoleIds) && config.servers.defaultRoleIds.length) || config.security?.verificationEnabled === true) {
+    needs.add(PermissionFlagsBits.ManageRoles);
+  }
+  if (config.moderation?.enabled === true || (config.automod?.enabled === true && ["timeout", "mute"].includes(String(config.automod.action)))) {
+    needs.add(PermissionFlagsBits.ModerateMembers);
+  }
+  if (botMember) {
+    const missing = [...needs].filter((permission) => !botMember.permissions.has(permission));
+    if (missing.includes(PermissionFlagsBits.ManageChannels)) issues.push("🟡 Falta **Gerenciar canais**. O Wumpus não conseguirá abrir ou administrar canais de atendimento.");
+    if (missing.includes(PermissionFlagsBits.ManageRoles)) issues.push("🟡 Falta **Gerenciar cargos**. O Wumpus não conseguirá atribuir os cargos configurados.");
+    if (missing.includes(PermissionFlagsBits.ModerateMembers)) issues.push("🟡 Falta **Moderar membros**. Timeout e ações de moderação não funcionarão.");
+  }
+
+  if (checkedReferences === 0 && modules.length) issues.push("🟡 Nenhum canal ou cargo foi configurado para validar. Revise os destinos dos módulos que deseja usar.");
+  const hasProblems = issues.some((line) => line.startsWith("🟡") || line.startsWith("🔴"));
+  if (!hasProblems && modules.length) {
+    issues.push("✅ Nenhum problema encontrado nas referências e permissões verificadas.");
+  }
+  const visibleIssues = issues.slice(0, 9).map((line) => line.slice(0, 210));
+  if (issues.length > visibleIssues.length) visibleIssues.push(`… e mais ${issues.length - visibleIssues.length} item(ns). Corrija os primeiros alertas e rode o diagnóstico novamente.`);
+  const answer = ["**Diagnóstico do Wumpus**", ...visibleIssues].join("\n").slice(0, 1900);
+  await interaction.editReply(answer);
+  log.info("diagnostico do servidor consultado", { guildId: guild.id, alerts: issues.filter((line) => line.startsWith("🟡") || line.startsWith("🔴")).length });
+}
+
+/** Simulação privada: não apaga, avisa, registra nem altera o estado do AutoMod. */
+async function handleAutomodTest(interaction: ChatInputCommandInteraction, log: Logger): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) return;
+  await interaction.deferReply({ ephemeral: true });
+  const config = await moduleConfig(guild.id, "automod");
+  const message = interaction.options.getString("mensagem", true);
+  if (!config || config.enabled === false) {
+    await interaction.editReply("O AutoMod está desativado ou ainda não foi publicado para este servidor. Ative-o na dashboard e tente de novo.");
+    return;
+  }
+  const hit = scanMessage({ content: message, config, windowMs: 0, floodCount: 0, duplicateCount: 0 });
+  const result = hit
+    ? `⚠️ **A regra “${hit.rule}” seria acionada.**\nAção configurada: **${hit.action}**.\n\nSimulação privada: nada foi publicado nem alterado. Ela avalia o texto; flood, repetição e exceções por canal/cargo dependem do contexto real.`
+    : "✅ Nenhuma regra de conteúdo acionaria nesta mensagem.\n\nSimulação privada: nada foi publicado nem alterado. Flood, repetição e exceções por canal/cargo dependem do contexto real.";
+  await interaction.editReply(result);
+  log.info("simulacao de automod consultada", { guildId: guild.id, hit: Boolean(hit), rule: hit?.rule });
+}
+
 async function handleStats(interaction: ChatInputCommandInteraction, log: Logger): Promise<void> {
   const guild = interaction.guild;
   if (!guild) return;
@@ -460,6 +589,14 @@ export async function handleCommand(
 
     case "config":
       await handleConfigStatus(interaction, log);
+      return true;
+
+    case "diagnostico":
+      await handleDiagnostics(interaction, log);
+      return true;
+
+    case "automod-teste":
+      await handleAutomodTest(interaction, log);
       return true;
 
     case "stats":

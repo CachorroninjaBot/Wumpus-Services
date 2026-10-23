@@ -55,6 +55,9 @@ export type Ticket = {
   lastActivityAt: string;
   closeReason: string | null;
   feedback: { rating: number; comment: string | null } | null;
+  /** Referência da cópia de transcript para aplicar a política de retenção. */
+  transcriptChannelId?: string | null;
+  transcriptMessageId?: string | null;
 };
 
 export type TicketMessage = {
@@ -423,7 +426,7 @@ export async function closeTicket(
 
   if (transcriptChannel && transcriptChannel.isTextBased()) {
     try {
-      await transcriptChannel.send({
+      const transcriptMessage = await transcriptChannel.send({
         content: `Transcricao do atendimento **#${ticketId}** (${messages.length} mensagem(ns))`,
         files: [
           {
@@ -433,6 +436,11 @@ export async function closeTicket(
         ]
       });
       transcriptChannelId = transcriptChannel.id;
+      await mutate<Ticket>("tickets", (rows) => {
+        const row = rows.find((entry) => entry.guildId === guild.id && entry.id === ticketId);
+        if (row) { row.transcriptChannelId = transcriptChannel.id; row.transcriptMessageId = transcriptMessage.id; }
+        return rows;
+      });
     } catch (error) {
       log.warn("falha ao publicar transcricao", { guildId: guild.id, ticketId, error: String(error) });
     }
@@ -526,6 +534,53 @@ export async function closeTicket(
     reason: reason ?? "sem motivo"
   });
   return { ok: true, transcriptChannelId };
+}
+
+/** Remove conteúdo de atendimentos encerrados conforme a retenção definida pelo servidor.
+ * Metadados do ticket são mantidos para estatísticas; cópias de transcript conhecidas
+ * também são apagadas do Discord antes de remover as mensagens persistidas.
+ */
+export async function pruneTicketContent(guild: Guild, log: Logger): Promise<number> {
+  const config = await moduleConfig(guild.id, "tickets");
+  const retentionDays = num(config, "ticketMessageRetentionDays", 0);
+  if (retentionDays <= 0) return 0;
+  const cutoff = Date.now() - retentionDays * 24 * 60 * 60_000;
+  const eligible = (await read<Ticket>("tickets")).filter((ticket) => ticket.guildId === guild.id && ticket.status === "closed" && ticket.closedAt && Date.parse(ticket.closedAt) <= cutoff);
+  if (!eligible.length) return 0;
+  const ticketIds: number[] = [];
+  for (const ticket of eligible) {
+    if (ticket.transcriptChannelId && ticket.transcriptMessageId) {
+      const channel = await guild.channels.fetch(ticket.transcriptChannelId).catch((error: { code?: number }) => {
+        if (error?.code === 10003) return null; // Canal já foi removido no Discord.
+        log.warn("retenção do ticket aguardando acesso ao canal de transcript", { guildId: guild.id, ticketId: ticket.id, error: String(error).slice(0, 250) });
+        return undefined;
+      });
+      if (channel === undefined) continue;
+      if (channel && channel.isTextBased() && "messages" in channel) {
+        try {
+          const message = await channel.messages.fetch(ticket.transcriptMessageId);
+          await message.delete();
+        } catch (error) {
+          if ((error as { code?: number })?.code !== 10008) {
+            log.warn("retenção do ticket aguardando exclusão do transcript", { guildId: guild.id, ticketId: ticket.id, error: String(error).slice(0, 250) });
+            continue;
+          }
+        }
+      } else if (channel) {
+        log.warn("retenção do ticket aguardando um canal de texto para o transcript", { guildId: guild.id, ticketId: ticket.id });
+        continue;
+      }
+    }
+    ticketIds.push(ticket.id);
+  }
+  if (!ticketIds.length) return 0;
+  const remove = new Set(ticketIds);
+  await mutate<TicketMessage>("ticket_messages", (rows) => rows.filter((message) => !remove.has(message.ticketId)));
+  await mutate<Ticket>("tickets", (rows) => rows.map((ticket) => remove.has(ticket.id) && ticket.guildId === guild.id
+    ? { ...ticket, transcriptMessageId: null, transcriptChannelId: null }
+    : ticket));
+  log.info("conteúdo antigo de tickets removido", { guildId: guild.id, count: ticketIds.length, retentionDays });
+  return ticketIds.length;
 }
 
 /** Nome de exibicao do transcript — texto, nao mencao. Nunca lanca. */

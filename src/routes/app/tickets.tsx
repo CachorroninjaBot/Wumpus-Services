@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MemberAvatar } from "@/components/brand";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Search } from "lucide-react";
@@ -75,7 +75,17 @@ function TicketsPage() {
       }
       try {
         const rows = await getGuildTickets({ data: { token, guildId: gid } });
-        if (!stopped) { setTickets(rows); setTicketLoadError(null); setTicketsLoaded(true); }
+        if (!stopped) {
+          setTickets(rows);
+          setTicketLoadError(null);
+          setTicketsLoaded(true);
+          const requestedTicket = new URLSearchParams(window.location.search).get("ticket");
+          const requested = requestedTicket && rows.find((row) => row.id === requestedTicket || String(row.number) === requestedTicket);
+          if (requested) {
+            setSelectedId(requested.id);
+            setShowTicketOnMobile(true);
+          }
+        }
       } catch (error) {
         if (!stopped) { setTicketLoadError(error instanceof Error ? error.message : "Não foi possível carregar os atendimentos reais."); setTicketsLoaded(true); }
       }
@@ -113,11 +123,18 @@ function TicketsPage() {
   }
 
   useEffect(() => {
-    setSelectedId(firstTicketId);
-    setShowTicketOnMobile(false);
-  }, [gid, firstTicketId]);
+    const requestedTicket = new URLSearchParams(window.location.search).get("ticket");
+    const requested = requestedTicket ? tickets.find((row) => row.id === requestedTicket || String(row.number) === requestedTicket) : undefined;
+    if (requested) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("ticket");
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+    setSelectedId(requested?.id ?? firstTicketId);
+    setShowTicketOnMobile(Boolean(requested));
+  }, [gid, tickets, firstTicketId]);
 
-  const memberById = (id: string) => members.find((m) => m.id === id);
+  const memberById = useCallback((id: string) => members.find((m) => m.id === id), [members]);
   const list = useMemo(() => {
     return tickets
       .filter((t) => (filter === "active" ? t.status === "open" || t.status === "claimed" : t.status === filter))
@@ -129,22 +146,32 @@ function TicketsPage() {
         return haystack.toLocaleLowerCase("pt-BR").includes(query.trim().toLocaleLowerCase("pt-BR"));
       })
       .sort((a, b) => b.createdAt - a.createdAt);
-  }, [tickets, filter, departmentFilter, priorityFilter, query, members]);
+  }, [tickets, filter, departmentFilter, priorityFilter, query, memberById]);
 
   const ticket = list.find((t) => t.id === selectedId) ?? list[0] ?? null;
 
   async function runAi(t: Ticket) {
     setAiBusy(true);
     setAi(null);
-    const transcript = t.messages.map((m) => `${m.kind}: ${m.content}`).join("\n");
+    const redact = (value: string) => value
+      .replace(/<@!?\d{17,20}>|<@&\d{17,20}>|<#\d{17,20}>/g, "[referência Discord]")
+      .replace(/\b\d{17,20}\b/g, "[ID removido]")
+      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[e-mail removido]")
+      .replace(/(?:\+?\d[\d ().-]{7,}\d)/g, "[telefone removido]")
+      .replace(/(?:discord\.gg|discord\.com\/invite)\/[\w-]+/gi, "[convite removido]");
+    const includeConversation = Boolean(tcfg.config.aiIncludeConversation);
+    const transcript = includeConversation
+      ? t.messages.map((m) => `${m.kind}: ${redact(m.content)}`).join("\n")
+      : "A conversa foi omitida conforme a configuração de privacidade do servidor.";
+    const safeSubject = includeConversation ? redact(t.subject) : `Atendimento #${t.number}`;
     const related = kcfg.enabled
-      ? searchArticles(`${t.subject}\n${transcript}`, articles.filter((a) => a.guildId === gid), Boolean(kcfg.config.requireApprovedArticles)).slice(0, 3)
+      ? searchArticles(includeConversation ? `${safeSubject}\n${transcript}` : "", articles.filter((a) => a.guildId === gid), Boolean(kcfg.config.requireApprovedArticles)).slice(0, 3)
       : [];
     const knowledge = related.map((a) => `${a.title}: ${a.body}`).join("\n");
     const res = await analyzeWithGrok({
       data: {
         kind: "ticket",
-        title: `#${t.number} ${t.subject} (${t.department})`,
+        title: `#${t.number} ${safeSubject} (${t.department})`,
         body: transcript,
         extra: `SLA ${String(tcfg.config.slaWarningMinutes)} min. Prioridade ${t.priority}.${knowledge ? `\nBase do servidor:\n${knowledge}` : ""}`,
       },
@@ -389,38 +416,39 @@ function TicketsPage() {
 
         </TabsContent>
         <TabsContent value="panel" className="mt-4 space-y-5">
-          <div><h2 className="m-0 text-xl font-semibold tracking-tight">Configure seu atendimento</h2><p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Tudo sobre abertura, equipe, prazos e encerramento fica nesta aba. A prévia acompanha as opções escolhidas.</p></div>
-          <div className="mt-4 space-y-2">
-            <p className="m-0 text-sm font-semibold">Prévia do painel · atualiza ao salvar cada campo</p>
-            <DiscordPanel
-              channel={asString(tcfg.config.panelChannelId, "abrir-ticket").replace(/^#/, "") || "abrir-ticket"}
-              title={asString(tcfg.config.panelTitle, "Precisa de ajuda?")}
-              description={asString(tcfg.config.panelDescription, "Escolha uma opção para falar com nossa equipe.")}
-              accent={asString(tcfg.config.panelAccentColor, "#28655b")}
-              buttons={departments}
-            />
-          </div>
-          <div className="mt-4 space-y-4">
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3">
-              <Label>Atendimento ligado</Label>
-              <Switch checked={tcfg.enabled} onCheckedChange={(v) => setEnabled("tickets", v)} />
-            </div>
+          <div><h2 className="m-0 text-xl font-semibold tracking-tight">Prepare o primeiro painel</h2><p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Escolha onde ele aparece e quem atende. O restante pode ficar como está até você precisar.</p></div>
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(300px,.82fr)]">
+          <div className="min-w-0 space-y-4">
+          <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
+            <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">1</span><div><h3 className="m-0 text-base font-semibold">Onde a pessoa encontra ajuda?</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Escolha o canal público e a categoria para os canais privados.</p></div></div>
             <Field label="Canal do painel de atendimento">
               <DiscordSelect kind="text" value={asString(tcfg.config.panelChannelId)} onChange={(panelChannelId) => updateConfig("tickets", { panelChannelId })} placeholder="Selecione um canal" />
             </Field>
             <Field label="Categoria onde os canais privados serão criados">
               <DiscordSelect kind="category" value={asString(tcfg.config.categoryId)} onChange={(categoryId) => updateConfig("tickets", { categoryId })} placeholder="Selecione uma categoria" />
             </Field>
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/40 p-3">
+              <div><Label>Atendimento ligado</Label><p className="m-0 text-xs text-muted-foreground">Desligue para pausar a abertura de novos tickets.</p></div>
+              <Switch checked={tcfg.enabled} onCheckedChange={(v) => setEnabled("tickets", v)} />
+            </div>
+          </div>
+          <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
+            <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">2</span><div><h3 className="m-0 text-base font-semibold">Dê contexto ao painel</h3><p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p></div></div>
+            <Field label="Título do painel"><Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => updateConfig("tickets", { panelTitle: e.target.value })} /></Field>
+            <Field label="Descrição do painel"><Textarea maxLength={4000} value={asString(tcfg.config.panelDescription)} onChange={(e) => updateConfig("tickets", { panelDescription: e.target.value })} /></Field>
+          </div>
+          <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
+            <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">3</span><div><h3 className="m-0 text-base font-semibold">Escolha quem responde</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Cargos selecionados poderão acessar os canais privados.</p></div></div>
+            <Field label="Cargos da equipe"><DiscordMultiSelect value={asList(tcfg.config.staffRoleIds)} onChange={(staffRoleIds) => updateConfig("tickets", { staffRoleIds })} /></Field>
+          </div>
+          <details className="rounded-2xl border border-border bg-card p-4">
+            <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Mais configurações de atendimento</summary>
+            <p className="mb-4 mt-2 text-sm text-muted-foreground">Prazos, automações, registros e aparência. Você pode voltar a elas quando quiser.</p>
+            <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Formato do painel"><NativeSelect value={asString(tcfg.config.panelFormat, "components_v2")} onChange={(e) => updateConfig("tickets", { panelFormat: e.target.value })}><option value="components_v2">Componentes modernos</option><option value="embed">Incorporado clássico</option></NativeSelect></Field>
+              <p className="m-0 self-center text-xs text-muted-foreground">O painel usa os componentes modernos do Discord.</p>
               <Field label="Cor de destaque"><Input type="color" className="h-11 p-1" value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => updateConfig("tickets", { panelAccentColor: e.target.value })} /></Field>
             </div>
-            <Field label="Título do painel"><Input value={asString(tcfg.config.panelTitle)} onChange={(e) => updateConfig("tickets", { panelTitle: e.target.value })} /></Field>
-            <Field label="Descrição do painel"><Textarea value={asString(tcfg.config.panelDescription)} onChange={(e) => updateConfig("tickets", { panelDescription: e.target.value })} /></Field>
-            <Field label="Quem atende">
-              <DiscordMultiSelect value={asList(tcfg.config.staffRoleIds)} onChange={(staffRoleIds) => updateConfig("tickets", { staffRoleIds })} />
-              <p className="m-0 text-xs text-muted-foreground">Esses cargos terão acesso aos canais privados dos tickets.</p>
-            </Field>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Máximo de tickets abertos por pessoa">
                 <Input type="number" min={1} max={25} defaultValue={Number(tcfg.config.maxOpenPerUser ?? 1)} onBlur={(e) => updateConfig("tickets", { maxOpenPerUser: Math.max(1, Math.min(25, Number(e.target.value) || 1)) })} />
@@ -467,6 +495,10 @@ function TicketsPage() {
                     <DiscordSelect kind="text" value={asString(tcfg.config.logChannelId)} onChange={(logChannelId) => updateConfig("tickets", { logChannelId })} placeholder="Selecione um canal" />
                   </Field>
                 </div>
+                <Field label="Apagar mensagens após (dias; 0 mantém sem prazo)">
+                  <Input type="number" min={0} max={3650} defaultValue={Number(tcfg.config.ticketMessageRetentionDays ?? 0)} onBlur={(e) => updateConfig("tickets", { ticketMessageRetentionDays: Math.max(0, Math.min(3650, Number(e.target.value) || 0)) })} />
+                  <p className="m-0 text-xs text-muted-foreground">Remove mensagens e transcripts rastreados de tickets encerrados. O resumo permanece para estatísticas; arquivos antigos sem referência não podem ser apagados automaticamente.</p>
+                </Field>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Notificar a equipe</Label><p className="m-0 text-xs text-muted-foreground">Menciona os cargos ao abrir.</p></div><Switch checked={Boolean(tcfg.config.pingStaffOnOpen)} onCheckedChange={(value) => updateConfig("tickets", { pingStaffOnOpen: value })} /></div>
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Permitir reabertura</Label><p className="m-0 text-xs text-muted-foreground">A pessoa pode voltar ao canal.</p></div><Switch checked={Boolean(tcfg.config.reopenEnabled)} onCheckedChange={(value) => updateConfig("tickets", { reopenEnabled: value })} /></div>
@@ -486,12 +518,16 @@ function TicketsPage() {
                   <Textarea rows={3} defaultValue={asString(tcfg.config.welcomeMessage)} onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })} />
                   <p className="m-0 text-xs text-muted-foreground">Enviada automaticamente quando o atendimento é aberto.</p>
                 </Field>
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-3">
-                  <div><Label>IA de apoio à equipe</Label><p className="m-0 text-xs text-muted-foreground">Gera sugestões privadas para os atendentes.</p></div>
-                  <Switch checked={Boolean(tcfg.config.aiSupportEnabled)} onCheckedChange={(value) => updateConfig("tickets", { aiSupportEnabled: value })} />
-                </div>
+                <ToggleRow label="IA de apoio à equipe" description="Gera sugestões privadas para os atendentes." checked={Boolean(tcfg.config.aiSupportEnabled)} onChange={(value) => updateConfig("tickets", { aiSupportEnabled: value })} />
+                <ToggleRow label="Incluir conversa nas análises por IA" description="Quando desligado, o conteúdo das mensagens não é enviado à IA." checked={Boolean(tcfg.config.aiIncludeConversation)} onChange={(value) => updateConfig("tickets", { aiIncludeConversation: value })} />
+            </div>
+            </div>
+          </details>
+          <div className="space-y-2 rounded-2xl border border-border p-4">
+            <h3 className="m-0 text-base font-semibold">Publicar no Discord</h3>
+            <p className="m-0 text-sm text-muted-foreground">A publicação só aparece como concluída depois que o bot confirmar no Discord.</p>
+            {!asString(tcfg.config.panelChannelId).trim() ? <p className="m-0 text-sm text-warn">Escolha o canal do painel acima para continuar.</p> : null}
                 <Button
-                  variant="outline"
                   disabled={pubBusy || !asString(tcfg.config.panelChannelId).trim()}
                   onClick={async () => {
                     setPubBusy(true);
@@ -510,9 +546,15 @@ function TicketsPage() {
                     }
                   }}
                 >
-                  {pubBusy ? "Aguardando o bot…" : "Publicar painel no Discord"}
+                  {pubBusy ? "Aguardando confirmação do bot…" : "Publicar painel no Discord"}
                 </Button>
-              </div>
+            {notice ? <p role="status" className="m-0 rounded-lg bg-muted px-3 py-2 text-sm">{notice}</p> : null}
+          </div>
+          </div>
+          <aside className="min-w-0 space-y-2 xl:sticky xl:top-24 xl:self-start">
+            <div><p className="m-0 text-sm font-semibold">Prévia do painel</p><p className="m-0 mt-1 text-xs text-muted-foreground">Amostra das configurações atuais. A confirmação real depende do bot.</p></div>
+            <DiscordPanel channel={asString(tcfg.config.panelChannelId, "abrir-ticket").replace(/^#/, "") || "abrir-ticket"} title={asString(tcfg.config.panelTitle, "Precisa de ajuda?")} description={asString(tcfg.config.panelDescription, "Escolha uma opção para falar com nossa equipe.")} accent={asString(tcfg.config.panelAccentColor, "#28655b")} buttons={departments} />
+          </aside>
           </div>
         </TabsContent>
       </Tabs>
@@ -539,6 +581,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1.5">
       <Label>{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function ToggleRow({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3">
+      <div className="min-w-0"><Label>{label}</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">{description}</p></div>
+      <Switch checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }

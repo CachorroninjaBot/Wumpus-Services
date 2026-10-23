@@ -32,6 +32,8 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     transcriptChannelId: "",
     logChannelId: "",
     aiSupportEnabled: true,
+    aiIncludeConversation: false,
+    ticketMessageRetentionDays: 0,
     closeAfterHours: 48,
     autoCloseInactiveHours: 24,
     maxOpenPerUser: 1,

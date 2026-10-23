@@ -32,6 +32,7 @@ const groupSchema = z.array(z.object({
   id: z.string().min(1).max(80),
   name: z.string().trim().min(1).max(80),
   guildIds: z.array(z.string().regex(/^\d{17,20}$/)).min(1).max(50),
+  resourceMappings: z.record(z.string().regex(/^\d{17,20}$/), z.record(z.string().min(1).max(160), z.string().regex(/^\d{17,20}$/))).optional(),
 }).strict()).max(50);
 
 export const getServerGroups = createServerFn({ method: "POST" })

@@ -55,15 +55,15 @@ function useActiveNav(): NavId {
   return "overview";
 }
 
-function GuildPicker({ onChange }: { onChange?: () => void }) {
+function GuildPicker({ onChange, compact = false, id }: { onChange?: () => void; compact?: boolean; id?: string }) {
   const guilds = useWumpus((s) => s.guilds);
   const activeId = useWumpus((s) => s.activeGuildId);
   const setActive = useWumpus((s) => s.setActiveGuild);
   const guild = guilds.find((item) => item.id === activeId) ?? guilds[0];
 
   return (
-    <SearchSelect id="guild-picker" value={guild?.id ?? ""} eyebrow="Servidor Discord" placeholder="Selecione um servidor" onChange={(id) => { setActive(id); onChange?.(); }}
-      className="min-h-[58px] rounded-2xl px-3" options={guilds.map((item) => ({ id: item.id, label: item.name, description: `Plano ${item.plan}`, icon: <GuildBadge tag={item.tag ?? "W"} iconUrl={item.iconUrl} size={34} /> }))} />
+    <SearchSelect id={id ?? "guild-picker"} value={guild?.id ?? ""} eyebrow={compact ? "Servidor ativo" : "Servidor Discord"} placeholder="Selecione um servidor" onChange={(nextId) => { setActive(nextId); onChange?.(); }}
+      className={compact ? "min-h-11 rounded-xl px-2.5" : "min-h-[58px] rounded-2xl px-3"} options={guilds.map((item) => ({ id: item.id, label: item.name, description: compact ? undefined : `Plano ${item.plan}`, icon: <GuildBadge tag={item.tag ?? "W"} iconUrl={item.iconUrl} size={compact ? 26 : 34} /> }))} />
   );
 }
 
@@ -177,7 +177,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <BrandMark size={34} />
           <span className="text-[17px] font-bold tracking-[-0.03em]">Wumpus</span>
         </Link>
-        <div className="px-3 pb-4 pt-4"><GuildPicker /></div>
+        <div className="px-3 pb-4 pt-4"><GuildPicker id="guild-picker-sidebar" /></div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3">
           <NavList />
         </div>
@@ -201,7 +201,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="app-bar sticky top-0 z-20 flex min-h-[4.5rem] items-center gap-3 border-b border-border px-4 sm:px-7">
+        <header className="app-bar sticky top-0 z-20 flex min-h-[4.5rem] flex-wrap items-center gap-3 border-b border-border px-4 sm:px-7">
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <Button variant="outline" size="icon-sm" className="lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Abrir navegação">
               <Menu className="size-4" />
@@ -210,7 +210,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <div className="flex h-[4.5rem] items-center gap-3 border-b border-border px-5">
                 <BrandMark size={34} /><strong className="text-[17px]">Wumpus</strong>
               </div>
-              <div className="px-3 py-4"><GuildPicker onChange={() => setMenuOpen(false)} /></div>
+              <div className="px-3 py-4"><GuildPicker id="guild-picker-menu" onChange={() => setMenuOpen(false)} /></div>
               <div className="px-3"><NavList onNavigate={() => setMenuOpen(false)} /></div>
             </SheetContent>
           </Sheet>
@@ -230,6 +230,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <a href={brand.invite} target="_blank" rel="noreferrer" className="hidden min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:bg-muted sm:inline-flex">
             <Plus className="size-4" /> Adicionar a outro servidor
           </a>
+          <div className="order-last w-full pb-3 lg:hidden">
+            <GuildPicker id="guild-picker-mobile-header" compact />
+          </div>
         </header>
         {runtimeSyncError ? <p role="alert" className="mx-4 mb-0 mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive sm:mx-7">{runtimeSyncError}</p> : null}
         <main className="app-page w-full flex-1 px-4 py-6 sm:px-7 sm:py-8">

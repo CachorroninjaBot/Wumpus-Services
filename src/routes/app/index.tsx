@@ -8,7 +8,6 @@ import { ticketSla } from "@/lib/wumpus/engine";
 import { useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
 import { getGuildActivity, getGuildTickets, getPublishStatus, type PublishStatus } from "@/lib/wumpus/runtime-store";
-import { getPublicBotHealth, type PublicBotHealth } from "@/lib/wumpus/health";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import type { Ticket as WumpusTicket } from "@/lib/wumpus/types";
 
@@ -20,7 +19,6 @@ function Overview() {
   const tcfg = useModule("tickets");
   const lockdown = Boolean(useModule("security").config.lockdown);
   const [publishStatuses, setPublishStatuses] = useState<PublishStatus[]>([]);
-  const [botHealth, setBotHealth] = useState<PublicBotHealth | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [tickets, setTickets] = useState<WumpusTicket[]>([]);
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof getGuildActivity>> | null>(null);
@@ -28,7 +26,9 @@ function Overview() {
   const submissions = activity?.pendingForms ?? 0;
   const logs = activity?.recentEvents ?? [];
   const pendingSync = publishStatuses.filter((job) => job.status === "queued").length;
-  const latestSync = [...publishStatuses].sort((a, b) => (b.at ?? b.createdAt) - (a.at ?? a.createdAt))[0];
+  const failedSync = publishStatuses.filter((job) => job.status === "failed");
+  const latestAttempt = [...publishStatuses].sort((a, b) => (b.at ?? b.createdAt) - (a.at ?? a.createdAt))[0];
+  const latestConfirmed = publishStatuses.filter((job) => job.status === "done").sort((a, b) => (b.at ?? b.createdAt) - (a.at ?? a.createdAt))[0];
 
   useEffect(() => {
     let active = true;
@@ -39,14 +39,12 @@ function Overview() {
           if (active) setStatusError(null);
           return;
         }
-        const [health, statuses, liveTickets, liveActivity] = await Promise.all([
-          getPublicBotHealth(),
+        const [statuses, liveTickets, liveActivity] = await Promise.all([
           getPublishStatus({ data: { token, guildId: gid } }),
           getGuildTickets({ data: { token, guildId: gid } }),
           getGuildActivity({ data: { token, guildId: gid } }),
         ]);
         if (active) {
-          setBotHealth(health);
           setPublishStatuses(statuses);
           setTickets(liveTickets);
           setActivity(liveActivity);
@@ -66,6 +64,7 @@ function Overview() {
 
   const open = tickets.filter((t) => t.status === "open" || t.status === "claimed");
   const breaches = open.filter((t) => ticketSla(t, tcfg.config) !== "ok");
+  const priorityTicket = breaches[0] ?? open[0] ?? null;
   const csat = tickets.filter((t) => t.feedback);
   const avg =
     csat.length === 0 ? "—" : (csat.reduce((s, t) => s + (t.feedback?.rating ?? 0), 0) / csat.length).toFixed(1);
@@ -77,14 +76,20 @@ function Overview() {
         {lockdown ? <Badge tone="danger">Lockdown ativo</Badge> : null}
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5" role="status">
-          <i className={`inline-block size-2 rounded-full ${botHealth?.status === "online" ? "bg-ok" : botHealth?.status === "offline" ? "bg-destructive" : "bg-warn"}`} />
-          {pendingSync ? `${pendingSync} publicações aguardando` : botHealth?.status === "online" ? `Bot conectado · ${botHealth.pingMs ?? "—"} ms` : botHealth?.status === "offline" ? "Bot desconectado" : "Conexão do bot indisponível"}
-        </span>
-        <span className="text-muted-foreground">Última publicação: {latestSync ? formatRelative(latestSync.at ?? latestSync.createdAt) : "nenhuma ainda"}</span>
-        {statusError ? <span className="text-destructive" role="alert">{statusError}</span> : null}
+      <div className="grid gap-2 rounded-xl border border-border bg-card px-3 py-3 text-sm sm:grid-cols-3" aria-label="Estado do bot e das publicações">
+        <StatusLine label="Bot neste servidor" tone={activity?.bot.status === "online" ? "ok" : activity?.bot.status === "offline" ? "danger" : "warn"}>
+          {activity?.bot.status === "online" ? `Conectado${activity.bot.pingMs == null ? "" : ` · ${activity.bot.pingMs} ms`}` : activity?.bot.status === "offline" ? "Sem conexão recente" : "Estado indisponível"}
+        </StatusLine>
+        <StatusLine label="Fila de publicação" tone={failedSync.length ? "danger" : pendingSync ? "warn" : "ok"}>
+          {pendingSync || failedSync.length ? `${pendingSync} aguardando · ${failedSync.length} com falha` : "Sem pendências"}
+          {failedSync[0]?.detail ? <span className="block truncate text-xs text-destructive">{failedSync[0].detail}</span> : null}
+        </StatusLine>
+        <StatusLine label="Última publicação confirmada" tone={latestConfirmed ? "ok" : "warn"}>
+          {latestConfirmed ? formatRelative(latestConfirmed.at ?? latestConfirmed.createdAt) : "Ainda não confirmada pelo bot"}
+          {latestAttempt?.status === "failed" ? <span className="block text-xs text-muted-foreground">Última tentativa falhou · {formatRelative(latestAttempt.at ?? latestAttempt.createdAt)}</span> : null}
+        </StatusLine>
       </div>
+      {statusError ? <p className="m-0 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">Não foi possível atualizar o estado: {statusError}</p> : null}
       {breaches.length > 0 ? (
         <Card className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="grid size-10 place-items-center rounded-xl bg-destructive/15 text-destructive">
@@ -119,7 +124,7 @@ function Overview() {
             const tone = sla === "ok" ? "ok" : sla === "warning" ? "warn" : "danger";
             return <li key={t.id} className="grid gap-2 py-3 lg:grid-cols-[90px_minmax(180px,1fr)_130px_140px_100px_110px] lg:items-center lg:gap-3">
               <span className="font-mono-num text-sm font-semibold text-primary">#{t.number}</span>
-              <span className="min-w-0"><strong className="block truncate text-sm font-medium">{t.subject}</strong><small className="text-muted-foreground">Aberto {formatRelative(t.createdAt)}</small></span>
+              <span className="min-w-0"><a href={`/app/tickets?ticket=${encodeURIComponent(t.id)}`} className="block truncate text-sm font-medium text-foreground underline-offset-2 hover:text-primary hover:underline">{t.subject || `Ticket #${t.number}`}</a><small className="text-muted-foreground">Aberto {formatRelative(t.createdAt)}</small></span>
               <span className="text-sm">{t.department}</span><span className="text-sm text-muted-foreground">{t.claimedBy ? `Em atendimento · ${members.find((member) => member.id === t.claimedBy)?.displayName ?? t.claimedBy}` : "Aguardando equipe"}</span>
               <Badge tone={t.priority === "urgent" ? "danger" : t.priority === "high" ? "warn" : "default"}>{t.priority === "urgent" ? "Urgente" : t.priority === "high" ? "Alta" : t.priority === "low" ? "Baixa" : "Normal"}</Badge>
               <Badge tone={tone}>{sla === "ok" ? "No prazo" : sla === "warning" ? "Atenção" : "Atrasado"}</Badge>
@@ -148,9 +153,9 @@ function Overview() {
             {logs.map((event) => (
               <li key={event.id} className="flex gap-3 text-sm">
                 <Clock3 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                <span>
-                  <span className="text-muted-foreground">{event.module} · {event.actorId ?? "Sistema"} · {formatRelative(event.at)} · </span>
-                  {event.eventType.replaceAll("_", " ")}
+                <span className="min-w-0">
+                  <strong className="font-medium">{eventLabel(event.eventType)}</strong>
+                  <span className="block truncate text-xs text-muted-foreground">{moduleLabel(event.module)} · {event.actorId ? members.find((member) => member.id === event.actorId)?.displayName ?? "Equipe" : "Wumpus"} · {formatRelative(event.at)}</span>
                 </span>
               </li>
             ))}
@@ -160,7 +165,7 @@ function Overview() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Quick to="/app/tickets" icon={<Ticket className="size-4" />} title="Assumir um ticket" />
+        <Quick to={priorityTicket ? `/app/tickets?ticket=${encodeURIComponent(priorityTicket.id)}` : "/app/tickets"} icon={<Ticket className="size-4" />} title={priorityTicket ? breaches.length ? `Abrir ticket atrasado #${priorityTicket.number}` : `Abrir ticket #${priorityTicket.number}` : "Abrir fila de tickets"} />
         <Quick to="/app/forms" icon={<Ticket className="size-4" />} title="Revisar formulários" />
         <Quick to="/app/protect" icon={<Shield className="size-4" />} title="Testar o AutoMod" />
       </div>
@@ -170,7 +175,7 @@ function Overview() {
           <h2 className="mt-0 mb-2 text-base font-semibold">Alertas críticos recentes</h2>
           {logs.filter((event) => event.module === "security" && event.severity === "critical").slice(0, 3).map((event) => (
             <p key={event.id} className="m-0 text-sm text-muted-foreground">
-              {event.eventType.replaceAll("_", " ")} · {formatRelative(event.at)}
+              {eventLabel(event.eventType)} · {formatRelative(event.at)}
             </p>
           ))}
         </Card>
@@ -190,10 +195,33 @@ function Summary({ label, value, hint, warn }: { label: string; value: string; h
 
 function Quick({ to, icon, title }: { to: string; icon: React.ReactNode; title: string }) {
   return (
-    <Link to={to} className="flex min-h-12 items-center gap-2 rounded-2xl bg-card px-4 text-sm font-medium shadow-border">
+    <a href={to} className="flex min-h-12 items-center gap-2 rounded-2xl bg-card px-4 text-sm font-medium shadow-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       {icon}
       {title}
       <ArrowRight className="ml-auto size-4 text-muted-foreground" />
-    </Link>
+    </a>
   );
+}
+
+function StatusLine({ label, tone, children }: { label: string; tone: "ok" | "warn" | "danger"; children: React.ReactNode }) {
+  return <div className="min-w-0"><span className="block text-xs text-muted-foreground">{label}</span><span className="mt-1 flex min-w-0 items-start gap-2"><i className={`mt-1 inline-block size-2 shrink-0 rounded-full ${tone === "ok" ? "bg-ok" : tone === "danger" ? "bg-destructive" : "bg-warn"}`} /><span className="min-w-0 truncate">{children}</span></span></div>;
+}
+
+function moduleLabel(module: string) {
+  const labels: Record<string, string> = { tickets: "Atendimento", forms: "Formulários", automod: "Proteção", security: "Segurança", moderation: "Moderação", knowledge: "Base de conhecimento", members: "Membros", staff: "Equipe", automation: "Automação", integrations: "Integrações", roles: "Cargos", channels: "Canais", bans: "Banimentos" };
+  return labels[module] ?? "Servidor";
+}
+
+function eventLabel(eventType: string) {
+  const exact: Record<string, string> = {
+    ticket_opened: "Novo atendimento aberto", ticket_claimed: "Atendimento assumido", ticket_closed: "Atendimento encerrado", ticket_reopened: "Atendimento reaberto", ticket_priority_changed: "Prioridade alterada", ticket_sla_warning: "Prazo de resposta próximo", ticket_sla_breach: "Prazo de resposta ultrapassado",
+    form_submitted: "Nova resposta recebida", form_approved: "Resposta aprovada", form_rejected: "Resposta recusada", knowledge_answered: "Resposta sugerida pela base de conhecimento",
+    member_joined: "Novo membro entrou", member_left: "Membro saiu", member_updated: "Perfil de membro atualizado", automation_awaiting_approval: "Automação aguarda aprovação", automation_failed: "Automação não foi concluída", staff_overloaded: "Equipe acima da capacidade", staff_inactive: "Atendente inativo",
+  };
+  if (exact[eventType]) return exact[eventType];
+  if (eventType.startsWith("automod_")) return "Regra automática aplicada";
+  if (eventType.startsWith("moderation_")) return "Ação de moderação registrada";
+  if (eventType.startsWith("security_")) return "Alerta de segurança registrado";
+  if (eventType.startsWith("integration_")) return "Integração atualizada";
+  return "Atividade registrada";
 }
