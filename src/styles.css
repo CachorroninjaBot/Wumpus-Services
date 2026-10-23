@@ -180,6 +180,21 @@ html[data-theme="dark"] {
   }
 }
 
+@keyframes ticket-success-check {
+  from {
+    stroke-dasharray: 24;
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dasharray: 24;
+    stroke-dashoffset: 0;
+  }
+}
+
+.ticket-success-check {
+  animation: ticket-success-check 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 .font-mono-num {
   font-variant-numeric: tabular-nums;
 }

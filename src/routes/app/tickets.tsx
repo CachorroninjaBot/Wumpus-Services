@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemberAvatar } from "@/components/brand";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
-import { Search } from "lucide-react";
+import { Check, Search } from "lucide-react";
 import { DiscordPanel } from "@/components/discord-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,8 @@ const slaTone: Record<SlaState, "ok" | "warn" | "danger"> = {
   breach: "danger",
 };
 
+type NoticeTone = "neutral" | "success" | "error";
+
 function TicketsPage() {
   const gid = useWumpus((s) => s.activeGuildId);
   const guild = useActiveGuild();
@@ -35,6 +37,7 @@ function TicketsPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [ticketsLoaded, setTicketsLoaded] = useState(false);
   const [ticketLoadError, setTicketLoadError] = useState<string | null>(null);
+  const [loadingTicketId, setLoadingTicketId] = useState<string | null>(null);
   const members = useGuildMembers();
   const tcfg = useModule("tickets");
   const staffConfig = useModule("staff");
@@ -59,9 +62,16 @@ function TicketsPage() {
   const [aiBusy, setAiBusy] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<NoticeTone>("neutral");
+  const noticeId = useRef(0);
   const [pubBusy, setPubBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const firstTicketId = tickets[0]?.id ?? null;
+  const announce = useCallback((message: string, tone: NoticeTone = "neutral") => {
+    setNotice(message);
+    setNoticeTone(tone);
+    noticeId.current += 1;
+  }, []);
 
   useEffect(() => {
     let stopped = false;
@@ -128,15 +138,25 @@ function TicketsPage() {
   async function runTicketAction(action: "claim" | "reply" | "close" | "priority" | "transfer" | "escalate", input: { content?: string; priority?: TicketPriority; reason?: string; targetStaffId?: string } = {}) {
     if (!ticket) return false;
     const token = getStoredSessionToken();
-    if (!token) { setNotice("Entre novamente com Discord para atender tickets."); return false; }
+    if (!token) { announce("Entre novamente com Discord para atender tickets.", "error"); return false; }
     setActionBusy(true);
+    setNotice(null);
     try {
       const { jobId } = await requestTicketAction({ data: { token, guildId: gid, ticketId: ticket.number, actorId: user.id, action, ...input } });
       for (let attempt = 0; attempt < 24; attempt++) {
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
         const result = await getTicketActionStatus({ data: { token, guildId: gid, jobId } });
         if (result.status === "done" || result.status === "failed") {
-          setNotice(result.detail ?? (result.status === "done" ? "Concluído." : "O bot não conseguiu executar a ação."));
+          announce(
+            result.detail ?? (
+              result.status === "done"
+                ? action === "close"
+                  ? `Atendimento #${ticket.number} encerrado.`
+                  : "Ação concluída no Discord."
+                : "O bot não conseguiu executar a ação."
+            ),
+            result.status === "done" ? "success" : "error",
+          );
           const rows = await getGuildTickets({ data: { token, guildId: gid } });
           setTickets((current) => {
             const currentById = new Map(current.map((item) => [item.id, item]));
@@ -145,10 +165,10 @@ function TicketsPage() {
           return result.status === "done";
         }
       }
-      setNotice("O bot ainda está processando. A fila será atualizada automaticamente.");
+      announce("O bot ainda está processando. A fila será atualizada automaticamente.");
       return false;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Não foi possível solicitar a ação ao bot.");
+      announce(error instanceof Error ? error.message : "Não foi possível solicitar a ação ao bot.", "error");
       return false;
     } finally { setActionBusy(false); }
   }
@@ -165,19 +185,20 @@ function TicketsPage() {
     setShowTicketOnMobile(Boolean(requested));
   }, [gid, tickets, firstTicketId]);
 
-  const memberById = useCallback((id: string) => members.find((m) => m.id === id), [members]);
+  const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+  const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
   const list = useMemo(() => {
     return tickets
       .filter((t) => (filter === "active" ? t.status === "open" || t.status === "claimed" : t.status === filter))
       .filter((t) => departmentFilter === "all" || t.department === departmentFilter)
       .filter((t) => priorityFilter === "all" || t.priority === priorityFilter)
       .filter((t) => {
-        const opener = memberById(t.openerId)?.displayName ?? t.openerId;
+        const opener = memberById.get(t.openerId)?.displayName ?? t.openerId;
         const haystack = `#${t.number} ${t.subject} ${t.department} ${opener} ${t.claimedBy ?? ""}`;
-        return haystack.toLocaleLowerCase("pt-BR").includes(query.trim().toLocaleLowerCase("pt-BR"));
+        return haystack.toLocaleLowerCase("pt-BR").includes(normalizedQuery);
       })
       .sort((a, b) => b.createdAt - a.createdAt);
-  }, [tickets, filter, departmentFilter, priorityFilter, query, memberById]);
+  }, [tickets, filter, departmentFilter, priorityFilter, normalizedQuery, memberById]);
 
   const ticket = list.find((t) => t.id === selectedId) ?? list[0] ?? null;
   const selectedTicketId = ticket?.id;
@@ -190,6 +211,7 @@ function TicketsPage() {
     const token = getStoredSessionToken();
     if (!token) return;
 
+    setLoadingTicketId(selectedTicketId);
     void getGuildTicketMessages({ data: { token, guildId: gid, ticketId: selectedTicketNumber } })
       .then((detail) => {
         if (stopped) return;
@@ -198,10 +220,13 @@ function TicketsPage() {
           : row));
       })
       .catch((error) => {
-        if (!stopped) setNotice(error instanceof Error ? error.message : "Não foi possível carregar a conversa.");
+        if (!stopped) announce(error instanceof Error ? error.message : "Não foi possível carregar a conversa.", "error");
+      })
+      .finally(() => {
+        if (!stopped) setLoadingTicketId((current) => current === selectedTicketId ? null : current);
       });
     return () => { stopped = true; };
-  }, [gid, selectedTicketId, selectedTicketNumber, selectedTicketMessageCount]);
+  }, [announce, gid, selectedTicketId, selectedTicketNumber, selectedTicketMessageCount]);
 
   async function runAi(t: Ticket) {
     const token = getStoredSessionToken();
@@ -259,14 +284,29 @@ function TicketsPage() {
         <TabsContent value="queue" className="mt-4 space-y-4">
 
       <p role="note" className="m-0 rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
-        Esta fila lê os atendimentos persistidos pelo bot. As ações são encaminhadas ao Discord pelo bot.
+        O bot executa as ações no Discord e confirma quando conclui.
       </p>
       {ticketLoadError ? <p role="alert" className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn">{ticketLoadError}</p> : null}
 
       {!tcfg.enabled ? (
         <p className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn">Atendimento pausado neste servidor.</p>
       ) : null}
-      {notice ? <p className="m-0 rounded-xl bg-muted px-3 py-2 text-sm">{notice}</p> : null}
+      {notice ? (
+        <p
+          key={noticeId.current}
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "m-0 flex items-center gap-2 rounded-xl px-3 py-2 text-sm",
+            noticeTone === "success" && "bg-ok/10 text-ok",
+            noticeTone === "error" && "bg-warn/15 text-warn",
+            noticeTone === "neutral" && "bg-muted text-foreground",
+          )}
+        >
+          {noticeTone === "success" ? <Check aria-hidden="true" className="ticket-success-check size-4 shrink-0" /> : null}
+          <span>{notice}</span>
+        </p>
+      ) : null}
       {!planAllows(guild.plan, "ai") ? (
         <p className="m-0 text-sm text-muted-foreground">Plano Essencial não inclui IA. O Pro libera a análise para a equipe.</p>
       ) : null}
@@ -315,14 +355,22 @@ function TicketsPage() {
             <div className="space-y-3 p-4">
               <div>
                 <h2 className="m-0 text-base font-semibold">
-                  {!ticketsLoaded ? "Carregando atendimentos…" : tickets.length === 0 ? "Sua fila começa aqui" : "Nenhum atendimento nesta vista"}
+                  {!ticketsLoaded
+                    ? "Carregando atendimentos…"
+                    : ticketLoadError
+                    ? "Não foi possível carregar a fila"
+                    : tickets.length === 0
+                    ? "Sua fila começa aqui"
+                    : "Nenhum atendimento encontrado"}
                 </h2>
                 <p className="mt-1 mb-0 text-sm text-muted-foreground">
                   {!ticketsLoaded
-                    ? "Buscando tickets reais no armazenamento do bot."
+                    ? "Buscando os atendimentos registrados pelo bot."
+                    : ticketLoadError
+                    ? "A fila tentará carregar novamente em instantes."
                     : tickets.length === 0
                     ? "Configure o canal e os cargos de atendimento e publique o painel no Discord para receber os primeiros tickets."
-                    : "Troque o filtro para consultar os atendimentos de outro estado."}
+                    : "Ajuste a busca ou os filtros para encontrar atendimentos."}
                 </p>
               </div>
               {tickets.length === 0 ? (
@@ -396,7 +444,7 @@ function TicketsPage() {
               <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <span>{ticket.department}</span>
                 <span>aberto {formatTime(ticket.createdAt)}</span>
-                {ticket.claimedBy ? <span>com {memberById(ticket.claimedBy)?.displayName ?? ticket.claimedBy}</span> : <span>sem dono</span>}
+                {ticket.claimedBy ? <span>com {memberById.get(ticket.claimedBy)?.displayName ?? ticket.claimedBy}</span> : <span>sem dono</span>}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {ticket.status === "open" || ticket.status === "claimed" ? (
@@ -430,20 +478,26 @@ function TicketsPage() {
             </header>
 
             <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-              {ticket.messages.map((m) => {
-                const who = m.kind === "system" ? null : memberById(m.authorId);
-                return (
-                  <div key={m.id} className="flex gap-2">
-                    {who ? <MemberAvatar name={who.displayName} hue={who.hue} size={28} /> : <span className="size-7" />}
-                    <div className="min-w-0">
-                      <p className="m-0 text-[11px] text-muted-foreground">
-                        {who?.displayName ?? m.authorName ?? "Sistema"} · {formatRelative(m.at)}
-                      </p>
-                      <p className="m-0 text-sm leading-relaxed">{m.content}</p>
+              {ticket.messages.length ? (
+                ticket.messages.map((m) => {
+                  const who = m.kind === "system" ? null : memberById.get(m.authorId);
+                  return (
+                    <div key={m.id} className="flex gap-2">
+                      {who ? <MemberAvatar name={who.displayName} hue={who.hue} size={28} /> : <span className="size-7" />}
+                      <div className="min-w-0">
+                        <p className="m-0 text-[11px] text-muted-foreground">
+                          {who?.displayName ?? m.authorName ?? "Sistema"} · {formatRelative(m.at)}
+                        </p>
+                        <p className="m-0 text-sm leading-relaxed">{m.content}</p>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              ) : (
+                <p className="m-0 text-sm text-muted-foreground" role="status">
+                  {loadingTicketId === ticket.id ? "Carregando conversa…" : "Nenhuma mensagem registrada neste atendimento."}
+                </p>
+              )}
               {ai ? (
                 <div className="rounded-xl bg-primary/10 px-3 py-2 text-sm whitespace-pre-wrap">{ai}</div>
               ) : null}
@@ -612,9 +666,9 @@ function TicketsPage() {
                         target: "tickets",
                         channelRef: asString(tcfg.config.panelChannelId).trim(),
                       });
-                      setNotice(publishResultMessage(result));
+                      announce(publishResultMessage(result));
                     } catch (cause) {
-                      setNotice(cause instanceof Error ? cause.message : "Não foi possível pedir a publicação ao bot.");
+                      announce(cause instanceof Error ? cause.message : "Não foi possível pedir a publicação ao bot.", "error");
                     } finally {
                       setPubBusy(false);
                     }
@@ -636,7 +690,7 @@ function TicketsPage() {
       <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
         <DialogContent>
           <DialogTitle>Encerrar atendimento</DialogTitle>
-          <DialogDesc>Informe um motivo para manter o histórico consistente. O bot encerrará o canal e enviará a pesquisa configurada.</DialogDesc>
+          <DialogDesc>Informe o motivo. O bot registrará no histórico e encerrará o canal. Se houver transcrição configurada e disponível no seu plano, ela será enviada ao canal escolhido.</DialogDesc>
           <Field label="Motivo do encerramento">
             <Textarea rows={3} maxLength={500} value={closeReason} onChange={(event) => setCloseReason(event.target.value)} placeholder="Ex.: dúvida resolvida, solicitação concluída…" />
           </Field>
@@ -645,7 +699,7 @@ function TicketsPage() {
             disabled={actionBusy || !closeReason.trim()}
             onClick={() => void runTicketAction("close", { reason: closeReason.trim() }).then((ok) => { if (ok) { setCloseOpen(false); setCloseReason(""); } })}
           >
-            Encerrar e gerar transcrição
+            Encerrar atendimento
           </Button>
         </DialogContent>
       </Dialog>
