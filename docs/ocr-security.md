@@ -15,10 +15,13 @@ reconhecido é limitado a 12.000 caracteres. Apenas resultados de parsing
 explicitamente bem-sucedidos (`OCRExitCode` e `FileParseExitCode`) são usados.
 
 OCR.space não retorna score de confiança calibrado, portanto `confidenceThreshold`
-não mede a qualidade da transcrição nesse provedor. Uma transcrição bem-sucedida
-é encaminhada às regras existentes do AutoMod; o OCR não é, por si só, uma
-decisão de moderação. As regras devem ser configuradas para os tipos de conteúdo
-que a comunidade quer bloquear.
+não mede a qualidade da transcrição nesse provedor. Após uma leitura bem-sucedida,
+o AutoMod procura somente os `blockedTerms` configurados pelo usuário, sem
+aplicar regras de convite, links, caixa alta ou flood ao texto da imagem. Se
+encontrar um termo, aplica a ação configurada no AutoMod e grava um evento de
+auditoria/log identificando o termo, a ação e a origem OCR. Sem correspondência,
+nenhuma ação de moderação nem evento de incidente é gerado. Os canais e cargos
+ignorados pelo AutoMod também são respeitados.
 
 `retainExtractedText` controla se o texto reconhecido é gravado no registro de
 auditoria do AutoMod. Com a opção desativada (padrão), o conteúdo e trechos

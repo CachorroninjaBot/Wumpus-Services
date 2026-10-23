@@ -139,6 +139,18 @@ export function scanMessage(input: {
   return null;
 }
 
+/** Imagens usam somente os termos bloqueados configurados pelo usuário. */
+export function scanImageText(
+  content: string,
+  config: Record<string, unknown> | null,
+): AutomodHit | null {
+  const lower = content.toLowerCase();
+  const term = list(config, "blockedTerms").find(
+    (blockedTerm) => blockedTerm && lower.includes(blockedTerm.toLowerCase()),
+  );
+  return term ? { rule: `termo:${term}`, action: str(config, "action", "delete") } : null;
+}
+
 /** Aplica a acao configurada. `delete` e o padrao; `warn` deixa a mensagem. */
 export async function handleMessage(message: Message, log: Logger): Promise<void> {
   if (!message.guild || message.author.bot) return;
@@ -315,20 +327,22 @@ export async function handleImageContent(message: Message, log: Logger): Promise
     .filter((value): value is string => Boolean(value));
   if (ignoredChannels.includes(message.channelId)) return;
 
+  const ignoredRoles = resolveRoles(guild, list(config, "ignoredRoleIds")).map((role) => role.id);
+  const member = message.member;
+  if (
+    member &&
+    ignoredRoles.length &&
+    member.roles.cache.some((role) => ignoredRoles.includes(role.id))
+  ) {
+    return;
+  }
+
   const text = await extractTextFromAttachments(guild.id, images, log);
   if (!text.trim()) return;
 
-  const hit = scanMessage({
-    content: text,
-    config,
-    windowMs: 0,
-    floodCount: 0,
-    duplicateCount: 0,
-  });
+  const hit = scanImageText(text, config);
   if (!hit) return;
 
-  const ruleType = hit.rule.split(":")[0]!;
-  const member = message.member;
   const warnMessage = str(
     config,
     "warnMessage",
@@ -340,7 +354,7 @@ export async function handleImageContent(message: Message, log: Logger): Promise
 
     if (hit.action === "timeout" || hit.action === "mute") {
       const minutes = Math.max(1, Math.trunc(num(config, "timeoutMinutes", 10)));
-      await member?.timeout(minutes * 60_000, `automod-imagem:${ruleType}`).catch(() => undefined);
+      await member?.timeout(minutes * 60_000, `automod-imagem:${hit.rule}`).catch(() => undefined);
     }
 
     if (hit.action === "warn") {
@@ -353,7 +367,7 @@ export async function handleImageContent(message: Message, log: Logger): Promise
   } catch (error) {
     log.warn("falha ao aplicar automod em imagem", {
       guildId: guild.id,
-      rule: ruleType,
+      rule: hit.rule,
       error: String(error),
     });
   }
@@ -363,19 +377,19 @@ export async function handleImageContent(message: Message, log: Logger): Promise
     {
       module: "automod",
       category: "automod",
-      eventType: `automod_imagem_${ruleType}`,
+      eventType: "automod_imagem_termo",
       targetId: message.author.id,
       channelId: message.channelId,
-      severity: "warning",
-      title: `AUTOMOD (IMAGEM) · ${ruleType}`,
+      severity: hit.action === "timeout" || hit.action === "mute" ? "warning" : "info",
+      title: `AUTOMOD (IMAGEM) · ${hit.rule}`,
       description: `<@${message.author.id}> em <#${message.channelId}>`,
       accentColor: "#f5a524",
       fields: [
-        { name: "Regra", value: ruleType },
+        { name: "Regra", value: hit.rule },
         { name: "Acao", value: hit.action },
         ...(retainExtractedText ? [{ name: "Texto lido", value: text.slice(0, 1000) }] : []),
       ],
-      data: { rule: ruleType, action: hit.action, source: "ocr" },
+      data: { rule: hit.rule, action: hit.action, source: "ocr" },
     },
     log,
   );
@@ -383,7 +397,7 @@ export async function handleImageContent(message: Message, log: Logger): Promise
   log.info("automod aplicado em imagem", {
     guildId: guild.id,
     userId: message.author.id,
-    rule: ruleType,
+    rule: hit.rule,
     action: hit.action,
   });
 }

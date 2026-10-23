@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { scanMessage } from "./automod.ts";
+import { scanImageText, scanMessage } from "./automod.ts";
 
 /** Contexto neutro: sem flood nem repeticao, a menos que o teste diga o contrario. */
 const base = { windowMs: 10_000, floodCount: 0, duplicateCount: 0 };
@@ -29,6 +29,37 @@ test("detecta termo bloqueado sem diferenciar caixa", () => {
     config: { blockedTerms: ["golpe"] },
   });
   assert.equal(hit?.rule, "termo:golpe");
+});
+
+test("OCR de imagem aplica a ação configurada quando encontra termo bloqueado", () => {
+  assert.deepEqual(
+    scanImageText("Promoção imperdível: GOLPE agora!", {
+      blockedTerms: ["golpe"],
+      action: "timeout",
+    }),
+    { rule: "termo:golpe", action: "timeout" },
+  );
+});
+
+test("OCR de imagem não aciona regras que não sejam termos bloqueados", () => {
+  assert.equal(
+    scanImageText("discord.gg/golpe https://site-suspeito.example COMPRA AGORA", {
+      blockInvites: true,
+      blockLinks: true,
+      blockedDomains: ["site-suspeito.example"],
+      capsThresholdPercent: 20,
+      blockedTerms: ["outra palavra"],
+      action: "delete",
+    }),
+    null,
+  );
+});
+
+test("OCR de imagem usa delete como ação padrão para termo bloqueado", () => {
+  assert.deepEqual(scanImageText("conteúdo proibido", { blockedTerms: ["proibido"] }), {
+    rule: "termo:proibido",
+    action: "delete",
+  });
 });
 
 test("bloqueia link fora da allowlist quando blockLinks esta ligado", () => {
