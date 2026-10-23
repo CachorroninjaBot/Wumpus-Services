@@ -13,7 +13,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { enqueueOutbox, readBotCollection, readRuntime, writeRuntime, type BotFormRecord, type BotTicketMessage, type BotTicketRecord, type OutboxJob } from "./runtime.server";
+import { enqueueOutbox, readBotCollection, readRuntime, writeBotCollection, writeRuntime, type BotFormRecord, type BotTicketMessage, type BotTicketRecord, type KnowledgeFaqSuggestion, type OutboxJob } from "./runtime.server";
 import { requireGuildAccess } from "./session-access.server";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
@@ -185,7 +185,51 @@ export const saveServerGroups = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-export type { RuntimeFile, RuntimeGuild, RuntimeArticle, OutboxJob } from "./runtime.server";
+export const getGuildKnowledgeFaqSuggestions = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const [suggestions, statusRows] = await Promise.all([
+      readBotCollection<KnowledgeFaqSuggestion>("knowledge-suggestions"),
+      readBotCollection<{ id: string; guildId: string; status: "dismissed" | "converted" }>("knowledge-suggestion-status")
+    ]);
+    const statuses = new Map(statusRows.map((row) => [`${row.guildId}:${row.id}`, row.status]));
+    return suggestions
+      .filter((suggestion) => suggestion.guildId === data.guildId && (statuses.get(`${suggestion.guildId}:${suggestion.id}`) ?? "pending") === "pending")
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+      .slice(0, 100);
+  });
+
+export const updateGuildKnowledgeFaqSuggestion = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    suggestionId: z.string().min(1).max(100),
+    status: z.enum(["dismissed", "converted"]),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const [suggestions, statusRows] = await Promise.all([
+      readBotCollection<KnowledgeFaqSuggestion>("knowledge-suggestions"),
+      readBotCollection<{ id: string; guildId: string; status: "dismissed" | "converted" }>("knowledge-suggestion-status")
+    ]);
+    const exists = suggestions.some((suggestion) =>
+      suggestion.id === data.suggestionId &&
+      suggestion.guildId === data.guildId
+    );
+    if (!exists) throw new Error("A sugestão de FAQ não existe mais.");
+    const index = statusRows.findIndex((row) => row.id === data.suggestionId && row.guildId === data.guildId);
+    if (index >= 0) throw new Error("A sugestão de FAQ já foi resolvida.");
+    const statusRow = { id: data.suggestionId, guildId: data.guildId, status: data.status };
+    statusRows.push(statusRow);
+    await writeBotCollection("knowledge-suggestion-status", statusRows);
+    return { ok: true as const };
+  });
+
+export type { RuntimeFile, RuntimeGuild, RuntimeArticle, KnowledgeFaqSuggestion, OutboxJob } from "./runtime.server";
 
 /** Payload de config de um servidor: `{ modulo: { ...campos, enabled } }`. */
 export type PublishInput = {

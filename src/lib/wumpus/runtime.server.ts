@@ -10,6 +10,7 @@
  */
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 export type RuntimeGuild = {
   name?: string;
@@ -37,6 +38,22 @@ export type RuntimeArticle = {
   category?: string;
   exampleQuestions?: string[];
   approved: boolean;
+};
+
+export type KnowledgeFaqSuggestion = {
+  id: string;
+  candidateId: string;
+  guildId: string;
+  title: string;
+  category: string;
+  tags: string[];
+  exampleQuestions: string[];
+  occurrenceCount: number;
+  uniqueUserCount: number;
+  channelCount: number;
+  createdAt: number;
+  lastSeenAt: number;
+  status: "pending" | "dismissed" | "converted";
 };
 
 /**
@@ -155,7 +172,9 @@ export async function readRuntime(): Promise<RuntimeFile> {
 }
 
 /** Bot collections shared on disk; malformed or missing files return empty lists. */
-export async function readBotCollection<T>(name: "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage"): Promise<T[]> {
+export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status";
+
+export async function readBotCollection<T>(name: BotCollectionName): Promise<T[]> {
   try {
     const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
     const parsed: unknown = JSON.parse(await readFile(join(directory, `${name}.json`), "utf8"));
@@ -163,6 +182,15 @@ export async function readBotCollection<T>(name: "tickets" | "ticket_messages" |
   } catch {
     return [];
   }
+}
+
+export async function writeBotCollection<T>(name: BotCollectionName, rows: T[]): Promise<void> {
+  const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, `${name}.json`);
+  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(rows, null, 2));
+  await rename(temporaryPath, path);
 }
 
 /**

@@ -208,6 +208,7 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     autoSuggest: true,
     mentionRequired: false,
     suggestInAllChannels: false,
+    respondInAllChannels: false,
     maxArticlesPerSearch: 5,
     similarityThreshold: 0.6,
     logSearches: false,

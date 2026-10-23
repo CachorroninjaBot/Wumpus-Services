@@ -17,6 +17,7 @@ import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
 import { asSendable, resolveChannel } from "./resolve.ts";
 import { readRuntime } from "./runtime.ts";
+import { shouldRespondToKnowledgeMessage } from "./faq-detection.ts";
 
 export type KnowledgeArticle = {
   id: string;
@@ -186,9 +187,16 @@ export async function shouldAnswer(guild: Guild, message: Message): Promise<bool
   const mentioned = message.mentions.users.has(guild.client.user!.id);
   const mentionRequired = bool(config, "mentionRequired", false);
   const mentionsElsewhere = bool(config, "suggestInAllChannels", false);
+  const respondInAllChannels = bool(config, "respondInAllChannels", false);
 
-  if (inChannel) return !mentionRequired || mentioned;
-  return mentionsElsewhere && mentioned;
+  return shouldRespondToKnowledgeMessage({
+    inAnswerChannel: inChannel,
+    mentionRequired,
+    mentioned,
+    respondInAllChannels,
+    mentionsElsewhere,
+    content: message.content
+  });
 }
 
 /** Ponto de entrada do modulo a partir de uma mensagem. */

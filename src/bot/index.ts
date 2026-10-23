@@ -40,6 +40,7 @@ import { syncBotPlanLicenses } from "./license-sync.ts";
 import { buildFormModal, handleFormSelect, openForm, parseFields, readDraft, reviewForm, submitForm } from "./forms.ts";
 import { id, parseId } from "./ids.ts";
 import { handleKnowledgeMessage } from "./knowledge.ts";
+import { trackFrequentQuestion } from "./knowledge-faq.ts";
 import { consoleLogger, type Logger } from "./logger.ts";
 import { auditAndLog, logToChannel, pruneAudit, recordAudit, shouldIgnoreLogEvent } from "./logs.ts";
 import { renderAuditDiff } from "./log-diff.ts";
@@ -689,6 +690,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
 
   client.on(Events.MessageCreate, (message: Message) => {
     if (message.author.bot || !message.guild) return;
+    const guildId = message.guild.id;
     void recordMessageLog(message, "message_created", "Mensagem enviada", message.content, log);
 
     void handleMessage(message, log).catch((error) =>
@@ -702,6 +704,9 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     void bump(message.guild.id, "messages").catch(() => undefined);
     void handleKnowledgeMessage(message, log).catch((error) =>
       log.error("falha na base de conhecimento", { error: String(error) })
+    );
+    void trackFrequentQuestion(message, log).catch((error) =>
+      log.error("falha ao analisar perguntas frequentes", { guildId, error: String(error) })
     );
   });
 

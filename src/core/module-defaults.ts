@@ -284,6 +284,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     similarityThreshold: 0.6,
     autoSuggest: true,
     suggestInAllChannels: false,
+    respondInAllChannels: false,
     includeArticleLink: true,
     logSearches: false,
     logChannelId: ""
