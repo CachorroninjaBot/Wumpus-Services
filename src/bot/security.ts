@@ -39,6 +39,15 @@ async function saveVerificationState(state: VerificationState | null, guildId: s
   });
 }
 
+export function verificationSetupFailure(error: unknown): string {
+  const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+  const message = String(error);
+  if (code === 350003 || /Onboarding channels must be readable by everyone/i.test(message)) {
+    return "O Discord não permite restringir um canal usado no Onboarding: ele precisa continuar visível para @everyone. Remova esse canal do Onboarding nas configurações do servidor ou escolha outro canal para a verificação e tente novamente.";
+  }
+  return `Não consegui aplicar todas as permissões: ${message.slice(0, 180)}`;
+}
+
 /** Apply and persist a reversible @everyone gate before sending the verification panel. */
 export async function setupVerification(guild: Guild, channelId: string, roleId: string): Promise<{ ok: boolean; detail: string }> {
   const me = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
@@ -76,7 +85,7 @@ export async function setupVerification(guild: Guild, channelId: string, roleId:
     return { ok: true, detail: "Acesso restrito e cargo verificado liberado nos canais." };
   } catch (error) {
     await restoreVerification(guild).catch(() => undefined);
-    return { ok: false, detail: `Não consegui aplicar todas as permissões: ${String(error).slice(0, 180)}` };
+    return { ok: false, detail: verificationSetupFailure(error) };
   }
 }
 

@@ -35,8 +35,11 @@ type SecurityEvent = Awaited<ReturnType<typeof getGuildSecurityIncidents>>[numbe
 type PermissionKey = "manageMessages" | "manageChannels" | "manageRoles" | "moderateMembers" | "viewAuditLog" | "banMembers";
 type ConfirmAction = "lockdown_on" | "lockdown_off" | "restore_verification";
 
-function verificationRoleAdvice(detail: string): string | null {
+function verificationFailureAdvice(detail: string): string | null {
   const normalized = detail.toLocaleLowerCase("pt-BR");
+  if (normalized.includes("onboarding")) {
+    return "Em Configurações do servidor > Onboarding, remova esse canal da lista de canais do Onboarding. Se preferir mantê-lo lá, selecione outro canal para a verificação.";
+  }
   if (normalized.includes("gerenciado por uma integração")) {
     return "Escolha outro cargo, criado diretamente neste servidor. Cargos de bots e integrações não podem ser concedidos pelo painel.";
   }
@@ -213,7 +216,7 @@ function ProtectPage() {
     setActionFailed(false);
     setActionNote("Pedido recebido. Aguardando o bot executar no Discord…");
     try {
-      for (let attempt = 0; attempt < 20; attempt += 1) {
+      for (let attempt = 0; attempt < 30; attempt += 1) {
         const result = await getGuildSecurityActionStatus({ data: { token: getStoredSessionToken(), guildId, jobId } });
         if (result.status === "done") {
           setActionFailed(false);
@@ -225,7 +228,7 @@ function ProtectPage() {
           setActionNote(result.detail || "O bot não conseguiu concluir a ação. Confira as permissões e tente novamente.");
           return false;
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
       }
       setActionFailed(true);
       setActionNote("O pedido continua na fila. Consulte o estado do bot e tente novamente se ele não concluir.");
@@ -341,8 +344,8 @@ function ProtectPage() {
         <div className={`rounded-lg px-4 py-3 text-sm ${actionFailed ? "border border-destructive/25 bg-destructive/10" : "bg-muted"}`} role={actionFailed ? "alert" : "status"} aria-live={actionFailed ? "assertive" : "polite"}>
           <p className="m-0 font-semibold">{actionFailed ? "Não foi possível concluir a ação" : actionNote}</p>
           {actionFailed ? <p className="mb-0 mt-1">{actionNote}</p> : null}
-          {actionFailed && section === "verification" && verificationRoleAdvice(actionNote) ? (
-            <p className="mb-0 mt-2 text-muted-foreground">{verificationRoleAdvice(actionNote)}</p>
+          {actionFailed && section === "verification" && verificationFailureAdvice(actionNote) ? (
+            <p className="mb-0 mt-2 text-muted-foreground">{verificationFailureAdvice(actionNote)}</p>
           ) : null}
         </div>
       ) : null}

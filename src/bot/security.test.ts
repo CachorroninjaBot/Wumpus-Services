@@ -1,9 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pushPersistedSecurityWindow, readPersistedSecurityWindow, type SecurityWindowKind } from "./security.ts";
+import { pushPersistedSecurityWindow, readPersistedSecurityWindow, type SecurityWindowKind, verificationSetupFailure } from "./security.ts";
 import { flushPersistedSecurityWindows, resetSecurityWindowCacheForTests } from "./security/windows.ts";
 import { mutate, resetStoreCacheForTests } from "./store.ts";
+
+test("erro de canal do onboarding explica como liberar a publicação", () => {
+  const detail = verificationSetupFailure({ code: 350003, message: "Onboarding channels must be readable by everyone" });
+  assert.match(detail, /Onboarding/);
+  assert.match(detail, /@everyone/);
+  assert.match(detail, /escolha outro canal/);
+});
+
+test("outros erros de permissão preservam o detalhe do Discord", () => {
+  const detail = verificationSetupFailure(new Error("Missing Permissions"));
+  assert.match(detail, /Não consegui aplicar todas as permissões/);
+  assert.match(detail, /Missing Permissions/);
+});
 
 async function resetWindow(guildId: string, kind: SecurityWindowKind): Promise<void> {
   await mutate<{ guildId: string; kind: SecurityWindowKind }>("security-windows", (rows) => {

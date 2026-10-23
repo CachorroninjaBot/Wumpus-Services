@@ -836,25 +836,28 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     })();
   }, PRUNE_INTERVAL_MS);
 
-  // Fila de saida: o painel pede, o bot publica. Roda a cada 20s porque e a
-  // unica forma de "Publicar painel" na dashboard chegar a um canal de verdade
-  // — o painel nao tem conexao com o gateway do Discord.
+  // A fila e a ponte entre o painel e o gateway do Discord; uma passada curta
+  // evita que publicações e ações fiquem esperando dezenas de segundos.
+  let processingOutbox = false;
+  const processQueuedActions = async () => {
+    if (processingOutbox) return;
+    processingOutbox = true;
+    try {
+      for (const guild of client.guilds.cache.values()) {
+        await processOutbox(guild, log).catch((error) => {
+          log.error("falha ao processar fila de ações", { guildId: guild.id, error: String(error).slice(0, 300) });
+        });
+      }
+    } finally {
+      processingOutbox = false;
+    }
+  };
   const outboxTimer = setInterval(() => {
-    void (async () => {
-      for (const guild of client.guilds.cache.values()) {
-        await processOutbox(guild, log).catch(() => 0);
-      }
-    })();
-  }, 20_000);
+    void processQueuedActions();
+  }, 1_000);
 
-  // Uma passada logo apos conectar, para nao esperar o primeiro intervalo.
-  client.once(Events.ClientReady, () => {
-    void (async () => {
-      for (const guild of client.guilds.cache.values()) {
-        await processOutbox(guild, log).catch(() => 0);
-      }
-    })();
-  });
+  // Uma passada logo apos conectar, sem esperar o primeiro intervalo.
+  client.once(Events.ClientReady, () => void processQueuedActions());
 
   // Inatividade da equipe roda uma vez por dia — nao precisa de mais que isso.
   const inactivityTimer = setInterval(() => {

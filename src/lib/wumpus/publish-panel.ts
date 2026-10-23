@@ -10,8 +10,8 @@ export async function publishPanelAndWait(input: {
   if (!token) throw new Error("Entre novamente com Discord para publicar este painel.");
   const request = await requestPanelPublish({ data: { token, ...input } });
 
-  for (let attempt = 0; attempt < 15; attempt++) {
-    await new Promise((resolve) => window.setTimeout(resolve, 2000));
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
     const rows = await getPublishStatus({ data: { token, guildId: input.guildId } });
     const result = rows.find((row) => row.id === request.jobId);
     if (result && result.status !== "queued") return result;
