@@ -68,6 +68,125 @@ function GuildPicker({ onChange, compact = false, id }: { onChange?: () => void;
   );
 }
 
+function DiscordAvatar({ user }: { user: { id: string; avatar?: string | null; globalName: string } }) {
+  const [failed, setFailed] = useState(false);
+  const avatarUrl = user.avatar
+    ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.webp?size=96`
+    : null;
+
+  return avatarUrl && !failed ? (
+    <img
+      src={avatarUrl}
+      alt=""
+      width={36}
+      height={36}
+      onError={() => setFailed(true)}
+      className="size-9 shrink-0 rounded-full object-cover"
+    />
+  ) : (
+    <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-xs font-bold text-primary-foreground" aria-hidden="true">
+      {user.globalName.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+function ServerRail() {
+  const guilds = useWumpus((state) => state.guilds);
+  const activeGuildId = useWumpus((state) => state.activeGuildId);
+  const setActiveGuild = useWumpus((state) => state.setActiveGuild);
+  const userId = useWumpus((state) => state.sessionUser.id);
+  const [orderedIds, setOrderedIds] = useState<string[]>([]);
+  const orderKey = `wumpus-server-order-v1:${userId}`;
+
+  useEffect(() => {
+    let saved: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(orderKey) ?? "[]");
+      if (Array.isArray(parsed)) saved = parsed.filter((id): id is string => typeof id === "string");
+    } catch (error) {
+      console.error("Não foi possível carregar a ordem dos servidores.", error);
+    }
+    const availableIds = new Set(guilds.map((guild) => guild.id));
+    const next = [...saved.filter((id) => availableIds.has(id)), ...guilds.map((guild) => guild.id).filter((id) => !saved.includes(id))];
+    setOrderedIds(next);
+  }, [guilds, orderKey]);
+
+  const orderedGuilds = useMemo(() => {
+    const byId = new Map(guilds.map((guild) => [guild.id, guild]));
+    return orderedIds.map((id) => byId.get(id)).filter((guild) => guild !== undefined);
+  }, [guilds, orderedIds]);
+
+  const reorder = (sourceId: string, targetId: string) => {
+    const sourceIndex = orderedIds.indexOf(sourceId);
+    const targetIndex = orderedIds.indexOf(targetId);
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+    const next = [...orderedIds];
+    const [moved] = next.splice(sourceIndex, 1);
+    if (!moved) return;
+    next.splice(targetIndex, 0, moved);
+    setOrderedIds(next);
+    try {
+      localStorage.setItem(orderKey, JSON.stringify(next));
+    } catch (error) {
+      console.error("Não foi possível salvar a ordem dos servidores.", error);
+    }
+  };
+
+  return (
+    <aside aria-label="Servidores" className="hidden w-[4.5rem] shrink-0 flex-col items-center gap-3 border-r border-border bg-muted/35 py-3 lg:flex">
+      <Link to="/app" aria-label="Início do Wumpus" className="grid size-12 place-items-center rounded-2xl transition-colors hover:bg-background">
+        <BrandMark size={38} />
+      </Link>
+      <span aria-hidden="true" className="h-px w-8 bg-border" />
+      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto px-2">
+        {orderedGuilds.map((guild, index) => {
+          const active = guild.id === activeGuildId;
+          return (
+            <button
+              key={guild.id}
+              type="button"
+              draggable
+              aria-label={`${guild.name}${active ? ", servidor selecionado" : ""}. Arraste para reordenar; use Alt e as setas para mover.`}
+              aria-pressed={active}
+              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+              title={guild.name}
+              onClick={() => setActiveGuild(guild.id)}
+              onDragStart={(event) => {
+                event.dataTransfer.setData("text/plain", guild.id);
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                reorder(event.dataTransfer.getData("text/plain"), guild.id);
+              }}
+              onKeyDown={(event) => {
+                if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+                event.preventDefault();
+                const target = orderedGuilds[index + (event.key === "ArrowUp" ? -1 : 1)];
+                if (target) reorder(guild.id, target.id);
+              }}
+              className={cn(
+                "relative grid size-12 shrink-0 place-items-center rounded-[18px] transition-[border-radius,background] duration-150 hover:rounded-[14px] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                active && "rounded-[14px] bg-background shadow-border",
+              )}
+            >
+              <span aria-hidden="true" className={cn("absolute -left-2 w-1 rounded-r-full bg-primary transition-all", active ? "h-8" : "h-2 opacity-0")} />
+              <GuildBadge tag={guild.tag ?? guild.name.slice(0, 2)} iconUrl={guild.iconUrl} size={38} />
+            </button>
+          );
+        })}
+      </div>
+      <a href={brand.invite} target="_blank" rel="noreferrer" aria-label="Adicionar o Wumpus a outro servidor" title="Adicionar servidor" className="grid size-11 shrink-0 place-items-center rounded-full border border-border text-primary transition-colors hover:bg-background">
+        <Plus className="size-5" />
+      </a>
+    </aside>
+  );
+}
+
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const active = useActiveNav();
   const groups: Array<ModuleGroupId | "home"> = ["home", "attend", "protect", "team", "intel"];
@@ -235,6 +354,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-shell flex min-h-dvh bg-background text-foreground">
+      <ServerRail />
       <aside className="app-sidebar hidden w-[17rem] shrink-0 flex-col border-r border-border bg-card lg:flex">
         <Link to="/" aria-label="Wumpus, início" className="flex h-[4.5rem] items-center gap-3 border-b border-border px-5">
           <BrandMark size={34} />
@@ -251,7 +371,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </Link>
           ) : null}
           <div className="flex items-center gap-3 rounded-lg px-3 py-2">
-            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-xs font-bold text-primary-foreground">{user.globalName.slice(0, 1).toUpperCase()}</span>
+            <DiscordAvatar key={user.id} user={user} />
             <div className="min-w-0 flex-1">
               <p className="m-0 truncate text-sm font-semibold">{user.globalName}</p>
               <p className="m-0 truncate text-xs text-muted-foreground">{user.username}</p>

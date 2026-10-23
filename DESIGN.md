@@ -28,7 +28,9 @@ A prévia Discord tem paleta própria: superfície profunda `#1E1F22`, superfíc
 
 ## Hierarquia e controles
 
-O shell mantém identidade e contexto do servidor em primeiro plano. Em telas largas, a navegação lateral fixa tem 17 rem, apresenta o seletor de servidor/plano, rotas agrupadas e identidade do usuário; a barra superior fixa contém o título da rota, estado de sincronização quando aplicável, controle de tema e convite para outro servidor. O conteúdo ocupa a área principal. Rotas ativas recebem fundo secundário, e não dependem apenas de ícone.
+O shell mantém identidade e contexto do servidor em primeiro plano. Em telas largas, uma coluna de ícones de servidores fica à esquerda da navegação fixa de 17 rem; os ícones mostram o servidor selecionado, aceitam arrastar para reordenar e também podem ser movidos com Alt+setas. A navegação apresenta o servidor ativo, rotas agrupadas e identidade do usuário. O avatar do perfil usa a imagem recebida do Discord, com fallback por iniciais. A barra superior contém o título da rota, estado de sincronização quando aplicável, controle de tema e convite para outro servidor. A preferência de tema (claro, escuro ou sistema) é persistida por conta neste navegador. O conteúdo ocupa a área principal. Rotas ativas recebem fundo secundário, e não dependem apenas de ícone.
+
+Grupos de configuração são distintos das pastas visuais da coluna de servidores: eles organizam servidores que compartilham configurações. A criação usa uma janela focada para nome e seleção de comunidades; grupos e servidores integrantes podem ser reordenados. Canais e cargos continuam mapeados separadamente por servidor.
 
 Os controles usam rótulos em português, dimensões de toque confortáveis (itens de navegação com mínimo de 40 px, ações principais com mínimo de 44 px nos estados de entrada), foco visível e feedback de hover. A troca de tema circula entre claro, sistema e escuro. Status de sincronização usam texto explícito junto a ponto colorido; falha também pode aparecer como alerta. A área de trabalho deve preservar a ordem de leitura: identificação, contexto, escolha/ação e resultado.
 

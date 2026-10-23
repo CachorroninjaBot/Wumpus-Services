@@ -1,5 +1,5 @@
 import { o as require_jsx_runtime } from "../_libs/@radix-ui/react-collection+[...].mjs";
-import { Q as cn, tt as initials } from "./router-DlyrBhH9.mjs";
+import { Q as cn, tt as initials } from "./router-DjtjaZqs.mjs";
 //#region node_modules/.nitro/vite/services/ssr/assets/brand-E6aTdQpB.js
 var import_jsx_runtime = require_jsx_runtime();
 function BrandMark({ size = 36, className }) {

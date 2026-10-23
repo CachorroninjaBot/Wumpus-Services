@@ -55,6 +55,7 @@ export type FormFieldConfig = {
 };
 
 const KEY = "wumpus-demo-v2";
+const THEME_KEY_PREFIX = "wumpus-theme-v1:";
 
 type PersistSlice = {
   activeGuildId: string;
@@ -359,6 +360,15 @@ export const useWumpus = create<WumpusStore>((set, get) => {
               ...stored,
               isAdmin: false,
             };
+            let theme = parsed.theme === "dark" || parsed.theme === "light" || parsed.theme === "system"
+              ? parsed.theme
+              : "system";
+            try {
+              const savedTheme = localStorage.getItem(`${THEME_KEY_PREFIX}${sessionUser.id}`);
+              if (savedTheme === "dark" || savedTheme === "light" || savedTheme === "system") theme = savedTheme;
+            } catch (error) {
+              console.error("Não foi possível carregar a preferência de tema.", error);
+            }
 
             // Os defaults entram POR BAIXO do que esta salvo. Sem isto, chave
             // de padrao adicionada depois nunca chega a um workspace existente
@@ -372,14 +382,12 @@ export const useWumpus = create<WumpusStore>((set, get) => {
               licenses,
               modules,
               sessionUser,
+              theme,
               posts: parsed.posts ?? [],
               publishQueue: parsed.publishQueue ?? [],
               recentMessages: parsed.recentMessages ?? [],
               hydrated: true,
             });
-            const theme = parsed.theme === "dark" || parsed.theme === "light" || parsed.theme === "system"
-              ? parsed.theme
-              : "system";
             document.documentElement.dataset.theme = theme;
             // Revalida a presença do bot e a assinatura antes de sincronizar
             // qualquer config que tenha ficado salva no navegador.
@@ -405,7 +413,16 @@ export const useWumpus = create<WumpusStore>((set, get) => {
 
     setTheme: (theme) => {
       document.documentElement.dataset.theme = theme;
-      write({ theme });
+      set({ theme });
+      persist(pick(get()));
+      const userId = get().sessionUser.id;
+      if (typeof window !== "undefined" && userId) {
+        try {
+          localStorage.setItem(`${THEME_KEY_PREFIX}${userId}`, theme);
+        } catch (error) {
+          console.error("Não foi possível salvar a preferência de tema.", error);
+        }
+      }
     },
 
     setActiveGuild: (id) => { write({ activeGuildId: id }); void refreshGuildResources(id); },
