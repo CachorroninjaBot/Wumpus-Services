@@ -120,10 +120,11 @@ test("payload sem userId e recusado", async () => {
 
 test("servidor sem id e descartado", async () => {
   const token = await new SignJWT({
-    userId: "1",
+    userId: PAYLOAD.userId,
     guilds: ["lixo", { name: "sem id" }, { id: "9", name: "ok", owner: false }],
   })
     .setProtectedHeader({ alg: "HS256" })
+    .setJti(PAYLOAD.sessionId)
     .sign(SECRET);
 
   const back = await verifySession(token, SECRET);
@@ -133,8 +134,9 @@ test("servidor sem id e descartado", async () => {
 });
 
 test("guilds que nao e lista vira lista vazia", async () => {
-  const token = await new SignJWT({ userId: "1", guilds: "nada" })
+  const token = await new SignJWT({ userId: PAYLOAD.userId, guilds: "nada" })
     .setProtectedHeader({ alg: "HS256" })
+    .setJti(PAYLOAD.sessionId)
     .sign(SECRET);
 
   assert.deepEqual((await verifySession(token, SECRET))?.guilds, []);
