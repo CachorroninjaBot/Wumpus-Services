@@ -1,4 +1,7 @@
 import type { ReactNode } from "react";
+import { useEffect } from "react";
+import { useRouterState } from "@tanstack/react-router";
+import { heartbeatDashboardSession } from "@/lib/wumpus/session";
 
 /**
  * App-wide client provider mounted once near the root (in `src/routes/__root.tsx`):
@@ -11,5 +14,28 @@ import type { ReactNode } from "react";
  * (e.g. a toast or theme provider) without churning the root shell.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  return <>{children}</>;
+  return (
+    <>
+      <SessionPresence />
+      {children}
+    </>
+  );
+}
+
+function SessionPresence() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  useEffect(() => {
+    if (!pathname.startsWith("/app") && pathname !== "/admin") return;
+    const heartbeat = () => {
+      if (document.visibilityState === "visible") {
+        void heartbeatDashboardSession({ data: {} }).catch(() => undefined);
+      }
+    };
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 60_000);
+    return () => window.clearInterval(timer);
+  }, [pathname]);
+
+  return null;
 }

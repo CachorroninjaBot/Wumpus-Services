@@ -35,7 +35,7 @@ function SettingsPage() {
   const preview = renderTemplate(asString(servers.config.joinMessage), {
     user: sample?.displayName ?? "membro",
   });
-  const billing = useBilling();
+  const billing = useBilling(true);
   const catalog = billing.data?.plans?.length ? billing.data.plans : fallbackPlans;
   const current = catalog.find((p) => p.id === guild.plan) ?? planById(guild.plan);
   const cap = serverLimit(guild.plan);

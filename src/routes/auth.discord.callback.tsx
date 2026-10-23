@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { buildWorkspace } from "@/lib/wumpus/owner-workspace";
 import { resolveAccess, startSession } from "@/lib/wumpus/session";
-import { SESSION_TOKEN_KEY } from "@/lib/wumpus/session-token";
+import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 
 const KEY = "wumpus-demo-v2";
 
@@ -25,32 +25,25 @@ function CallbackPage() {
       setMsg("Login cancelado no Discord.");
       return;
     }
-    const expectedState = sessionStorage.getItem("wumpus-discord-oauth-state");
-    sessionStorage.removeItem("wumpus-discord-oauth-state");
-    if (!state || state !== expectedState) {
+    if (!state || !code) {
       setMsg("A validação do login expirou. Volte ao início e tente novamente.");
-      return;
-    }
-    if (!code) {
-      setMsg("Código ausente.");
       return;
     }
 
     void (async () => {
       // O servidor troca o code e ASSINA a identidade. Daqui em diante o
       // `userId` vem do token, nao do navegador.
-      const started = await startSession({ data: { code } });
+      const started = await startSession({ data: { code, state } });
       if (!started.ok) {
         setMsg(started.error);
         return;
       }
 
-      localStorage.setItem(SESSION_TOKEN_KEY, started.token);
       setMsg("Verificando assinatura e servidores…");
 
       // O direito e resolvido no servidor: plano pago, bot presente e posse do
       // servidor sao conferidos la, a cada login.
-      const access = await resolveAccess({ data: { token: started.token } });
+      const access = await resolveAccess({ data: { token: getStoredSessionToken() } });
       if (!access.ok) {
         setMsg(access.error);
         return;

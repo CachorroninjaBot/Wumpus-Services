@@ -14,7 +14,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { enqueueOutbox, readBotCollection, readRuntime, writeRuntime, type BotFormRecord, type BotTicketMessage, type BotTicketRecord, type OutboxJob } from "./runtime.server";
-import { requireGuildAccess } from "./session";
+import { requireGuildAccess } from "./session-access.server";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 import { readBotHealth } from "./health.server";

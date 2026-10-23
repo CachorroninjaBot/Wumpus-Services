@@ -1,25 +1,59 @@
 import { createServerFn } from "@tanstack/react-start";
+import { setResponseHeaders } from "@tanstack/react-start/server";
 import { z } from "zod";
-import { requireAdminSession } from "./session";
-import { loadBilling } from "./shardpay";
+import { requireAdminSession } from "./session-access.server";
+import { loadBilling } from "./shardpay.server";
 import { loadBotGuildIds } from "./bot-guilds";
 import { readRuntime, enqueueOutbox } from "./runtime.server";
-import { listDashboardMembers } from "./admin-store.server";
+import {
+  getDashboardAdminState,
+  grantDashboardAccess,
+  manageDashboardUser,
+  revokeDashboardGrant,
+  recordDashboardAdminEvent,
+} from "./admin-store.server";
 import { readBotHealth } from "./health.server";
-import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
+import { SESSION_TOKEN_MAX_LENGTH, sessionSecret } from "./session-token";
+import { enforceRequestLimit } from "./request-limits.server";
+import type { PlanId } from "./catalog";
 
 const tokenSchema = z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH) }).strict();
 const resyncSchema = z.object({
   token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
   guildId: z.string().regex(/^\d{17,20}$/),
 }).strict();
+const userActionSchema = z.object({
+  token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+  userId: z.string().regex(/^\d{17,20}$/),
+  action: z.enum(["suspend", "restore", "revoke-sessions", "save-notes"]),
+  reason: z.string().trim().max(300).optional(),
+  notes: z.string().max(2000).optional(),
+}).strict();
+const grantSchema = z.object({
+  token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+  userId: z.string().regex(/^\d{17,20}$/),
+  username: z.string().trim().min(1).max(100),
+  planId: z.enum(["essencial", "pro", "escala"]),
+  durationDays: z.number().int().min(1).max(3650),
+  reason: z.string().trim().min(3).max(500),
+}).strict();
+const revokeGrantSchema = z.object({
+  token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+  grantId: z.string().uuid(),
+}).strict();
+
+function privateResponse(): void {
+  setResponseHeaders(new Headers({ "Cache-Control": "private, no-store", Vary: "Cookie" }));
+}
 
 export const getAdminOverview = createServerFn({ method: "POST" })
   .validator((input: unknown) => tokenSchema.parse(input))
   .handler(async ({ data }) => {
-    await requireAdminSession(data.token);
-    const [members, billing, botGuildIds, runtime, health] = await Promise.all([
-      listDashboardMembers(),
+    enforceRequestLimit("admin-overview", 60, 60_000);
+    const actor = await requireAdminSession(data.token);
+    privateResponse();
+    const [admin, billing, botGuildIds, runtime, health] = await Promise.all([
+      getDashboardAdminState(),
       loadBilling(),
       loadBotGuildIds(),
       readRuntime(),
@@ -38,29 +72,108 @@ export const getAdminOverview = createServerFn({ method: "POST" })
 
     return {
       ok: true as const,
-      members,
-      subscriptions: billing.subscriptions.map((subscription) => ({
-        id: subscription.id,
-        username: subscription.discordUsername ?? "Conta sem nome Discord",
-        productName: subscription.productName,
-        status: subscription.status,
-        billingCycle: subscription.billingCycle,
-        nextBillingDate: subscription.nextBillingDate,
-        priceCents: subscription.priceCents,
-      })),
+      adminId: actor.userId,
+      members: admin.members,
+      sessions: admin.sessions,
+      events: admin.events,
+      subscriptions: [
+        ...billing.subscriptions.map((subscription) => ({
+          id: subscription.id,
+          username: subscription.discordUsername ?? "Conta sem nome Discord",
+          discordUserId: subscription.discordUserId,
+          productName: subscription.productName,
+          status: subscription.status,
+          billingCycle: subscription.billingCycle,
+          nextBillingDate: subscription.nextBillingDate,
+          startedAt: subscription.startedAt ?? null,
+          periodEndsAt: subscription.periodEndsAt ?? null,
+          canceledAt: subscription.canceledAt ?? null,
+          priceCents: subscription.priceCents,
+          manual: false,
+          reason: null,
+          planId: subscription.planId,
+        })),
+        ...admin.grants.map((grant) => ({
+          id: grant.id,
+          username: grant.username,
+          discordUserId: grant.userId,
+          productName: `Concessão manual · ${grant.planId}`,
+          status: grant.revokedAt ? "revoked" : grant.expiresAt <= Date.now() ? "expired" : "active",
+          billingCycle: `${Math.ceil(Math.max(0, grant.expiresAt - grant.createdAt) / 86_400_000)} dias concedidos`,
+          nextBillingDate: "",
+          startedAt: new Date(grant.createdAt).toISOString(),
+          periodEndsAt: new Date(grant.expiresAt).toISOString(),
+          canceledAt: grant.revokedAt ? new Date(grant.revokedAt).toISOString() : null,
+          priceCents: 0,
+          manual: true,
+          reason: grant.reason,
+          planId: grant.planId as PlanId,
+        })),
+      ],
       billingAvailable: billing.ok,
       billingError: billing.ok ? null : billing.error ?? "ShardPay indisponível.",
+      billingStoreUrl: billing.storeUrl,
       guilds,
       health: health && health.status === "online" && Date.now() - health.at <= 90_000
         ? { status: "online" as const, guildCount: health.guildCount, lastSeenAt: health.at, pingMs: health.pingMs }
         : { status: "offline" as const, guildCount: health?.guildCount ?? 0, lastSeenAt: health?.at ?? null, pingMs: health?.pingMs ?? null },
+      security: {
+        sessionSecretConfigured: Boolean(sessionSecret()),
+        shardPayKeyConfigured: Boolean(process.env.SHARDPAY_API_KEY?.trim()),
+        discordClientSecretConfigured: Boolean(process.env.DISCORD_CLIENT_SECRET?.trim()),
+        ownerIdConfigured: Boolean(process.env.WUMPUS_OWNER_ID?.trim()),
+      },
     };
+  });
+
+export const grantAdminAccess = createServerFn({ method: "POST" })
+  .validator((input: unknown) => grantSchema.parse(input))
+  .handler(async ({ data }) => {
+    enforceRequestLimit("admin-grant-access", 20, 60_000);
+    const actor = await requireAdminSession(data.token);
+    const grant = await grantDashboardAccess({
+      actorId: actor.userId,
+      userId: data.userId,
+      username: data.username,
+      planId: data.planId,
+      durationDays: data.durationDays,
+      reason: data.reason,
+    });
+    privateResponse();
+    return { ok: true as const, expiresAt: grant.expiresAt };
+  });
+
+export const revokeAdminGrant = createServerFn({ method: "POST" })
+  .validator((input: unknown) => revokeGrantSchema.parse(input))
+  .handler(async ({ data }) => {
+    enforceRequestLimit("admin-revoke-grant", 30, 60_000);
+    const actor = await requireAdminSession(data.token);
+    await revokeDashboardGrant({ actorId: actor.userId, grantId: data.grantId });
+    privateResponse();
+    return { ok: true as const };
+  });
+
+export const manageAdminUser = createServerFn({ method: "POST" })
+  .validator((input: unknown) => userActionSchema.parse(input))
+  .handler(async ({ data }) => {
+    enforceRequestLimit("admin-user-manage", 30, 60_000);
+    const actor = await requireAdminSession(data.token);
+    await manageDashboardUser({
+      actorId: actor.userId,
+      userId: data.userId,
+      action: data.action,
+      ...(data.reason !== undefined ? { reason: data.reason } : {}),
+      ...(data.notes !== undefined ? { notes: data.notes } : {}),
+    });
+    privateResponse();
+    return { ok: true as const };
   });
 
 export const forceGuildResync = createServerFn({ method: "POST" })
   .validator((input: unknown) => resyncSchema.parse(input))
   .handler(async ({ data }) => {
-    await requireAdminSession(data.token);
+    enforceRequestLimit("admin-guild-resync", 20, 60_000);
+    const actor = await requireAdminSession(data.token);
     const [botGuildIds, runtime] = await Promise.all([loadBotGuildIds(), readRuntime()]);
     if (!botGuildIds.includes(data.guildId)) {
       throw new Error("O Wumpus não está instalado neste servidor.");
@@ -88,5 +201,12 @@ export const forceGuildResync = createServerFn({ method: "POST" })
       await enqueueOutbox(row);
       queued.push(row.id);
     }
+    await recordDashboardAdminEvent({
+      actorId: actor.userId,
+      action: "guild-resync",
+      targetId: data.guildId,
+      summary: `${queued.length} painel(is) enviados para republicação.`,
+    });
+    privateResponse();
     return { ok: true as const, queued };
   });

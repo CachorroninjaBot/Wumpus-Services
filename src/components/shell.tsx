@@ -24,6 +24,7 @@ import { SearchSelect } from "@/components/search-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { brand, groupLabels, navItems, type ModuleGroupId, type NavId } from "@/lib/wumpus/brand";
 import { SESSION_TOKEN_KEY } from "@/lib/wumpus/session-token";
+import { logoutDashboardSession } from "@/lib/wumpus/session";
 import { useWumpus } from "@/lib/wumpus/store";
 import { cn } from "@/lib/utils";
 import { ModuleAssistant } from "@/components/module-assistant";
@@ -193,7 +194,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <p className="m-0 truncate text-sm font-semibold">{user.globalName}</p>
               <p className="m-0 truncate text-xs text-muted-foreground">{user.username}</p>
             </div>
-            <a href="/" aria-label="Sair" title="Sair" onClick={(event) => { event.preventDefault(); localStorage.removeItem(SESSION_TOKEN_KEY); window.location.assign("/"); }} className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground">
+            <a href="/" aria-label="Sair" title="Sair" onClick={(event) => {
+              event.preventDefault();
+              void logoutDashboardSession({ data: {} }).catch(() => undefined).finally(() => {
+                localStorage.removeItem(SESSION_TOKEN_KEY);
+                localStorage.removeItem("wumpus-demo-v2");
+                window.location.assign("/");
+              });
+            }} className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground">
               <LogOut className="size-4" />
             </a>
           </div>

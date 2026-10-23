@@ -6,15 +6,9 @@
  * o campo `id` para o do dono e a checagem passava. Revalidar na leitura nao
  * resolve: o dado continua vindo do cliente.
  *
- * Aqui o servidor assina (HMAC-SHA256, via `jose`) um retrato do usuario. O
- * cliente pode GUARDAR o token, mas nao consegue alterar o conteudo sem
- * invalidar a assinatura. O `userId` dentro dele veio do Discord, nao do
- * navegador — entao `isPlatformOwner` passa a ser confiavel.
- *
- * LIMITE CONHECIDO: o token fica no localStorage, entao um XSS conseguiria
- * le-lo. Isso e diferente do problema aqui (usuario editando o proprio estado
- * para ganhar acesso) e a correcao e cookie `httpOnly`. Registrado como
- * proximo passo, nao escondido.
+ * O servidor assina (HMAC-SHA256, via `jose`) um retrato de curta duração do
+ * usuário vindo do Discord. A credencial trafega somente em cookie HttpOnly;
+ * o navegador não consegue lê-la nem escolher a identidade assinada.
  */
 import { SignJWT, jwtVerify } from "jose";
 
@@ -27,6 +21,7 @@ export type SessionGuild = {
 };
 
 export type SessionPayload = {
+  sessionId: string;
   userId: string;
   username: string;
   globalName: string;
@@ -38,36 +33,40 @@ export type SessionPayload = {
 const ALG = "HS256";
 const TTL = "7d";
 
-/**
- * Onde o token assinado fica guardado no navegador.
- *
- * Chave separada do estado do painel de proposito: assim limpar o estado (ou
- * um `resetDemo`) nao apaga a sessao por acidente.
- */
+/** Chave antiga removida durante a migração para cookie HttpOnly. */
 export const SESSION_TOKEN_KEY = "wumpus-session-token";
 export const SESSION_TOKEN_MAX_LENGTH = 16_384;
+const COOKIE_SESSION_MARKER = "cookie-session";
 
 export function getStoredSessionToken(): string {
   if (typeof window === "undefined") return "";
-  return window.localStorage.getItem(SESSION_TOKEN_KEY) ?? "";
+  try {
+    window.localStorage.removeItem(SESSION_TOKEN_KEY);
+  } catch {
+    // Storage pode estar bloqueado; o cookie HttpOnly continua sendo enviado.
+  }
+  // This marker is not an authentication credential. Server functions ignore
+  // the body value and validate the HttpOnly cookie from the request instead.
+  return COOKIE_SESSION_MARKER;
 }
 
 /**
  * Segredo do servidor.
  *
- * Cai para `DISCORD_CLIENT_SECRET` quando o dedicado nao existe: os dois sao
- * segredos so-do-servidor, e depender de configuracao nova faria o login
- * parar de funcionar em ambiente que ja roda hoje.
+ * Exige um segredo independente do OAuth do Discord. A chave precisa ter pelo
+ * menos 32 bytes para limitar o impacto de vazamentos e permitir rotação
+ * independente das credenciais do bot e do provedor.
  */
 export function sessionSecret(): Uint8Array | null {
-  const raw = (process.env.WUMPUS_SESSION_SECRET || process.env.DISCORD_CLIENT_SECRET || "").trim();
-  if (!raw) return null;
-  return new TextEncoder().encode(`wumpus-session-v1:${raw}`);
+  const raw = process.env.WUMPUS_SESSION_SECRET?.trim() ?? "";
+  if (new TextEncoder().encode(raw).byteLength < 32) return null;
+  return new TextEncoder().encode(raw);
 }
 
 export async function signSession(payload: SessionPayload, secret: Uint8Array): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: ALG })
+    .setJti(payload.sessionId)
     .setIssuedAt()
     .setExpirationTime(TTL)
     .sign(secret);
@@ -104,9 +103,11 @@ export async function verifySession(token: string, secret: Uint8Array): Promise<
     const { payload } = await jwtVerify(token, secret, { algorithms: [ALG] });
 
     const userId = text(payload.userId);
-    if (!userId) return null;
+    const sessionId = text(payload.jti);
+    if (!/^\d{17,20}$/.test(userId) || !/^[0-9a-f-]{36}$/i.test(sessionId)) return null;
 
     return {
+      sessionId,
       userId,
       username: text(payload.username),
       globalName: text(payload.globalName),

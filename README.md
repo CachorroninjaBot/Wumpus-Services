@@ -29,4 +29,21 @@ SHARDPAY_API_KEY=sua_chave npm run dev
 
 A chave nunca entra no repositório. Sem ela o painel mostra a vitrine salva dos quatro planos.
 
+## Sessões e administração
+
+O login da dashboard depende de `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`,
+`WUMPUS_OWNER_ID` e `WUMPUS_SESSION_SECRET`. Gere um segredo de sessão próprio
+para cada ambiente (`openssl rand -base64 48`) e configure-o no gerenciador de
+secrets do deploy. Ele precisa ter pelo menos 32 bytes e não deve ser igual à
+chave OAuth, token do bot ou chave ShardPay. A administração também exige MFA
+ativado na conta Discord do proprietário. As sessões ficam em cookie `HttpOnly`
+e podem ser revogadas na aba Segurança.
+
+As contas, sessões, auditoria e concessões manuais são salvas no arquivo definido por
+`WUMPUS_MEMBERS_PATH` (padrão `data/wumpus-dashboard-members.json`). O bot
+precisa ler o mesmo arquivo para aplicar concessões e revogações; o sync de
+licenças ocorre no ciclo do bot. Use volume persistente acessível pelos dois
+processos. Se a dashboard rodar em várias instâncias, migre esse estado para
+um banco de dados compartilhado para evitar gravações concorrentes no arquivo.
+
 Checkout público: https://shardpay.app/pt-br/store/hubexpress

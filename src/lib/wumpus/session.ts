@@ -16,19 +16,26 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { exchangeDiscordCodeDirect } from "@/lib/discord/oauth";
 import { loadBotGuildIds } from "./bot-guilds";
 import { configuredLifetimeSubscriptions, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
-import { loadBilling } from "./shardpay";
-import { isPlatformOwner } from "./owner";
-import { recordDashboardLogin } from "./admin-store.server";
-import { planAllows, type PlanFeature } from "./engine";
+import { loadBilling } from "./shardpay.server";
+import {
+  closeDashboardSession,
+  dashboardSessionIsUsable,
+  isDashboardAccountSuspended,
+  recordDashboardActivity,
+  recordDashboardLogin,
+} from "./admin-store.server";
 import { syncGuildEntitlements } from "./license-store.server";
+import { consumeOAuthStateCookie, clearDashboardSessionCookie, getDashboardSessionCookie, markPrivateResponse, setDashboardSessionCookie } from "./session-cookie.server";
+import { enforceRequestLimit } from "./request-limits.server";
+import { loadManualSubscriptionRows, verifySignedSession } from "./session-access.server";
 import {
   sessionSecret,
   signSession,
   verifySession,
-  SESSION_TOKEN_MAX_LENGTH,
   type SessionGuild,
   type SessionPayload,
 } from "./session-token";
@@ -45,8 +52,6 @@ export type AccessResult =
   | { ok: true; session: SessionUserView; guilds: SessionGuild[]; entitlements: Entitlements }
   | { ok: false; error: string };
 
-let guildAccessCache: { userId: string; guildIds: Set<string>; entitlements: Entitlements; expiresAt: number } | null = null;
-
 function subscriptionRows(billing: Awaited<ReturnType<typeof loadBilling>>): SubscriptionLite[] {
   return [...billing.subscriptions.map((sub) => ({
     status: sub.status,
@@ -58,15 +63,27 @@ function subscriptionRows(billing: Awaited<ReturnType<typeof loadBilling>>): Sub
 
 /** Entra com o `code` do Discord e devolve um token assinado. */
 export const startSession = createServerFn({ method: "POST" })
-  .validator((input: unknown) => z.object({ code: z.string().min(1).max(2048) }).strict().parse(input))
-  .handler(async ({ data }): Promise<{ ok: true; token: string } | { ok: false; error: string }> => {
+  .validator((input: unknown) => z.object({ code: z.string().min(1).max(2048), state: z.string().regex(/^[0-9a-f-]{36}$/i) }).strict().parse(input))
+  .handler(async ({ data }): Promise<{ ok: true } | { ok: false; error: string }> => {
+    enforceRequestLimit("discord-login", 10, 10 * 60_000);
+    if (!consumeOAuthStateCookie(data.state)) return { ok: false, error: "A validação do login expirou. Volte ao início e tente novamente." };
     const secret = sessionSecret();
-    if (!secret) return { ok: false, error: "Segredo de sessão ausente no servidor." };
+    if (!secret) return { ok: false, error: "A configuração segura de sessão está incompleta." };
 
-    const exchanged = await exchangeDiscordCodeDirect(data.code);
+    let exchanged: Awaited<ReturnType<typeof exchangeDiscordCodeDirect>>;
+    try {
+      exchanged = await exchangeDiscordCodeDirect(data.code);
+    } catch (error) {
+      console.error("Falha de rede durante autenticação Discord.", error);
+      return { ok: false, error: "Não foi possível concluir o login com o Discord. Tente novamente." };
+    }
     if (!exchanged.ok) return { ok: false, error: exchanged.error };
+    if (await isDashboardAccountSuspended(exchanged.user.id)) {
+      return { ok: false, error: "Esta conta está suspensa. Fale com o suporte da plataforma." };
+    }
 
     const payload: SessionPayload = {
+      sessionId: randomUUID(),
       userId: exchanged.user.id,
       username: exchanged.user.username,
       globalName: exchanged.user.globalName,
@@ -82,12 +99,15 @@ export const startSession = createServerFn({ method: "POST" })
 
     const token = await signSession(payload, secret);
     try {
-      await recordDashboardLogin({ id: payload.userId, username: payload.username });
+      await recordDashboardLogin({ id: payload.userId, username: payload.username }, payload.sessionId);
     } catch (error) {
-      console.error("Não foi possível persistir o cadastro do membro da dashboard.", error);
-      return { ok: false, error: "Login validado, mas não foi possível registrar o acesso no servidor." };
+      console.error("Não foi possível registrar a sessão autenticada.", error);
+      return { ok: false, error: error instanceof Error && error.message.includes("suspensa")
+        ? error.message
+        : "Não foi possível registrar a sessão com segurança. Tente novamente." };
     }
-    return { ok: true, token };
+    setDashboardSessionCookie(token);
+    return { ok: true };
   });
 
 /**
@@ -98,23 +118,31 @@ export const startSession = createServerFn({ method: "POST" })
  */
 export const resolveAccess = createServerFn({ method: "POST" })
   .validator((input: unknown) =>
-    z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH) }).strict().parse(input),
+    z.object({ token: z.string().max(64).optional() }).strict().parse(input),
   )
-  .handler(async ({ data }): Promise<AccessResult> => {
+  .handler(async (): Promise<AccessResult> => {
+    enforceRequestLimit("resolve-access", 60, 60_000);
+    markPrivateResponse();
     const secret = sessionSecret();
     if (!secret) return { ok: false, error: "Segredo de sessão ausente no servidor." };
 
-    const payload = await verifySession(data.token, secret);
+    const payload = await verifySession(getDashboardSessionCookie() ?? "", secret);
     if (!payload) return { ok: false, error: "Sessão inválida ou expirada. Entre de novo." };
+    if (!(await dashboardSessionIsUsable(payload.sessionId, payload.userId))) {
+      clearDashboardSessionCookie();
+      return { ok: false, error: "Sessão encerrada ou revogada. Entre novamente." };
+    }
+    await recordDashboardActivity(payload.sessionId);
 
     // Relido do servidor a cada chamada: bot que saiu e assinatura que venceu
     // deixam de valer sem depender de nada guardado no navegador.
-    const [botGuildIds, billing] = await Promise.all([
+    const [botGuildIds, billing, manualSubscriptions] = await Promise.all([
       loadBotGuildIds(),
       loadBilling(),
+      loadManualSubscriptionRows(),
     ]);
 
-    const subscriptions = subscriptionRows(billing);
+    const subscriptions = [...subscriptionRows(billing), ...manualSubscriptions];
 
     const entitlements = resolveEntitlements({
       discordUserId: payload.userId,
@@ -127,7 +155,7 @@ export const resolveAccess = createServerFn({ method: "POST" })
 
     // Se a ShardPay respondeu, publica a decisão atual para o processo do bot.
     // Em indisponibilidade temporária, preserva a última licença conhecida.
-    if (billing.ok || entitlements.isOwner || configuredLifetimeSubscriptions().some((sub) => sub.discordUserId === payload.userId)) {
+    if (billing.ok || entitlements.isOwner || manualSubscriptions.some((sub) => sub.discordUserId === payload.userId) || configuredLifetimeSubscriptions().some((sub) => sub.discordUserId === payload.userId)) {
       await syncGuildEntitlements({
         accountId: payload.userId,
         discordUsername: payload.username,
@@ -152,65 +180,23 @@ export const resolveAccess = createServerFn({ method: "POST" })
     };
   });
 
-export async function verifySignedSession(token: string): Promise<SessionPayload> {
-  const secret = sessionSecret();
-  if (!secret) throw new Error("Segredo de sessão ausente no servidor.");
-  const payload = await verifySession(token, secret);
-  if (!payload) throw new Error("Sessão inválida ou expirada. Entre de novo.");
-  return payload;
-}
+export const heartbeatDashboardSession = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({}).strict().parse(input))
+  .handler(async () => {
+    const payload = await verifySignedSession("");
+    await recordDashboardActivity(payload.sessionId);
+    return { ok: true as const };
+  });
 
-export async function requireAdminSession(token: string): Promise<SessionPayload> {
-  const payload = await verifySignedSession(token);
-  if (!isPlatformOwner(payload.userId)) throw new Error("Acesso restrito ao dono da plataforma.");
-  if (!payload.mfaEnabled) {
-    throw new Error("Ative a autenticação de dois fatores na conta Discord autorizada e entre novamente.");
-  }
-  return payload;
-}
-
-export async function requireGuildAccess(token: string, guildId: string): Promise<SessionPayload & { entitlements: Entitlements }> {
-  const payload = await verifySignedSession(token);
-  const ownsGuild = payload.guilds.some((guild) => guild.id === guildId && guild.owner);
-  if (!ownsGuild) throw new Error("Você não é proprietário deste servidor no Discord.");
-
-  if (!guildAccessCache || guildAccessCache.userId !== payload.userId || guildAccessCache.expiresAt < Date.now()) {
-    const [botGuildIds, billing] = await Promise.all([loadBotGuildIds(), loadBilling()]);
-    const subscriptions = subscriptionRows(billing);
-    const access = resolveEntitlements({
-      discordUserId: payload.userId,
-      discordUsername: payload.username,
-      ownedGuildIds: payload.guilds.filter((guild) => guild.owner).map((guild) => guild.id),
-      botGuildIds,
-      subscriptions,
-    });
-    guildAccessCache = { userId: payload.userId, guildIds: new Set(access.guildIds), entitlements: access, expiresAt: Date.now() + 30_000 };
-  }
-
-  if (!guildAccessCache.guildIds.has(guildId) && !isPlatformOwner(payload.userId)) {
-    throw new Error("Este servidor não está incluído na sua assinatura ou o Wumpus não está instalado.");
-  }
-  if (!guildAccessCache.guildIds.has(guildId)) {
-    throw new Error("O Wumpus não está instalado neste servidor.");
-  }
-  return { ...payload, entitlements: guildAccessCache.entitlements };
-}
-
-/** Valida a licença também para chamadas diretas, sem depender do bloqueio visual. */
-export async function requireGuildFeature(token: string, guildId: string, feature: PlanFeature): Promise<SessionPayload> {
-  const session = await requireGuildAccess(token, guildId);
-  const plan = session.entitlements.plan;
-  if (!plan || !planAllows(plan, feature)) {
-    const names: Record<PlanFeature, string> = {
-      forms: "formulários",
-      ai: "recursos de IA",
-      multiDepartment: "múltiplos departamentos",
-      antiNuke: "anti-nuke",
-      transcripts: "transcrições",
-      ocr: "OCR",
-      webhooks: "webhooks",
-    };
-    throw new Error(`Seu plano não inclui ${names[feature]}. Faça upgrade para continuar.`);
-  }
-  return session;
-}
+export const logoutDashboardSession = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({}).strict().parse(input))
+  .handler(async () => {
+    const raw = getDashboardSessionCookie();
+    const secret = sessionSecret();
+    if (raw && secret) {
+      const payload = await verifySession(raw, secret);
+      if (payload) await closeDashboardSession(payload.sessionId);
+    }
+    clearDashboardSessionCookie();
+    return { ok: true as const };
+  });

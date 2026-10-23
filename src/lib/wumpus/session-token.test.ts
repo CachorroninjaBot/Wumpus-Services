@@ -15,10 +15,11 @@ import {
   type SessionPayload,
 } from "./session-token.ts";
 
-const SECRET = new TextEncoder().encode("segredo-de-teste");
-const OUTRO = new TextEncoder().encode("segredo-diferente");
+const SECRET = new TextEncoder().encode("segredo-de-teste-com-pelo-menos-trinta-e-dois-bytes");
+const OUTRO = new TextEncoder().encode("outro-segredo-de-teste-com-pelo-menos-trinta-e-dois-bytes");
 
 const PAYLOAD: SessionPayload = {
+  sessionId: "94f7ff4c-97da-4e6b-b9dd-730645b56289",
   userId: "928871447940710480",
   username: "dono",
   globalName: "Dono",

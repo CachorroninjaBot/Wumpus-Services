@@ -29,6 +29,8 @@ export type SubscriptionLite = {
   planId: PlanId | null;
   discordUsername: string | null;
   discordUserId?: string | null;
+  /** Data final de uma concessão manual, quando houver. */
+  expiresAt?: number | null;
 };
 
 /** IDs de compradores Vitalício verificados manualmente no painel da loja. */
@@ -85,7 +87,8 @@ export function planForUser(
   username: string
 ): { plan: PlanId; status: string } | null {
   const active = subscriptions.filter(
-    (sub) => sub.planId && ENTITLED_STATUS.has(sub.status.toLowerCase()) && belongsTo(sub, userId, username)
+    (sub) => sub.planId && ENTITLED_STATUS.has(sub.status.toLowerCase()) &&
+      (sub.expiresAt == null || sub.expiresAt > Date.now()) && belongsTo(sub, userId, username)
   );
 
   if (!active.length) return null;

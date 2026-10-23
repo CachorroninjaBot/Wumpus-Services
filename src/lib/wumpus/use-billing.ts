@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { getBilling, type BillingSnapshot } from "./shardpay";
+import { getBilling, getMyBilling, type BillingSnapshot } from "./shardpay";
 
-export function useBilling() {
+export function useBilling(privateAccount = false) {
   const [data, setData] = useState<BillingSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
-    getBilling()
+    (privateAccount ? getMyBilling({ data: {} }) : getBilling())
       .then((snapshot) => {
         if (!alive) return;
         if (snapshot && typeof snapshot === "object" && Array.isArray(snapshot.plans)) setData(snapshot);
@@ -21,7 +21,7 @@ export function useBilling() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [privateAccount]);
 
   return { data, loading };
 }

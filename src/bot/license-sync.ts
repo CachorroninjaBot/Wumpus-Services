@@ -1,5 +1,6 @@
 import { planIdFromName, serverLimit, type PlanId } from "../lib/wumpus/catalog.ts";
 import { configuredLifetimeSubscriptions, planForUser, type SubscriptionLite } from "../lib/wumpus/entitlements.ts";
+import { listDashboardGrants } from "../lib/wumpus/admin-store.server.ts";
 import { isPlatformOwner } from "../lib/wumpus/owner.ts";
 import { mutateGuildLicenses, readGuildLicenses, type GuildLicense } from "../lib/wumpus/license-store.server.ts";
 import type { Logger } from "./logger.ts";
@@ -67,6 +68,16 @@ async function loadSubscriptions(): Promise<Subscription[] | null> {
   const payload = asObject(structured(result.json));
   if (!Array.isArray(payload?.subscriptions)) return null;
   const rows = payload.subscriptions;
+  const manualGrants = (await listDashboardGrants())
+    .filter((grant) => !grant.revokedAt && grant.expiresAt > Date.now())
+    .map((grant) => ({
+      status: "active",
+      planId: grant.planId,
+      discordUsername: grant.username,
+      discordUserId: grant.userId,
+      expiresAt: grant.expiresAt,
+      productName: `Acesso administrativo · ${grant.planId}`,
+    }));
   return [
     ...rows.flatMap((raw): Subscription[] => {
     const row = asObject(raw);
@@ -81,6 +92,7 @@ async function loadSubscriptions(): Promise<Subscription[] | null> {
       productName,
     }];
     }),
+    ...manualGrants,
     ...configuredLifetimeSubscriptions().map((sub) => ({ ...sub, productName: "Wumpus Vitalício" })),
   ];
 }

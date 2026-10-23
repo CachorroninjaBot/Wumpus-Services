@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireGuildFeature } from "./session";
+import { requireGuildFeature } from "./session-access.server";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
+import { enforceRequestLimit } from "./request-limits.server";
 
 const analyzeInputSchema = z.object({
   token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
@@ -35,7 +36,8 @@ const SYSTEM: Record<AnalyzeInput["kind"], string> = {
 export const analyzeWithGrok = createServerFn({ method: "POST" })
   .validator((input: unknown) => analyzeInputSchema.parse(input))
   .handler(async ({ data }) => {
-    await requireGuildFeature(data.token, data.guildId, "ai");
+    const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    enforceRequestLimit("ai-analysis", 20, 10 * 60_000, session.userId);
     const apiKey = process.env.WUMPUS_GROQ_API_KEY;
     if (!apiKey) {
       return { ok: false as const, error: "IA indisponível neste ambiente." };
