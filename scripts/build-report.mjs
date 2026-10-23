@@ -5,8 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const viteCli = join(root, "node_modules", "vite", "bin", "vite.js");
 
-console.log("[build] Gerando a dashboard…");
-const result = spawnSync(process.execPath, [viteCli, "build", "--logLevel", "warn"], {
+const result = spawnSync(process.execPath, [viteCli, "build", "--logLevel", "error"], {
   cwd: root,
   encoding: "utf8",
   timeout: 300_000,
@@ -15,11 +14,15 @@ const result = spawnSync(process.execPath, [viteCli, "build", "--logLevel", "war
 const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 
 if (result.error || result.status !== 0) {
-  if (output) console.error(output);
+  if (output) {
+    const lines = output.split(/\r?\n/);
+    const details = lines.slice(-30).join("\n");
+    console.error(details);
+    if (lines.length > 30) console.error("[build] Saída reduzida às últimas 30 linhas.");
+  }
   if (result.error) console.error(`[build] ${result.error.message}`);
   console.error("[build] Falhou. Veja os detalhes acima.");
   process.exit(result.status || 1);
 }
 
-if (output) console.log(output);
 console.log("[build] Dashboard pronta.");

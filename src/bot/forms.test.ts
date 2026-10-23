@@ -73,10 +73,10 @@ test("required false e respeitado", () => {
   assert.equal(fields[0]!.required, false);
 });
 
-test("maxLength e preso em 1..1000", () => {
+test("maxLength e preso em 1..4000", () => {
   const alto = parseFields({ fields: [{ label: "X", maxLength: 99999 }] });
   const baixo = parseFields({ fields: [{ label: "X", maxLength: -5 }] });
-  assert.equal(alto[0]!.maxLength, 1000);
+  assert.equal(alto[0]!.maxLength, 4000);
   assert.ok(baixo[0]!.maxLength >= 1);
 });
 

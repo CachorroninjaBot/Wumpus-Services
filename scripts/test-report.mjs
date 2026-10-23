@@ -70,8 +70,30 @@ const fail = Number(output.match(/(?:#|ℹ)\s*fail\s+(\d+)/)?.[1] ?? 0);
 if (result.status === 0) {
   console.log(`[testes] ${pass} aprovados.`);
 } else {
-  console.error(`[testes] ${fail} falharam (${pass} aprovados). Detalhes:`);
-  if (output) console.error(output);
+  console.error(`[testes] ${fail} falharam (${pass} aprovados).`);
+  const failureStart = output.lastIndexOf("✖ failing tests:");
+  const failureOutput = failureStart >= 0 ? output.slice(failureStart) : output;
+  const failures = [...failureOutput.matchAll(/test at ([^\r\n]+)\r?\n✖ ([^\r\n]+?) \([^)]+\)/g)];
+
+  for (const [index, match] of failures.entries()) {
+    if (index >= 5) break;
+    const blockStart = match.index ?? 0;
+    const next = failures[index + 1]?.index ?? failureOutput.length;
+    const block = failureOutput.slice(blockStart, next);
+    const mismatch = block.match(/^\s*([^\s]+)\s*!==\s*([^\s]+)\s*$/m);
+    const assertion = block.match(/AssertionError(?: \[[^\]]+\])?: ([^\r\n]+)/);
+    console.error(`[falha] ${match[1]} — ${match[2]}`);
+    if (mismatch) console.error(`[falha] Esperado ${mismatch[2]}; recebido ${mismatch[1]}.`);
+    else if (assertion) console.error(`[falha] ${assertion[1]}`);
+  }
+
+  if (!failures.length) {
+    const excerpt = failureOutput.split(/\r?\n/).filter(Boolean).slice(0, 10).join("\n");
+    if (excerpt) console.error(excerpt);
+  } else if (failures.length > 5) {
+    console.error(`[falha] Mais ${failures.length - 5} falha(s) omitida(s).`);
+  }
+
   console.error("[testes] O deploy segue; revise as falhas antes de publicar novas alterações.");
 }
 
