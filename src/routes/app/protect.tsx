@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowRight,
@@ -810,7 +810,8 @@ function ProtectPage() {
                 <ListField
                   id="blocked-terms"
                   label="Termos bloqueados"
-                  hint="Um termo por linha. Também são procurados no texto lido pelo OCR."
+                  hint="Digite um termo e pressione Enter. Também são procurados no texto lido pelo OCR."
+                  placeholder="Adicionar termo..."
                   value={asList(automod.config.blockedTerms)}
                   onChange={(blockedTerms) => updateConfig("automod", { blockedTerms })}
                 />
@@ -818,7 +819,8 @@ function ProtectPage() {
                   <ListField
                     id="blocked-domains"
                     label="Domínios bloqueados"
-                    hint="Ex.: golpe.example"
+                    hint="Pressione Enter para adicionar."
+                    placeholder="exemplo.com"
                     value={asList(automod.config.blockedDomains)}
                     onChange={(blockedDomains) => updateConfig("automod", { blockedDomains })}
                     disabled={!automod.enabled}
@@ -826,7 +828,8 @@ function ProtectPage() {
                   <ListField
                     id="allowed-domains"
                     label="Domínios liberados"
-                    hint="Usado quando o bloqueio de links está ligado."
+                    hint="Pressione Enter para adicionar. Usado quando o bloqueio de links está ligado."
+                    placeholder="exemplo.com"
                     value={asList(automod.config.allowedDomains)}
                     onChange={(allowedDomains) => updateConfig("automod", { allowedDomains })}
                     disabled={!automod.enabled}
@@ -1853,6 +1856,7 @@ function ListField({
   id,
   label,
   hint,
+  placeholder,
   value,
   onChange,
   disabled,
@@ -1860,30 +1864,109 @@ function ListField({
   id: string;
   label: string;
   hint: string;
+  placeholder?: string;
   value: string[];
   onChange: (value: string[]) => void;
   disabled?: boolean;
 }) {
-  const serialized = value.join("\n");
-  const [draft, setDraft] = useState(serialized);
-  useEffect(() => setDraft(serialized), [serialized]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState("");
+
+  function addItems(items: string[]) {
+    const next = [...value];
+    const seen = new Set(value.map((item) => item.trim().toLocaleLowerCase()));
+    for (const item of items) {
+      const trimmed = item.trim();
+      const normalized = trimmed.toLocaleLowerCase();
+      if (trimmed && !seen.has(normalized)) {
+        next.push(trimmed);
+        seen.add(normalized);
+      }
+    }
+    if (next.length !== value.length) onChange(next);
+  }
+
+  function commitDraft() {
+    if (!draft.trim()) return;
+    addItems(draft.split(/[\n,]/));
+    setDraft("");
+  }
+
+  function removeItem(itemToRemove: string) {
+    const index = value.indexOf(itemToRemove);
+    if (index < 0) return;
+    onChange(value.filter((_, itemIndex) => itemIndex !== index));
+  }
+
   return (
     <Field id={id} label={label} hint={hint}>
-      <Textarea
-        id={id}
-        rows={4}
-        value={draft}
-        disabled={disabled}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={() =>
-          onChange(
-            draft
-              .split(/[\n,]/)
-              .map((item) => item.trim())
-              .filter(Boolean),
-          )
-        }
-      />
+      <div
+        ref={rootRef}
+        role="group"
+        aria-label={label}
+        className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg border border-input bg-card px-2 py-1.5 transition-[box-shadow,border-color] duration-150 focus-within:ring-2 focus-within:ring-ring has-[:disabled]:opacity-50"
+      >
+        {value.map((item, index) => (
+          <span
+            key={`${item}-${index}`}
+            className="inline-flex min-h-7 max-w-full items-center gap-1 rounded-md bg-secondary px-2 text-xs font-medium text-secondary-foreground"
+          >
+            <span className="truncate">{item}</span>
+            <button
+              type="button"
+              aria-label={`Remover "${item}" de ${label}`}
+              title={`Remover ${item}`}
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => removeItem(item)}
+              className="grid size-4 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none"
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          </span>
+        ))}
+        <Input
+          id={id}
+          value={draft}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete="off"
+          className="h-8 min-w-28 flex-1 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
+          onChange={(event) => {
+            const entered = event.target.value;
+            if (entered.includes(",") || entered.includes("\n")) {
+              const parts = entered.split(/[\n,]/);
+              setDraft(parts.pop() ?? "");
+              addItems(parts);
+            } else {
+              setDraft(entered);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === "Enter" || event.key === ",") {
+              event.preventDefault();
+              commitDraft();
+            } else if (event.key === "Backspace" && !draft && value.length) {
+              removeItem(value[value.length - 1]!);
+            }
+          }}
+          onPaste={(event) => {
+            const pasted = event.clipboardData.getData("text");
+            if (!/[\n,]/.test(pasted)) return;
+            event.preventDefault();
+            const parts = pasted.split(/[\n,]/);
+            const trailing = parts.pop() ?? "";
+            addItems(parts);
+            setDraft((current) => `${current}${trailing}`);
+          }}
+          onBlur={(event) => {
+            const nextFocus = event.relatedTarget;
+            if (nextFocus instanceof Node && rootRef.current?.contains(nextFocus)) return;
+            commitDraft();
+          }}
+        />
+      </div>
     </Field>
   );
 }
