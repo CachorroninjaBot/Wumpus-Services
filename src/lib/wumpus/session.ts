@@ -23,7 +23,6 @@ import { configuredLifetimeSubscriptions, resolveEntitlements, type Entitlements
 import { loadBilling } from "./shardpay.server";
 import {
   closeDashboardSession,
-  dashboardSessionIsUsable,
   isDashboardAccountSuspended,
   recordDashboardActivity,
   recordDashboardLogin,
@@ -99,7 +98,7 @@ export const startSession = createServerFn({ method: "POST" })
 
     const token = await signSession(payload, secret);
     try {
-      await recordDashboardLogin({ id: payload.userId, username: payload.username }, payload.sessionId);
+      await recordDashboardLogin({ id: payload.userId, username: payload.username }, payload.sessionId, payload.guilds);
     } catch (error) {
       console.error("Não foi possível registrar a sessão autenticada.", error);
       return { ok: false, error: error instanceof Error && error.message.includes("suspensa")
@@ -126,13 +125,15 @@ export const resolveAccess = createServerFn({ method: "POST" })
     const secret = sessionSecret();
     if (!secret) return { ok: false, error: "Segredo de sessão ausente no servidor." };
 
-    const payload = await verifySession(getDashboardSessionCookie() ?? "", secret);
-    if (!payload) return { ok: false, error: "Sessão inválida ou expirada. Entre de novo." };
-    if (!(await dashboardSessionIsUsable(payload.sessionId, payload.userId))) {
-      clearDashboardSessionCookie();
-      return { ok: false, error: "Sessão encerrada ou revogada. Entre novamente." };
+    let payload: SessionPayload;
+    try {
+      payload = await verifySignedSession("");
+    } catch (error) {
+      if (error instanceof Error && /sessão inválida|encerrada ou revogada/i.test(error.message)) {
+        clearDashboardSessionCookie();
+      }
+      return { ok: false, error: error instanceof Error ? error.message : "Sessão inválida ou expirada. Entre de novo." };
     }
-    await recordDashboardActivity(payload.sessionId);
 
     // Relido do servidor a cada chamada: bot que saiu e assinatura que venceu
     // deixam de valer sem depender de nada guardado no navegador.

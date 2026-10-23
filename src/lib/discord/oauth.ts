@@ -83,7 +83,7 @@ export async function exchangeDiscordCodeDirect(code: string) {
     return { ok: false as const, error: "O Discord retornou uma identidade inválida." };
   }
 
-  const guildsRes = await fetch("https://discord.com/api/users/@me/guilds", {
+  const guildsRes = await fetch("https://discord.com/api/users/@me/guilds?limit=200", {
     headers: { Authorization: `Bearer ${token.access_token}` },
     signal: AbortSignal.timeout(10_000),
   });
@@ -111,7 +111,7 @@ export async function exchangeDiscordCodeDirect(code: string) {
       avatar: typeof me.avatar === "string" ? me.avatar : null,
       mfaEnabled: me.mfa_enabled === true,
     },
-    guilds: managed.slice(0, 25).map((guild) => ({
+    guilds: managed.map((guild) => ({
       id: guild.id,
       name: guild.name,
       owner: guild.owner,

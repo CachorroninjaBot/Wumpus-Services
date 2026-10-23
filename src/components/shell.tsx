@@ -159,13 +159,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <h1 className="mb-2 mt-6 text-2xl font-semibold">Vamos preparar seu servidor</h1>
           <p className="mb-6 mt-0 text-sm leading-6 text-muted-foreground">
             {isOwner
-              ? "Seu acesso de dono da plataforma está ativo. Para aparecer aqui, o Wumpus precisa estar em um servidor que sua conta administra. Se o bot já está em um, atualize a conexão com o Discord."
+              ? "Seu acesso de dono da plataforma está ativo. O Wumpus precisa estar online em um servidor que sua conta administra e enviar um heartbeat recente (até 90 segundos). Se ele já está online, confira se o bot e o painel compartilham o volume de saúde (WUMPUS_HEALTH_PATH); depois atualize a conexão com o Discord."
               : "Instale o Wumpus em um servidor que você administra e conecte seu plano para começar a configurar."}
           </p>
           <a href={brand.invite} target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
             Adicionar o Wumpus ao Discord
           </a>
-          {isOwner ? <Link to="/entrar" className="mt-4 block text-center text-sm font-medium text-primary hover:underline">Atualizar conexão com o Discord</Link> : null}
+          {isOwner ? <a href="/entrar?reconectar=1" className="mt-4 block text-center text-sm font-medium text-primary hover:underline">Atualizar conexão com o Discord</a> : null}
           {!isOwner ? <Link to="/" className="mt-4 block text-center text-sm text-muted-foreground hover:text-foreground">Ver planos e recursos</Link> : null}
         </section>
       </div>

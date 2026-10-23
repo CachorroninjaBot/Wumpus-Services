@@ -11,7 +11,6 @@ import { SignJWT } from "jose";
 import {
   signSession,
   verifySession,
-  SESSION_TOKEN_MAX_LENGTH,
   type SessionPayload,
 } from "./session-token.ts";
 
@@ -30,15 +29,15 @@ const PAYLOAD: SessionPayload = {
 
 /* ------------------------------------------------------------- caminho bom --- */
 
-test("assina e verifica de volta", async () => {
+test("assina a identidade e não inclui os servidores no cookie", async () => {
   const token = await signSession(PAYLOAD, SECRET);
   const back = await verifySession(token, SECRET);
 
   assert.equal(back?.userId, PAYLOAD.userId);
   assert.equal(back?.username, "dono");
   assert.equal(back?.mfaEnabled, true);
-  assert.equal(back?.guilds.length, 1);
-  assert.equal(back?.guilds[0]!.owner, true);
+  assert.deepEqual(back?.guilds, []);
+  assert.ok(token.length < 4096);
 });
 
 test("avatar ausente vira null", async () => {
@@ -51,8 +50,8 @@ test("sessão preserva MFA desativado como restrição administrativa", async ()
   assert.equal(back?.mfaEnabled, false);
 });
 
-test("token com a lista de servidores permitida cabe no limite dos endpoints", async () => {
-  const guilds = Array.from({ length: 25 }, (_, index) => ({
+test("cookie permanece pequeno mesmo para usuários com muitos servidores", async () => {
+  const guilds = Array.from({ length: 200 }, (_, index) => ({
     id: String(10000000000000000n + BigInt(index)),
     name: `Comunidade ${index} ${"nome-longo-".repeat(7)}`,
     iconUrl: `https://cdn.discordapp.com/icons/10000000000000000/${"a".repeat(32)}.gif?size=128`,
@@ -60,9 +59,8 @@ test("token com a lista de servidores permitida cabe no limite dos endpoints", a
   }));
   const token = await signSession({ ...PAYLOAD, guilds }, SECRET);
 
-  assert.ok(token.length > 4096);
-  assert.ok(token.length <= SESSION_TOKEN_MAX_LENGTH);
-  assert.equal((await verifySession(token, SECRET))?.guilds.length, 25);
+  assert.ok(token.length < 4096);
+  assert.deepEqual((await verifySession(token, SECRET))?.guilds, []);
 });
 
 /* --------------------------------------------------------------- ataques --- */

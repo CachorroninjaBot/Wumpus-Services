@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { PlanId } from "./catalog";
+import type { SessionGuild } from "./session-token";
 
 export type DashboardMemberRecord = {
   id: string;
@@ -19,6 +20,7 @@ export type DashboardSessionRecord = {
   id: string;
   userId: string;
   username: string;
+  guilds: SessionGuild[];
   startedAt: number;
   lastSeenAt: number;
   endedAt: number | null;
@@ -68,6 +70,12 @@ const sessionSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().regex(/^\d{17,20}$/),
   username: z.string().min(1).max(100),
+  guilds: z.array(z.object({
+    id: z.string().regex(/^\d{17,20}$/),
+    name: z.string().max(100),
+    iconUrl: z.string().max(300).nullable(),
+    owner: z.boolean(),
+  }).strict()).default([]),
   startedAt: z.number().finite(),
   lastSeenAt: z.number().finite(),
   endedAt: z.number().finite().nullable(),
@@ -174,9 +182,11 @@ function addEvent(state: DashboardAdminState, actorId: string, action: string, t
 export async function recordDashboardLogin(
   member: { id: string; username: string },
   sessionId: string,
+  guilds: SessionGuild[],
 ): Promise<void> {
   const safeMember = memberSchema.pick({ id: true, username: true }).parse(member);
   const safeSessionId = z.string().uuid().parse(sessionId);
+  const safeGuilds = sessionSchema.shape.guilds.parse(guilds);
   await mutateState((state) => {
     const now = Date.now();
     let previous = state.members.find((row) => row.id === safeMember.id);
@@ -200,6 +210,7 @@ export async function recordDashboardLogin(
       id: safeSessionId,
       userId: safeMember.id,
       username: safeMember.username,
+      guilds: safeGuilds,
       startedAt: now,
       lastSeenAt: now,
       endedAt: null,
@@ -207,6 +218,12 @@ export async function recordDashboardLogin(
     });
     state.sessions.length = Math.min(state.sessions.length, 5000);
   });
+}
+
+export async function getDashboardSessionGuilds(sessionId: string, userId: string): Promise<SessionGuild[] | null> {
+  const state = await readState();
+  const session = state.sessions.find((row) => row.id === sessionId && row.userId === userId);
+  return session ? structuredClone(session.guilds) : null;
 }
 
 export async function recordDashboardActivity(sessionId: string): Promise<void> {
@@ -233,6 +250,7 @@ export async function closeDashboardSession(sessionId: string, revoked = false):
     session.endedAt ??= now;
     if (revoked) session.revokedAt ??= now;
     session.lastSeenAt = Math.max(session.lastSeenAt, now);
+    session.guilds = [];
   });
 }
 
@@ -249,7 +267,10 @@ export async function dashboardSessionIsUsable(sessionId: string, userId: string
 
   await mutateState((current) => {
     const expired = current.sessions.find((row) => row.id === sessionId && row.userId === userId);
-    if (expired && !expired.endedAt) expired.endedAt = now;
+    if (expired && !expired.endedAt) {
+      expired.endedAt = now;
+      expired.guilds = [];
+    }
   });
   return false;
 }
@@ -290,6 +311,7 @@ export async function manageDashboardUser(input: {
         if (session.userId === data.userId && !session.endedAt) {
           session.endedAt = now;
           session.revokedAt = now;
+          session.guilds = [];
         }
       }
       addEvent(state, data.actorId, data.action, data.userId, `Conta suspensa. ${member.suspensionReason}`);
@@ -302,6 +324,7 @@ export async function manageDashboardUser(input: {
         if (session.userId === data.userId && !session.endedAt) {
           session.endedAt = now;
           session.revokedAt = now;
+          session.guilds = [];
         }
       }
       addEvent(state, data.actorId, data.action, data.userId, "Sessões ativas revogadas.");

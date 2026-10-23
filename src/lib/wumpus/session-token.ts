@@ -6,9 +6,10 @@
  * o campo `id` para o do dono e a checagem passava. Revalidar na leitura nao
  * resolve: o dado continua vindo do cliente.
  *
- * O servidor assina (HMAC-SHA256, via `jose`) um retrato temporário do
- * usuário vindo do Discord. A credencial trafega somente em cookie HttpOnly;
- * o navegador não consegue lê-la nem escolher a identidade assinada.
+ * O servidor assina (HMAC-SHA256, via `jose`) a identidade temporária do
+ * usuário. Os servidores autorizados ficam no armazenamento da sessão no
+ * servidor para que uma conta com muitos servidores não exceda o limite de
+ * tamanho de cookies. A credencial trafega somente em cookie HttpOnly.
  */
 import { SignJWT, jwtVerify } from "jose";
 
@@ -35,6 +36,7 @@ const TTL = "30d";
 
 /** Chave antiga removida durante a migração para cookie HttpOnly. */
 export const SESSION_TOKEN_KEY = "wumpus-session-token";
+/** Maximum accepted legacy marker length in server-function request schemas. */
 export const SESSION_TOKEN_MAX_LENGTH = 16_384;
 const COOKIE_SESSION_MARKER = "cookie-session";
 
@@ -64,7 +66,8 @@ export function sessionSecret(): Uint8Array | null {
 }
 
 export async function signSession(payload: SessionPayload, secret: Uint8Array): Promise<string> {
-  return new SignJWT({ ...payload })
+  const { guilds: _guilds, ...identity } = payload;
+  return new SignJWT(identity)
     .setProtectedHeader({ alg: ALG })
     .setJti(payload.sessionId)
     .setIssuedAt()

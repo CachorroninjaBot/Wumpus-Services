@@ -1,4 +1,4 @@
-import { dashboardSessionIsUsable, listDashboardGrants, recordDashboardActivity } from "./admin-store.server";
+import { dashboardSessionIsUsable, getDashboardSessionGuilds, listDashboardGrants, recordDashboardActivity } from "./admin-store.server";
 import { loadBotGuildIds } from "./bot-guilds";
 import { planAllows, type PlanFeature } from "./engine";
 import { configuredLifetimeSubscriptions, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
@@ -20,7 +20,8 @@ export async function verifySignedSession(_legacyToken: string): Promise<Session
     throw new Error("Sessão inválida, encerrada ou revogada. Entre novamente.");
   }
   await recordDashboardActivity(payload.sessionId);
-  return payload;
+  const guilds = await getDashboardSessionGuilds(payload.sessionId, payload.userId);
+  return guilds?.length ? { ...payload, guilds } : payload;
 }
 
 export async function requireAdminSession(token: string): Promise<SessionPayload> {
