@@ -577,19 +577,29 @@ export async function handleCommand(
 
     case "ticket": {
       if (!guild) return false;
+      await interaction.deferReply({ ephemeral: true });
       const panel = await buildTicketPanel(guild);
       const target = asSendable(interaction.channel);
-      if (target) await target.send(panel as never);
-      await interaction.reply({ content: "Painel de atendimento publicado.", ephemeral: true });
+      if (!target) {
+        await interaction.editReply("Não consegui publicar o painel neste canal. Escolha um canal de texto e tente novamente.");
+        return true;
+      }
+      await target.send(panel as never);
+      await interaction.editReply("Painel de atendimento publicado.");
       return true;
     }
 
     case "form": {
       if (!guild) return false;
+      await interaction.deferReply({ ephemeral: true });
       const panel = await buildFormPanel(guild);
       const target = asSendable(interaction.channel);
-      if (target) await target.send(panel as never);
-      await interaction.reply({ content: "Painel de candidaturas publicado.", ephemeral: true });
+      if (!target) {
+        await interaction.editReply("Não consegui publicar o painel neste canal. Escolha um canal de texto e tente novamente.");
+        return true;
+      }
+      await target.send(panel as never);
+      await interaction.editReply("Painel de candidaturas publicado.");
       return true;
     }
 

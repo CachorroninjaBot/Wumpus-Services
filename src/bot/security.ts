@@ -39,17 +39,18 @@ async function saveVerificationState(state: VerificationState | null, guildId: s
   });
 }
 
-export function verificationSetupFailure(error: unknown): string {
+export function isOnboardingReadabilityError(error: unknown): boolean {
   const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
   const message = String(error);
-  if (code === 350003 || /Onboarding channels must be readable by everyone/i.test(message)) {
-    return "O Discord não permite restringir um canal usado no Onboarding: ele precisa continuar visível para @everyone. Remova esse canal do Onboarding nas configurações do servidor ou escolha outro canal para a verificação e tente novamente.";
-  }
-  return `Não consegui aplicar todas as permissões: ${message.slice(0, 180)}`;
+  return code === 350003 || /Onboarding channels must be readable by everyone/i.test(message);
+}
+
+export function verificationSetupFailure(error: unknown): string {
+  return `Não consegui aplicar todas as permissões: ${String(error).slice(0, 180)}`;
 }
 
 /** Apply and persist a reversible @everyone gate before sending the verification panel. */
-export async function setupVerification(guild: Guild, channelId: string, roleId: string): Promise<{ ok: boolean; detail: string }> {
+export async function setupVerification(guild: Guild, channelId: string, roleId: string, log: Logger): Promise<{ ok: boolean; detail: string }> {
   const me = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
   const role = resolveRole(guild, roleId);
   const verificationChannel = resolveChannel(guild, channelId);
@@ -74,15 +75,27 @@ export async function setupVerification(guild: Guild, channelId: string, roleId:
   });
   const state: VerificationState = { guildId: guild.id, channelId: verificationChannel.id, roleId: role.id, active: false, snapshots, updatedAt: Date.now() };
   await saveVerificationState(state, guild.id);
+  let onboardingChannels = 0;
   try {
     for (const channel of channels) {
-      await channel.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: channel.id === channelId });
+      try {
+        await channel.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: channel.id === channelId });
+      } catch (error) {
+        if (!isOnboardingReadabilityError(error)) throw error;
+        onboardingChannels += 1;
+        log.warn("canal do onboarding mantido visível durante a verificação", { guildId: guild.id, channelId: channel.id });
+      }
       await channel.permissionOverwrites.edit(role, { ViewChannel: true });
     }
     state.active = true;
     state.updatedAt = Date.now();
     await saveVerificationState(state, guild.id);
-    return { ok: true, detail: "Acesso restrito e cargo verificado liberado nos canais." };
+    return {
+      ok: true,
+      detail: onboardingChannels
+        ? `Verificação ativada. ${onboardingChannels} canal(is) do Onboarding continuam visíveis para todos, conforme exigido pelo Discord.`
+        : "Acesso restrito e cargo verificado liberado nos canais.",
+    };
   } catch (error) {
     await restoreVerification(guild).catch(() => undefined);
     return { ok: false, detail: verificationSetupFailure(error) };
@@ -472,6 +485,10 @@ export async function gateNewChannel(channel: GuildBasedChannel, log: Logger): P
     await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { ViewChannel: false });
     await channel.permissionOverwrites.edit(state.roleId, { ViewChannel: true });
   } catch (error) {
+    if (isOnboardingReadabilityError(error)) {
+      log.warn("canal novo do onboarding mantido visível durante a verificação", { guildId: channel.guild.id, channelId: channel.id });
+      return;
+    }
     log.error("falha ao restringir canal novo durante verificação", { guildId: channel.guild.id, channelId: channel.id, error: String(error) });
   }
 }

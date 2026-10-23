@@ -776,6 +776,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   });
 
   client.on(Events.InteractionCreate, (interaction: Interaction) => {
+    const startedAt = Date.now();
     void (async () => {
       try {
         if (interaction.isChatInputCommand()) {
@@ -808,6 +809,18 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
           error: String(error)
         });
         await respond(interaction, "Algo falhou do meu lado. A equipe foi avisada pelo log.");
+      } finally {
+        const durationMs = Date.now() - startedAt;
+        if (durationMs >= 2_000) {
+          log.warn("interação lenta", {
+            guildId: interaction.guildId ?? "none",
+            type: interaction.type,
+            command: interaction.isChatInputCommand() ? interaction.commandName : undefined,
+            customId: "customId" in interaction ? interaction.customId : undefined,
+            durationMs,
+            gatewayPingMs: interaction.client.ws.ping >= 0 ? interaction.client.ws.ping : "unknown",
+          });
+        }
       }
     })();
   });

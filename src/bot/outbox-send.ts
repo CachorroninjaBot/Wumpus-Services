@@ -53,12 +53,12 @@ async function writeRuntimeFile(next: RuntimeFile): Promise<void> {
  * A config vem do runtime (o painel gravou la), nao de uma copia em memoria:
  * assim o bot publica exatamente o que o usuario acabou de salvar na tela.
  */
-async function publishPanel(guild: Guild, job: OutboxJob): Promise<
+async function publishPanel(guild: Guild, job: OutboxJob, log: Logger): Promise<
   { ok: true; channelId: string; messageId: string } | { ok: false; error: string }
 > {
   if (job.target === "security-verification") {
     if (!job.verificationRoleId) return { ok: false, error: "Selecione o cargo que será concedido após a verificação." };
-    const setup = await setupVerification(guild, job.channelRef, job.verificationRoleId);
+    const setup = await setupVerification(guild, job.channelRef, job.verificationRoleId, log);
     if (!setup.ok) return { ok: false, error: setup.detail };
     const channel = asSendable(resolveChannel(guild, job.channelRef));
     if (!channel) { await restoreVerification(guild); return { ok: false, error: "Canal de verificação indisponível para publicar." }; }
@@ -137,28 +137,50 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
   let outbox = runtime.outbox ?? [];
 
   for (const job of pending) {
-    if (job.kind === "ticket_action") {
-      const result = await processTicketAction(guild, job, log);
-      outbox = settleActionJob(outbox, job.id, result);
-      continue;
-    }
-    if (job.kind === "form_action") {
-      const result = await processFormAction(guild, job, log);
-      outbox = settleActionJob(outbox, job.id, result);
-      continue;
-    }
-    const result = await publishPanel(guild, job);
-    outbox = settleJob(outbox, job.id, result);
+    const startedAt = Date.now();
+    try {
+      if (job.kind === "ticket_action") {
+        const result = await processTicketAction(guild, job, log);
+        outbox = settleActionJob(outbox, job.id, result);
+        continue;
+      }
+      if (job.kind === "form_action") {
+        const result = await processFormAction(guild, job, log);
+        outbox = settleActionJob(outbox, job.id, result);
+        continue;
+      }
+      const result = await publishPanel(guild, job, log);
+      outbox = settleJob(outbox, job.id, result);
 
-    if (result.ok) {
-      log.info("painel publicado", {
-        guildId: guild.id,
-        target: job.target,
-        channelId: result.channelId,
-        channelRef: job.channelRef
-      });
-    } else {
-      log.warn("falha ao publicar painel", { guildId: guild.id, target: job.target, error: result.error });
+      if (result.ok) {
+        log.info("painel publicado", {
+          guildId: guild.id,
+          target: job.target,
+          channelId: result.channelId,
+          channelRef: job.channelRef,
+          queueWaitMs: Math.max(0, startedAt - job.createdAt),
+          executionMs: Date.now() - startedAt,
+        });
+      } else {
+        log.warn("falha ao publicar painel", {
+          guildId: guild.id,
+          target: job.target,
+          error: result.error,
+          queueWaitMs: Math.max(0, startedAt - job.createdAt),
+          executionMs: Date.now() - startedAt,
+        });
+      }
+    } finally {
+      if (job.kind !== "panel") {
+        log.info("ação da fila processada", {
+          guildId: guild.id,
+          target: job.target,
+          action: job.action ?? "none",
+          queueWaitMs: Math.max(0, startedAt - job.createdAt),
+          executionMs: Date.now() - startedAt,
+          status: outbox.find((entry) => entry.id === job.id)?.status ?? "queued",
+        });
+      }
     }
   }
 

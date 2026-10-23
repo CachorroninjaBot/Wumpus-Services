@@ -1,15 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pushPersistedSecurityWindow, readPersistedSecurityWindow, type SecurityWindowKind, verificationSetupFailure } from "./security.ts";
+import { isOnboardingReadabilityError, pushPersistedSecurityWindow, readPersistedSecurityWindow, type SecurityWindowKind, verificationSetupFailure } from "./security.ts";
 import { flushPersistedSecurityWindows, resetSecurityWindowCacheForTests } from "./security/windows.ts";
 import { mutate, resetStoreCacheForTests } from "./store.ts";
 
-test("erro de canal do onboarding explica como liberar a publicação", () => {
-  const detail = verificationSetupFailure({ code: 350003, message: "Onboarding channels must be readable by everyone" });
-  assert.match(detail, /Onboarding/);
-  assert.match(detail, /@everyone/);
-  assert.match(detail, /escolha outro canal/);
+test("canal do onboarding que o Discord exige manter público é reconhecido", () => {
+  assert.equal(isOnboardingReadabilityError({ code: 350003, message: "Onboarding channels must be readable by everyone" }), true);
+  assert.equal(isOnboardingReadabilityError(new Error("unrelated permission error")), false);
 });
 
 test("outros erros de permissão preservam o detalhe do Discord", () => {
