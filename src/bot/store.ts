@@ -20,6 +20,12 @@ const DIR = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
 const memory = new Map<string, unknown[]>();
 const queues = new Map<string, Promise<unknown>>();
 
+/** Clear the in-process cache when tests simulate a fresh bot process. */
+export function resetStoreCacheForTests(name?: string): void {
+  if (name) memory.delete(name);
+  else memory.clear();
+}
+
 function fileFor(name: string): string {
   return join(DIR, `${name}.json`);
 }

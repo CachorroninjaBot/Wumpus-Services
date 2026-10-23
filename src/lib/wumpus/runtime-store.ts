@@ -79,8 +79,9 @@ export const requestPanelPublish = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({
     token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
     guildId: z.string().regex(/^\d{17,20}$/),
-    target: z.enum(["tickets", "forms"]),
+    target: z.enum(["tickets", "forms", "security-verification"]),
     channelRef: z.string().trim().min(1).max(100),
+    verificationRoleId: z.string().regex(/^\d{17,20}$/).optional(),
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
@@ -90,10 +91,29 @@ export const requestPanelPublish = createServerFn({ method: "POST" })
       kind: "panel",
       target: data.target,
       channelRef: data.channelRef,
+      ...(data.verificationRoleId ? { verificationRoleId: data.verificationRoleId } : {}),
       createdAt: Date.now(),
       status: "queued"
     };
 
+    await enqueueOutbox(job);
+    return { ok: true as const, jobId: job.id };
+  });
+
+export const requestSecurityRestore = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/) }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const job: OutboxJob = { id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, guildId: data.guildId, kind: "ticket_action", target: "security-verification", channelRef: "", action: "security_restore", createdAt: Date.now(), status: "queued" };
+    await enqueueOutbox(job);
+    return { ok: true as const, jobId: job.id };
+  });
+
+export const requestSecurityLockdown = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/), enabled: z.boolean() }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const job: OutboxJob = { id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, guildId: data.guildId, kind: "ticket_action", target: "security", channelRef: "", action: data.enabled ? "security_lockdown_on" : "security_lockdown_off", createdAt: Date.now(), status: "queued" };
     await enqueueOutbox(job);
     return { ok: true as const, jobId: job.id };
   });

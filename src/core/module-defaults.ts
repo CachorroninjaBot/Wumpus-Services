@@ -139,7 +139,15 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     whitelistRoleIds: [],
     alertOnMassBan: true,
     alertOnMassChannelDelete: true,
-    lockdownMessage: "O servidor está em modo de proteção. Aguarde a equipe resolver."
+    lockdownMessage: "O servidor está em modo de proteção. Aguarde a equipe resolver.",
+    autoResponseConfirmed: false,
+    verificationChannelId: "",
+    verifiedRoleId: "",
+    verificationEnabled: false,
+    alertOnMassRoleDelete: true,
+    alertOnMassWebhookCreate: true,
+    alertOnMassInviteCreate: true,
+    alertOnEveryoneMentions: true
   },
   logs: {
     channelId: "",

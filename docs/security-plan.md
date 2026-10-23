@@ -9,7 +9,7 @@
 Impedir raid e nuke de verdade, com resposta automática e alerta visível para a
 equipe. Não só detectar e logar.
 
-## 🔴 Bug crítico encontrado ao escrever este plano
+## Problema identificado no levantamento inicial
 
 `src/bot/security.ts`, linhas 17-18:
 
@@ -18,7 +18,7 @@ const raidWindows = new Map<string, { at: number }[]>();
 const nukeWindows = new Map<string, { at: number; actorId: string }[]>();
 ```
 
-**Nunca são persistidos.** Vivem só na memória do processo.
+As janelas iniciais viviam só na memória do processo.
 
 E o cabeçalho do mesmo arquivo afirma o contrário:
 
@@ -26,8 +26,7 @@ E o cabeçalho do mesmo arquivo afirma o contrário:
 > a contagem, e uma raid em andamento passava despercebida logo depois de um
 > deploy. Aqui a janela de entradas e persistida."*
 
-O comentário descreve uma correção **que não foi feita**. O código é exatamente o
-que ele diz ter substituído.
+O comentário descrevia uma correção que ainda não estava feita.
 
 **Por que isso importa muito:** o bot reinicia a cada deploy — e nesta sessão ele
 reiniciou dezenas de vezes. Uma raid em andamento **desaparece** no restart: a
@@ -37,100 +36,78 @@ pode *induzir* o restart.
 **Correção:** mover as janelas para o mesmo `store.ts` que já persiste auditoria e
 estatísticas (`mutate`/`nextId`). É o mesmo padrão de `data/audit.json`.
 
-## Estado atual (verificado)
+## Implementação concluída (2026-10-22)
 
-`security.ts` já tem:
+O módulo já tinha:
 
 - `handleMemberAdd` — janela de entradas, raid, idade mínima de conta, quarentena
 - `handleAuditLogEntry` — anti-nuke via audit log (bans e canais apagados)
 - `evaluateRaid` / `evaluateNuke` no engine (puros, testáveis)
 - Lockdown com mensagem configurável
 
-Config em `moduleDefaults.security`: `alertChannelId`, `alertStaffRoleIds`,
-`response`, `raidMode`, `raidJoinThreshold`, `raidWindowSeconds`,
-`minAccountAgeHours`, `quarantineNewMembers`, `nukeActionThreshold`,
-`nukeWindowSeconds`, `timeoutMinutes`, `trustedRoleIds`, `lockdownMessage`,
-`lockdown`.
+### A. Janelas persistidas
 
-Base sólida. O que falta é **persistência** e **resposta**.
+- `src/bot/security/windows.ts` persiste janelas por servidor e tipo em `store.ts`.
+- Leituras removem entradas fora do TTL; escritas repetidas são agrupadas para
+  manter no máximo uma gravação por segundo por janela.
+- Testes simulam reinício limpando os caches e validam contagem e expiração.
 
-## O que construir
+### B. Verificação de membro
 
-### A. Persistir as janelas (crítico — fazer primeiro)
-
-Sem isso, todo o resto é frágil. Guardar em `store.ts` com TTL, podando na
-leitura. A janela é curta (30-60s), então o custo é baixo.
-
-Cuidado: `store.ts` grava em disco. Uma janela de raid com entradas a cada
-milissegundo poderia gerar escrita demais. **Agrupar**: gravar no máximo 1×/s.
-
-### B. Verificação de membro (GameSafer faz, nós não)
-
-O fluxo do GS Defender: membro novo cai num estado sem acesso, prova que é
-humano (botão/captcha), ganha o cargo.
-
-Já temos `quarantineNewMembers` + `timeoutMinutes`, que é metade disso. Falta:
-
-1. Canal de verificação com painel e botão
-2. Cargo "verificado" concedido ao clicar
-3. Sem o cargo, o membro não vê os outros canais (permissão `@everyone` deny)
-
-O item 3 é o que dá a proteção real — hoje o membro em quarentena ainda lê tudo.
+- O painel pode ser publicado no canal escolhido junto com a restrição de
+  `ViewChannel` para `@everyone` e a liberação para o cargo verificado.
+- O bot salva os overwrites anteriores e oferece restauração; se aplicação ou
+  publicação falhar, tenta reverter as alterações.
+- Botão de verificação concede o cargo; canais criados enquanto o recurso está
+  ativo recebem a mesma regra.
+- Requer `Gerenciar canais`, `Gerenciar cargos` e cargo do bot acima do cargo
+  verificado. A ativação é explícita pelo dashboard.
 
 ### C. Resposta proporcional
 
-`response: "lockdown_review"` é a única opção. Precisa de níveis:
+- `alert` somente alerta; `lockdown_review` restringe envio e alerta; `auto`
+  aplica timeout no membro que entrou durante a detecção.
+- Resposta automática e banimento automático anti-nuke exigem confirmação
+  explícita no dashboard. Sucessos e falhas são auditados.
+- Lockdown salva e restaura os overwrites anteriores de `SendMessages`.
 
-| Modo | Comportamento |
-|---|---|
-| `alert` | só avisa a equipe |
-| `lockdown_review` | fecha o servidor e avisa (atual) |
-| `auto` | age sozinho: timeout/kick em quem entra durante a raid |
+### D. Anti-nuke
 
-`auto` é arriscado. Se entrar, exigir confirmação explícita no painel e registrar
-cada ação automática na auditoria.
-
-### D. Anti-nuke mais amplo
-
-Hoje vigia bans e canais apagados. O padrão de conta comprometida inclui:
-- cargos apagados em massa
-- webhooks criados em massa (exfiltração)
-- convites criados em massa
-- `@everyone` com menção repetida
+Além de banimentos e exclusões de canais, o audit log monitora exclusões de
+cargos, criação de webhooks e criação de convites em massa. Menções repetidas
+de `@everyone` também são contadas por autor. Os sinais respeitam cargos de
+confiança e opções de configuração.
 
 ### E. Alertas acionáveis
 
-O alerta precisa dizer **o que fazer**. Um embed com "RAID DETECTADA" e nada mais
-é inútil às 3h da manhã.
+Alertas de raid incluem membros recentes e idade das contas, com ações para
+ativar lockdown, banir até 10 membros recentes elegíveis e ignorar/revisar o
+alerta. Alertas anti-nuke também oferecem lockdown e revisão. Ações de banimento
+manual verificam cargo de confiança, bots, o próprio operador e hierarquia do
+bot, registrando cada sucesso.
 
-Incluir: quem está entrando, há quanto tempo a conta existe, e **botões** —
-"Ativar lockdown", "Banir os últimos N", "Ignorar".
+## Checklist
 
-## Arquitetura sugerida
+- [x] Janelas persistidas com TTL e gravação agrupada.
+- [x] Verificação, concessão de cargo, rollback e restauração de permissões.
+- [x] Respostas proporcionais com confirmação e auditoria.
+- [x] Gatilhos anti-nuke ampliados e configuráveis.
+- [x] Alertas acionáveis com ações moderadas por permissões.
 
-```
-src/bot/security/
-├── index.ts        # handlers (o que já existe)
-├── windows.ts      # janelas persistidas (NOVO — crítico)
-├── verify.ts       # fluxo de verificação
-├── respond.ts      # níveis de resposta
-└── rules.ts        # padrões de nuke (puro, testável)
-```
+## Verificação executada
 
-## Como testar
-
-1. Testar `evaluateRaid`/`evaluateNuke` com fixtures (já existem testes)
-2. Testar a **persistência**: gravar janela, recriar o módulo, ler de volta
-3. Testar que a janela expira
-4. **Humano no Discord**: entrar com conta nova, ver se é barrado
-5. Testar restart: `npm run start`, derrubar, subir — a janela sobrevive?
+- `npm run typecheck` passou.
+- `npm test` passou: 142 testes, incluindo persistência/reload e expiração.
+- O teste manual no Discord permanece pendente porque depende de um servidor
+  conectado e permissões reais; o fluxo tem preflight e rollback para essa
+  validação.
 
 ## Armadilhas
 
 - **Edição duplicada derruba o build.** Rodar varredura antes de cada build.
 - Ação automática em membro errado é o pior bug possível neste módulo. Preferir
   alertar a agir quando houver dúvida.
-- `member.timeout()` falha em silêncio se o bot não tiver cargo acima do alvo.
-  Registrar a falha, não engolir.
+- Falhas em `member.timeout()` são registradas e auditadas, com orientação para
+  conferir hierarquia e permissões.
 - O bot precisa de **Ban Members**, **Manage Roles**, **View Audit Log** e
   **Moderate Members**.

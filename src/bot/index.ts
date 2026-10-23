@@ -11,6 +11,9 @@
  */
 import {
   ActionRowBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   Client,
   AuditLogEvent,
   Events,
@@ -49,7 +52,7 @@ import {
   reopenClosedTicket,
   setTicketPriority
 } from "./tickets.ts";
-import { handleAuditLogEntry, handleMemberAdd } from "./security.ts";
+import { clearPersistedSecurityWindow, gateNewChannel, handleAuditLogEntry, handleMassMention, handleMemberAdd, grantVerifiedRole, isVerificationActive, readPersistedSecurityWindow, setLockdown } from "./security.ts";
 import { processOutbox } from "./outbox-send.ts";
 import { writeBotHealth } from "../lib/wumpus/health.server.ts";
 
@@ -287,6 +290,39 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   const { kind, action, args } = parsed;
 
+  if (kind === "security") {
+    if (action === "verify") {
+      await interaction.deferReply({ ephemeral: true });
+      const result = await grantVerifiedRole(guild, interaction.user.id, log);
+      await interaction.editReply(result.detail);
+      return;
+    }
+    if (!interaction.memberPermissions?.has("ManageGuild")) {
+      await interaction.reply({ content: "Você precisa de Gerenciar servidor para usar essa ação.", ephemeral: true });
+      return;
+    }
+    if (action === "lockdown") {
+      await interaction.deferReply({ ephemeral: true });
+      const count = await setLockdown(guild, true, log);
+      await interaction.editReply(`Lockdown ativado em ${count} canais.`);
+      return;
+    }
+    if (action === "ignore") {
+      const windowKind = (args[0] ?? "raid-alert") as "raid-alert" | "nuke-cooldown";
+      await clearPersistedSecurityWindow(guild.id, windowKind);
+      await auditAndLog(guild, { module: "security", category: "automod", eventType: "security_alert_ignored", actorId: interaction.user.id, severity: "info", title: "ALERTA DE SEGURANÇA REVISADO", description: `<@${interaction.user.id}> marcou o alerta como revisado.` }, log);
+      await interaction.reply({ content: "Alerta marcado como revisado. A próxima detecção poderá gerar novo alerta.", ephemeral: true });
+      return;
+    }
+    if (action === "ban_recent") {
+      const modal = new ModalBuilder().setCustomId(id("security", "ban_confirm")).setTitle("Banir membros recentes");
+      const count = new TextInputBuilder().setCustomId("count").setLabel("Quantidade (1 a 10)").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2).setPlaceholder("5");
+      modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(count));
+      await interaction.showModal(modal);
+      return;
+    }
+  }
+
   if (kind === "ticket" && action === "open") {
     await promptDepartment(interaction, log);
     return;
@@ -396,6 +432,29 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
   const parsed = parseId(interaction.customId);
   if (!parsed) return;
 
+  if (parsed.kind === "security" && parsed.action === "ban_confirm" && interaction.guild) {
+    if (!interaction.memberPermissions?.has("ManageGuild")) { await interaction.reply({ content: "Você precisa de Gerenciar servidor para usar essa ação.", ephemeral: true }); return; }
+    const requested = Number(interaction.fields.getTextInputValue("count"));
+    if (!Number.isInteger(requested) || requested < 1 || requested > 10) { await interaction.reply({ content: "Informe uma quantidade entre 1 e 10.", ephemeral: true }); return; }
+    await interaction.deferReply({ ephemeral: true });
+    const config = await moduleConfig(interaction.guild.id, "security");
+    const trusted = new Set([...list(config, "trustedRoleIds"), ...list(config, "whitelistRoleIds")]);
+    const windowMs = Math.max(5, Number(config?.raidWindowSeconds ?? 60)) * 1000;
+    const entries = await readPersistedSecurityWindow(interaction.guild.id, "raid", windowMs);
+    const ids = [...new Set(entries.slice().reverse().map((entry) => entry.actorId).filter((value): value is string => Boolean(value)))].slice(0, requested);
+    let banned = 0;
+    for (const userId of ids) {
+      const member = await interaction.guild.members.fetch(userId).catch(() => null);
+      if (!member || member.id === interaction.user.id || member.user.bot || member.roles.cache.some((role) => trusted.has(role.id)) || !member.bannable) continue;
+      await member.ban({ reason: `ação manual de resposta ao alerta anti-raid por ${interaction.user.tag}` }).then(async () => {
+        banned++;
+        await auditAndLog(interaction.guild!, { module: "security", category: "bans", eventType: "security_recent_member_ban", actorId: interaction.user.id, targetId: member.id, severity: "critical", title: "BAN MANUAL APÓS ALERTA DE RAID", description: `<@${member.id}> banido por <@${interaction.user.id}>.` }, log);
+      }).catch((error) => log.warn("falha ao banir membro recente", { guildId: interaction.guildId, userId, error: String(error) }));
+    }
+    await interaction.editReply(`Banidos ${banned} de ${ids.length} membros recentes elegíveis. Membros protegidos ou acima do cargo do bot foram ignorados.`);
+    return;
+  }
+
   const guild = interaction.guild;
   if (!guild) return;
 
@@ -446,19 +505,20 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   });
 
   client.on(Events.GuildMemberAdd, (member) => {
-    void handleMemberAdd(member, log).catch((error) =>
-      log.error("falha no anti-raid", { error: String(error) })
-    );
-    // Cargo padrao: o campo existe no painel desde o inicio e nunca aplicava.
-    void applyDefaultRole(member, log).catch((error) =>
-      log.error("falha ao aplicar cargo padrao", { error: String(error) })
-    );
+    void handleMemberAdd(member, log).then(async () => {
+      // Não atribuir cargos padrão que possam contornar a barreira de verificação.
+      if (!(await isVerificationActive(member.guild.id))) await applyDefaultRole(member, log);
+    }).catch((error) => log.error("falha no fluxo de entrada de membro", { error: String(error) }));
     void bump(member.guild.id, "joins").catch(() => undefined);
   });
 
   client.on(Events.GuildMemberRemove, (member) => {
     void removeManagedRolesOnLeave(member.guild, member, log).catch(() => undefined);
     void bump(member.guild.id, "leaves").catch(() => undefined);
+  });
+
+  client.on(Events.ChannelCreate, (channel) => {
+    void gateNewChannel(channel, log).catch((error) => log.error("falha ao restringir canal novo", { channelId: channel.id, error: String(error) }));
   });
 
   client.on(Events.MessageCreate, (message: Message) => {
@@ -468,6 +528,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     void handleMessage(message, log).catch((error) =>
       log.error("falha no automod", { error: String(error) })
     );
+    void handleMassMention(message, log).catch((error) => log.error("falha no detector de menções em massa", { error: String(error) }));
     void handleImageContent(message, log).catch((error) =>
       log.error("falha no automod de imagem", { error: String(error) })
     );

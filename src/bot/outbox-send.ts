@@ -15,6 +15,8 @@ import { buildTicketPanel, claimTicket, closeTicket, sendTicketReply, setTicketP
 import { asSendable, resolveChannel } from "./resolve.ts";
 import type { Logger } from "./logger.ts";
 import type { OutboxJob, RuntimeFile } from "../lib/wumpus/runtime.server.ts";
+import { setupVerification, restoreVerification, setLockdown } from "./security.ts";
+import { id } from "./ids.ts";
 
 function runtimePath(): string {
   return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
@@ -53,6 +55,18 @@ async function writeRuntimeFile(next: RuntimeFile): Promise<void> {
 async function publishPanel(guild: Guild, job: OutboxJob): Promise<
   { ok: true; channelId: string; messageId: string } | { ok: false; error: string }
 > {
+  if (job.target === "security-verification") {
+    if (!job.verificationRoleId) return { ok: false, error: "Selecione o cargo que será concedido após a verificação." };
+    const setup = await setupVerification(guild, job.channelRef, job.verificationRoleId);
+    if (!setup.ok) return { ok: false, error: setup.detail };
+    const channel = asSendable(resolveChannel(guild, job.channelRef));
+    if (!channel) { await restoreVerification(guild); return { ok: false, error: "Canal de verificação indisponível para publicar." }; }
+    try {
+      const panel = buildPanelPayload({ title: "Verificação de membro", description: "Clique no botão para receber acesso ao servidor.", buttons: [{ label: "Estou pronto", customId: id("security", "verify"), style: 3 }] });
+      const message = await channel.send({ flags: panel.flags, components: panel.components } as never);
+      return { ok: true, channelId: message.channelId, messageId: message.id };
+    } catch (error) { await restoreVerification(guild); return { ok: false, error: `Falha ao publicar painel; permissões anteriores restauradas: ${String(error).slice(0, 180)}` }; }
+  }
   const runtime = await readRuntimeFile();
   const config = runtime.guilds[guild.id]?.[job.target as keyof typeof runtime.guilds[string]] as
     | Record<string, unknown>
@@ -137,6 +151,8 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
 }
 
 async function processTicketAction(guild: Guild, job: OutboxJob, log: Logger): Promise<{ ok: boolean; detail: string }> {
+  if (job.action === "security_restore") return restoreVerification(guild);
+  if (job.action === "security_lockdown_on" || job.action === "security_lockdown_off") return { ok: true, detail: `Lockdown aplicado em ${await setLockdown(guild, job.action === "security_lockdown_on", log)} canais.` };
   if (!job.action || !job.ticketId || !job.actorId) return { ok: false, detail: "Pedido de atendimento incompleto." };
   if (job.action === "claim") {
     const result = await claimTicket(guild, job.ticketId, job.actorId, log);

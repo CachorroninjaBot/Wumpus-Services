@@ -10,6 +10,8 @@ import { presets, type PresetId } from "@/lib/wumpus/defaults";
 import { asList, asString } from "@/lib/wumpus/engine";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
+import { getStoredSessionToken } from "@/lib/wumpus/session-token";
+import { requestPanelPublish, requestSecurityLockdown, requestSecurityRestore } from "@/lib/wumpus/runtime-store";
 
 export const Route = createFileRoute("/app/protect")({ component: ProtectPage });
 
@@ -21,7 +23,6 @@ function ProtectPage() {
   const updateConfig = useWumpus((s) => s.updateConfig);
   const applyPreset = useWumpus((s) => s.applyPreset);
   const testAutomod = useWumpus((s) => s.testAutomod);
-  const toggleLockdown = useWumpus((s) => s.toggleLockdown);
   const closeIncident = useWumpus((s) => s.closeIncident);
   const simulateRaid = useWumpus((s) => s.simulateRaid);
   const simulateNuke = useWumpus((s) => s.simulateNuke);
@@ -37,6 +38,9 @@ function ProtectPage() {
   const [joins, setJoins] = useState(14);
   const [nukes, setNukes] = useState(6);
   const [raidNote, setRaidNote] = useState<string | null>(null);
+  const [securityActionNote, setSecurityActionNote] = useState<string | null>(null);
+  const [verificationChannelId, setVerificationChannelId] = useState(asString(security.config.verificationChannelId));
+  const [verifiedRoleId, setVerifiedRoleId] = useState(asString(security.config.verifiedRoleId));
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4">
@@ -201,7 +205,7 @@ function ProtectPage() {
           <Card className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="m-0 text-base font-semibold">Anti-raid</h2>
-              {Boolean(security.config.lockdown) ? <Badge tone="danger">lockdown</Badge> : <Badge tone="ok">normal</Badge>}
+              {security.config.lockdown ? <Badge tone="danger">lockdown</Badge> : <Badge tone="ok">normal</Badge>}
             </div>
             <Field label="Modo">
               <NativeSelect
@@ -213,6 +217,20 @@ function ProtectPage() {
                 <option value="passive">Passivo</option>
               </NativeSelect>
             </Field>
+            <Field label="Resposta a uma raid">
+              <NativeSelect value={asString(security.config.response, "lockdown_review")} onChange={(e) => updateConfig("security", { response: e.target.value })}>
+                <option value="alert">Só alertar</option>
+                <option value="lockdown_review">Lockdown e revisão</option>
+                <option value="auto">Timeout automático</option>
+              </NativeSelect>
+            </Field>
+            {asString(security.config.response) === "auto" ? (
+              <Toggle label="Confirmo que o modo automático pode aplicar timeouts" checked={Boolean(security.config.autoResponseConfirmed)} onChange={(v) => updateConfig("security", { autoResponseConfirmed: v })} />
+            ) : null}
+            <Toggle label="Banir automaticamente autores de ações destrutivas em massa" checked={Boolean(security.config.autoBanRepeatOffenders)} onChange={(v) => updateConfig("security", { autoBanRepeatOffenders: v })} />
+            {security.config.autoBanRepeatOffenders ? (
+              <Toggle label="Confirmo banimentos automáticos após detecção anti-nuke" checked={Boolean(security.config.autoResponseConfirmed)} onChange={(v) => updateConfig("security", { autoResponseConfirmed: v })} />
+            ) : null}
             <Field label="Entradas para raid">
               <Input
                 type="number"
@@ -232,13 +250,46 @@ function ProtectPage() {
               checked={Boolean(security.config.quarantineNewMembers)}
               onChange={(v) => updateConfig("security", { quarantineNewMembers: v })}
             />
+            <h3 className="mb-0 mt-4 text-sm font-semibold">Verificação de membros</h3>
+            <p className="m-0 text-xs text-muted-foreground">Restringe a visualização dos canais a @everyone e libera o cargo selecionado após o clique no painel. As permissões atuais são salvas para restauração.</p>
+            <Field label="ID do canal de verificação">
+              <Input value={verificationChannelId} onChange={(e) => setVerificationChannelId(e.target.value)} onBlur={() => updateConfig("security", { verificationChannelId })} placeholder="ID do canal" />
+            </Field>
+            <Field label="ID do cargo verificado">
+              <Input value={verifiedRoleId} onChange={(e) => setVerifiedRoleId(e.target.value)} onBlur={() => updateConfig("security", { verifiedRoleId })} placeholder="ID do cargo" />
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={async () => {
+                if (!gid || !verificationChannelId || !verifiedRoleId) { setSecurityActionNote("Informe o canal e o cargo verificado."); return; }
+                try {
+                  await updateConfig("security", { verificationChannelId, verifiedRoleId, verificationEnabled: true });
+                  await requestPanelPublish({ data: { token: getStoredSessionToken(), guildId: gid, target: "security-verification", channelRef: verificationChannelId, verificationRoleId: verifiedRoleId } });
+                  setSecurityActionNote("Configuração enviada ao bot. O status aparecerá nos logs se houver erro.");
+                } catch (error) { setSecurityActionNote(String(error)); }
+              }}>Ativar e publicar painel</Button>
+              <Button variant="ghost" onClick={async () => {
+                if (!gid) return;
+                try { await requestSecurityRestore({ data: { token: getStoredSessionToken(), guildId: gid } }); setSecurityActionNote("Restauração enviada ao bot."); }
+                catch (error) { setSecurityActionNote(String(error)); }
+              }}>Restaurar permissões</Button>
+            </div>
+            {securityActionNote ? <p className="m-0 rounded-xl bg-muted px-3 py-2 text-sm">{securityActionNote}</p> : null}
+            <h3 className="mb-0 mt-4 text-sm font-semibold">Detecção anti-nuke</h3>
+            <Toggle label="Alertar sobre exclusão de cargos em massa" checked={security.config.alertOnMassRoleDelete !== false} onChange={(v) => updateConfig("security", { alertOnMassRoleDelete: v })} />
+            <Toggle label="Alertar sobre criação de webhooks em massa" checked={security.config.alertOnMassWebhookCreate !== false} onChange={(v) => updateConfig("security", { alertOnMassWebhookCreate: v })} />
+            <Toggle label="Alertar sobre criação de convites em massa" checked={security.config.alertOnMassInviteCreate !== false} onChange={(v) => updateConfig("security", { alertOnMassInviteCreate: v })} />
+            <Toggle label="Alertar sobre @everyone repetido" checked={security.config.alertOnEveryoneMentions !== false} onChange={(v) => updateConfig("security", { alertOnEveryoneMentions: v })} />
             <Field label="Mensagem de lockdown">
               <Textarea
                 defaultValue={asString(security.config.lockdownMessage)}
                 onBlur={(e) => updateConfig("security", { lockdownMessage: e.target.value })}
               />
             </Field>
-            <Button variant={security.config.lockdown ? "secondary" : "destructive"} onClick={() => toggleLockdown()}>
+            <Button variant={security.config.lockdown ? "secondary" : "destructive"} onClick={async () => {
+              if (!gid) return;
+              try { await requestSecurityLockdown({ data: { token: getStoredSessionToken(), guildId: gid, enabled: !security.config.lockdown } }); await updateConfig("security", { lockdown: !security.config.lockdown }); setSecurityActionNote("Ação de lockdown enviada ao bot."); }
+              catch (error) { setSecurityActionNote(String(error)); }
+            }}>
               {security.config.lockdown ? "Encerrar lockdown" : "Ligar lockdown"}
             </Button>
             <Field label="Simular entradas agora">

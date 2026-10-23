@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { pushPersistedSecurityWindow, readPersistedSecurityWindow, type SecurityWindowKind } from "./security.ts";
-import { mutate } from "./store.ts";
+import { flushPersistedSecurityWindows, resetSecurityWindowCacheForTests } from "./security/windows.ts";
+import { mutate, resetStoreCacheForTests } from "./store.ts";
 
 async function resetWindow(guildId: string, kind: SecurityWindowKind): Promise<void> {
   await mutate<{ guildId: string; kind: SecurityWindowKind }>("security-windows", (rows) => {
@@ -20,8 +21,13 @@ test("janelas de raid persistem e contam entradas dentro do prazo", async () => 
 
   assert.equal(secondCount, 2);
   assert.equal(entries.length, 2);
+  await flushPersistedSecurityWindows();
+  resetSecurityWindowCacheForTests();
+  resetStoreCacheForTests("security-windows");
+  assert.equal((await readPersistedSecurityWindow(guildId, "raid", 10_000)).length, 2);
 
   await resetWindow(guildId, "raid");
+  resetSecurityWindowCacheForTests();
 });
 
 test("janelas de nuke ficam separadas por autor", async () => {
@@ -34,6 +40,20 @@ test("janelas de nuke ficam separadas por autor", async () => {
 
   const entries = await readPersistedSecurityWindow(guildId, "nuke-ban", 10_000, "user-1");
   assert.equal(entries.length, 2);
+  await flushPersistedSecurityWindows();
 
   await resetWindow(guildId, "nuke-ban");
+  resetSecurityWindowCacheForTests();
+  resetStoreCacheForTests("security-windows");
+});
+
+test("janelas vencidas são removidas na leitura após recriar o módulo", async () => {
+  const guildId = "guild-expired-window";
+  const now = Date.now();
+  await mutate<{ guildId: string; kind: SecurityWindowKind; entries: { at: number; actorId?: string }[]; updatedAt: number }>("security-windows", (rows) => {
+    rows.push({ guildId, kind: "raid", entries: [{ at: now - 5_000 }], updatedAt: now - 5_000 });
+  });
+  resetSecurityWindowCacheForTests();
+  assert.deepEqual(await readPersistedSecurityWindow(guildId, "raid", 1_000), []);
+  await resetWindow(guildId, "raid");
 });

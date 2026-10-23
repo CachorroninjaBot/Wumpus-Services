@@ -10,14 +10,14 @@ Escopo conferido antes de encerrar o plano de dashboard: chaves de `src/lib/wump
 | `tickets` | `panelFormat` | O bot publica Components V2 independentemente do valor. |
 | `forms` | `panelFormat` | O bot publica Components V2 independentemente do valor. |
 | `moderation` | `publicLogging` | Não há leitor no bot. |
-| `security` | `autoBanRepeatOffenders`, `whitelistRoleIds` | Não há leitor no bot. Revisar junto do plano de segurança. |
+| `security` | — | `autoBanRepeatOffenders` exige `autoResponseConfirmed`; `whitelistRoleIds` é usada no anti-nuke e em menções em massa. Verificação, respostas e opções de anti-nuke estão conectadas ao bot. |
 | `logs` | `compactMode`, `mentionRoleId` | Consumidos pelo formato compacto e menções configuradas em alertas críticos. |
 | `staff` | `pingOnClaim`, `autoArchiveDays` | Não há leitor no bot. |
 | `knowledge` | `autoSuggest` | Há controle na tela, mas nenhum consumidor no bot. |
 | `statistics` | `anonymizeUsers` | Não há leitor no bot. |
 | `roles` | `allowAiDrafts` | Não há leitor no bot. |
 
-A checagem foi feita em `src/bot/` com busca de cada chave e inspeção do caminho de configuração. Os campos de `logs` foram concluídos no plano de logs; os de `security` ficam para o plano seguinte. Os outros itens não foram removidos porque isso mudaria a configuração persistida dos servidores. Antes de expor novamente um campo sem consumidor, implementar seu uso ou removê-lo com migração explícita.
+A checagem foi feita em `src/bot/` com busca de cada chave e inspeção do caminho de configuração. Os campos de `logs` e `security` foram concluídos nos respectivos planos. Os outros itens não foram removidos porque isso mudaria a configuração persistida dos servidores. Antes de expor novamente um campo sem consumidor, implementar seu uso ou removê-lo com migração explícita.
 
 ## Estado conectado durante este plano
 
