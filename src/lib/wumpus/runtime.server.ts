@@ -116,6 +116,7 @@ export type BotFormRecord = {
 export type RuntimeFile = {
   updatedAt: number;
   guilds: Record<string, RuntimeGuild>;
+  serverGroups?: Array<{ id: string; name: string; guildIds: string[] }>;
   /** Artigos da base de conhecimento, por servidor. */
   articles?: Record<string, RuntimeArticle[]>;
   /** Pedidos de publicacao aguardando o bot. */
@@ -133,11 +134,12 @@ export async function readRuntime(): Promise<RuntimeFile> {
     return {
       updatedAt: Number(parsed?.updatedAt) || 0,
       guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {},
+      serverGroups: Array.isArray(parsed?.serverGroups) ? parsed.serverGroups : [],
       articles: parsed?.articles && typeof parsed.articles === "object" ? parsed.articles : {},
       outbox: Array.isArray(parsed?.outbox) ? parsed.outbox : []
     };
   } catch {
-    return { updatedAt: 0, guilds: {}, articles: {}, outbox: [] };
+    return { updatedAt: 0, guilds: {}, serverGroups: [], articles: {}, outbox: [] };
   }
 }
 

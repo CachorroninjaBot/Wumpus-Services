@@ -18,6 +18,38 @@ import { requireGuildAccess } from "./session";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 
+const groupSchema = z.array(z.object({
+  id: z.string().min(1).max(80),
+  name: z.string().trim().min(1).max(80),
+  guildIds: z.array(z.string().regex(/^\d{17,20}$/)).min(1).max(50),
+}).strict()).max(50);
+
+export const getServerGroups = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/) }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const runtime = await readRuntime();
+    return (runtime.serverGroups ?? []).filter((group) => group.guildIds.includes(data.guildId));
+  });
+
+export const saveServerGroups = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/), groups: groupSchema }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    for (const group of data.groups) {
+      if (!group.guildIds.includes(data.guildId)) throw new Error("Cada grupo precisa incluir o servidor atual.");
+      for (const guildId of group.guildIds) await requireGuildAccess(data.token, guildId);
+    }
+    const runtime = await readRuntime();
+    runtime.serverGroups = [
+      ...(runtime.serverGroups ?? []).filter((group) => !group.guildIds.includes(data.guildId)),
+      ...data.groups.map((group) => ({ ...group, guildIds: [...new Set(group.guildIds)] })),
+    ];
+    runtime.updatedAt = Date.now();
+    await writeRuntime(runtime);
+    return { ok: true as const };
+  });
+
 export type { RuntimeFile, RuntimeGuild, RuntimeArticle, OutboxJob } from "./runtime.server";
 
 /** Payload de config de um servidor: `{ modulo: { ...campos, enabled } }`. */
@@ -81,7 +113,7 @@ export const requestPanelPublish = createServerFn({ method: "POST" })
     guildId: z.string().regex(/^\d{17,20}$/),
     target: z.enum(["tickets", "forms", "security-verification"]),
     channelRef: z.string().trim().min(1).max(100),
-    verificationRoleId: z.string().regex(/^\d{17,20}$/).optional(),
+    verificationRoleId: z.string().trim().min(1).max(100).optional(),
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);

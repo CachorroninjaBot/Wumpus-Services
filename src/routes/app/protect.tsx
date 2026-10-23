@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { DiscordSelect } from "@/components/discord-select";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -253,10 +254,10 @@ function ProtectPage() {
             <h3 className="mb-0 mt-4 text-sm font-semibold">Verificação de membros</h3>
             <p className="m-0 text-xs text-muted-foreground">Restringe a visualização dos canais a @everyone e libera o cargo selecionado após o clique no painel. As permissões atuais são salvas para restauração.</p>
             <Field label="ID do canal de verificação">
-              <Input value={verificationChannelId} onChange={(e) => setVerificationChannelId(e.target.value)} onBlur={() => updateConfig("security", { verificationChannelId })} placeholder="ID do canal" />
+              <DiscordSelect kind="text" value={verificationChannelId} onChange={(value) => { setVerificationChannelId(value); updateConfig("security", { verificationChannelId: value }); }} placeholder="Selecione um canal" />
             </Field>
             <Field label="ID do cargo verificado">
-              <Input value={verifiedRoleId} onChange={(e) => setVerifiedRoleId(e.target.value)} onBlur={() => updateConfig("security", { verifiedRoleId })} placeholder="ID do cargo" />
+              <DiscordSelect kind="role" value={verifiedRoleId} onChange={(value) => { setVerifiedRoleId(value); updateConfig("security", { verifiedRoleId: value }); }} placeholder="Selecione um cargo" />
             </Field>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={async () => {

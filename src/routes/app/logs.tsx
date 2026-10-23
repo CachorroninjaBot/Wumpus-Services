@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
+import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Input, Label } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { getGuildAudit } from "@/lib/wumpus/runtime-store";
@@ -28,20 +29,14 @@ function LogsPage() {
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("all");
-  const [ignoredDraft, setIgnoredDraft] = useState({ ignoredUserIds: "", ignoredRoleIds: "", ignoredChannelIds: "" });
+  const [ignoredDraft, setIgnoredDraft] = useState({ ignoredUserIds: "" });
   const [retentionDraft, setRetentionDraft] = useState(String(lcfg.config.retentionDays ?? 180));
-  const [mentionRoleDraft, setMentionRoleDraft] = useState(String(lcfg.config.mentionRoleId ?? ""));
-  const [channelDraft, setChannelDraft] = useState(String(lcfg.config.channelId ?? ""));
 
   useEffect(() => {
     setIgnoredDraft({
       ignoredUserIds: Array.isArray(lcfg.config.ignoredUserIds) ? (lcfg.config.ignoredUserIds as string[]).join(", ") : "",
-      ignoredRoleIds: Array.isArray(lcfg.config.ignoredRoleIds) ? (lcfg.config.ignoredRoleIds as string[]).join(", ") : "",
-      ignoredChannelIds: Array.isArray(lcfg.config.ignoredChannelIds) ? (lcfg.config.ignoredChannelIds as string[]).join(", ") : "",
     });
     setRetentionDraft(String(lcfg.config.retentionDays ?? 180));
-    setMentionRoleDraft(String(lcfg.config.mentionRoleId ?? ""));
-    setChannelDraft(String(lcfg.config.channelId ?? ""));
   }, [gid, lcfg.config]);
 
   useEffect(() => {
@@ -138,31 +133,20 @@ function LogsPage() {
         </div>
         <div className="sm:col-span-2">
           <Label htmlFor="logs-channel">Canal de logs</Label>
-          <Input id="logs-channel" value={channelDraft}
-            onChange={(event) => setChannelDraft(event.target.value)}
-            onBlur={() => updateConfig("logs", { channelId: channelDraft.trim() })} placeholder="Nome ou ID do canal" />
+          <DiscordSelect id="logs-channel" kind="text" value={String(lcfg.config.channelId ?? "")} onChange={(channelId) => updateConfig("logs", { channelId })} placeholder="Selecione um canal" />
         </div>
         <div className="sm:col-span-2">
           <Label htmlFor="logs-mention-role">Cargo mencionado em alertas</Label>
-          <Input id="logs-mention-role" value={mentionRoleDraft}
-            onChange={(event) => setMentionRoleDraft(event.target.value)}
-            onBlur={() => updateConfig("logs", { mentionRoleId: mentionRoleDraft.trim() })} placeholder="ID do cargo" />
+          <DiscordSelect id="logs-mention-role" kind="role" value={String(lcfg.config.mentionRoleId ?? "")} onChange={(mentionRoleId) => updateConfig("logs", { mentionRoleId })} placeholder="Sem menção de cargo" />
         </div>
       </Card>
       <Card className="space-y-3">
         <h2 className="m-0 text-base font-semibold">Ignorar eventos</h2>
-        <p className="m-0 text-sm text-muted-foreground">Informe IDs separados por vírgula. O filtro é aplicado antes da mensagem ser montada.</p>
+        <p className="m-0 text-sm text-muted-foreground">Escolha cargos e canais que devem ficar fora da auditoria. Para ignorar uma pessoa, informe o ID do usuário.</p>
         <div className="grid gap-3 md:grid-cols-3">
-          {([
-            ["ignoredUserIds", "Usuários ignorados"], ["ignoredRoleIds", "Cargos ignorados"], ["ignoredChannelIds", "Canais ignorados"],
-          ] as const).map(([field, label]) => (
-            <div key={field}>
-              <Label htmlFor={field}>{label}</Label>
-              <Input id={field} value={ignoredDraft[field]}
-                onChange={(event) => setIgnoredDraft((current) => ({ ...current, [field]: event.target.value }))}
-                onBlur={() => updateConfig("logs", { [field]: ignoredDraft[field].split(",").map((id) => id.trim()).filter(Boolean) })} />
-            </div>
-          ))}
+          <div><Label htmlFor="ignoredUserIds">Usuários ignorados (IDs)</Label><Input id="ignoredUserIds" value={ignoredDraft.ignoredUserIds} onChange={(event) => setIgnoredDraft((current) => ({ ...current, ignoredUserIds: event.target.value }))} onBlur={() => updateConfig("logs", { ignoredUserIds: ignoredDraft.ignoredUserIds.split(",").map((id) => id.trim()).filter(Boolean) })} /></div>
+          <div><Label>Cargos ignorados</Label><DiscordMultiSelect value={Array.isArray(lcfg.config.ignoredRoleIds) ? lcfg.config.ignoredRoleIds as string[] : []} onChange={(ignoredRoleIds) => updateConfig("logs", { ignoredRoleIds })} /></div>
+          <div><Label>Canais ignorados</Label><DiscordMultiSelect kind="text" value={Array.isArray(lcfg.config.ignoredChannelIds) ? lcfg.config.ignoredChannelIds as string[] : []} onChange={(ignoredChannelIds) => updateConfig("logs", { ignoredChannelIds })} /></div>
         </div>
       </Card>
     </div>

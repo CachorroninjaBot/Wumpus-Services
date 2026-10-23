@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { MemberAvatar } from "@/components/brand";
+import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Search } from "lucide-react";
 import { DiscordPanel } from "@/components/discord-panel";
 import { Badge } from "@/components/ui/badge";
@@ -402,15 +403,15 @@ function TicketsPage() {
               <Switch checked={tcfg.enabled} onCheckedChange={(v) => setEnabled("tickets", v)} />
             </div>
             <Field label="Onde o painel de atendimento aparece">
-              <Input list="ticket-text-channels" defaultValue={asString(tcfg.config.panelChannelId)} placeholder="Digite ou escolha #canal" onBlur={(e) => updateConfig("tickets", { panelChannelId: e.target.value.trim() })} />
+              <DiscordSelect kind="text" value={asString(tcfg.config.panelChannelId)} onChange={(panelChannelId) => updateConfig("tickets", { panelChannelId })} placeholder="Selecione um canal" />
               <datalist id="ticket-text-channels">{channels.filter((channel) => channel.type === "text").flatMap((channel) => [<option key={channel.id} value={channel.name} />, <option key={`${channel.id}-hash`} value={`#${channel.name}`} />, <option key={`${channel.id}-id`} value={channel.id} />])}</datalist>
             </Field>
             <Field label="Categoria onde os canais privados serão criados">
-              <Input list="ticket-category-channels" defaultValue={asString(tcfg.config.categoryId)} placeholder="Digite ou escolha uma categoria" onBlur={(e) => updateConfig("tickets", { categoryId: e.target.value.trim() })} />
+              <DiscordSelect kind="category" value={asString(tcfg.config.categoryId)} onChange={(categoryId) => updateConfig("tickets", { categoryId })} placeholder="Selecione uma categoria" />
               <datalist id="ticket-category-channels">{channels.filter((channel) => channel.type === "category").flatMap((channel) => [<option key={channel.id} value={channel.name} />, <option key={`${channel.id}-id`} value={channel.id} />])}</datalist>
             </Field>
             <Field label="Quem atende">
-              <Input list="ticket-staff-roles" defaultValue={asList(tcfg.config.staffRoleIds).join(", ")} placeholder="Digite ou escolha os cargos, separados por vírgula" onBlur={(e) => updateConfig("tickets", { staffRoleIds: e.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} />
+              <DiscordMultiSelect value={asList(tcfg.config.staffRoleIds)} onChange={(staffRoleIds) => updateConfig("tickets", { staffRoleIds })} />
               <datalist id="ticket-staff-roles">{roles.flatMap((role) => [<option key={role.id} value={role.name} />, <option key={`${role.id}-id`} value={role.id} />])}</datalist>
               <p className="m-0 text-xs text-muted-foreground">Digite o nome do cargo ou escolha uma sugestão. A equipe terá acesso privado aos canais.</p>
             </Field>
@@ -474,10 +475,10 @@ function TicketsPage() {
                 </Field>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Canal de transcrições">
-                    <Input list="ticket-text-channels" defaultValue={asString(tcfg.config.transcriptChannelId)} placeholder="Digite ou escolha #canal" onBlur={(e) => updateConfig("tickets", { transcriptChannelId: e.target.value.trim() })} />
+                    <DiscordSelect kind="text" value={asString(tcfg.config.transcriptChannelId)} onChange={(transcriptChannelId) => updateConfig("tickets", { transcriptChannelId })} placeholder="Selecione um canal" />
                   </Field>
                   <Field label="Canal de auditoria">
-                    <Input list="ticket-text-channels" defaultValue={asString(tcfg.config.logChannelId)} placeholder="Digite ou escolha #canal" onBlur={(e) => updateConfig("tickets", { logChannelId: e.target.value.trim() })} />
+                    <DiscordSelect kind="text" value={asString(tcfg.config.logChannelId)} onChange={(logChannelId) => updateConfig("tickets", { logChannelId })} placeholder="Selecione um canal" />
                   </Field>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">

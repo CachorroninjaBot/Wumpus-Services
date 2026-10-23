@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Card } from "@/components/ui/card";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { Label, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,8 @@ import { plans as fallbackPlans, type PlanId } from "@/lib/wumpus/brand";
 import { planById, serverLimit } from "@/lib/wumpus/catalog";
 import { useBilling } from "@/lib/wumpus/use-billing";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
+import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
+import { ServerGroups } from "@/components/server-groups";
 
 export const Route = createFileRoute("/app/settings")({ component: SettingsPage });
 
@@ -20,10 +22,6 @@ function SettingsPage() {
   const logsMod = useModule("logs");
   const updateConfig = useWumpus((s) => s.updateConfig);
   const setEnabled = useWumpus((s) => s.setModuleEnabled);
-  const channelMap = useWumpus((s) => s.channels);
-  const roleMap = useWumpus((s) => s.roles);
-  const channels = channelMap[gid] ?? [];
-  const roles = roleMap[gid] ?? [];
   const members = useGuildMembers();
   const setPlan = useWumpus((s) => s.setPlan);
   const sessionUser = useWumpus((s) => s.sessionUser);
@@ -44,7 +42,7 @@ function SettingsPage() {
       <div>
         <h1 className="m-0 text-2xl font-semibold tracking-tight">Configurações do servidor</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {guild.name} · {guild.memberCount.toLocaleString("pt-BR")} membros · {guild.region}
+            {guild.name} · {guild.memberCount.toLocaleString("pt-BR")} membros · {guild.region}
         </p>
       </div>
       <Card className="space-y-3">
@@ -100,6 +98,7 @@ function SettingsPage() {
           )}
         </div>
       </Card>
+      <ServerGroups />
       <Card className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -119,34 +118,27 @@ function SettingsPage() {
         ) : null}
       </Card>
       <Card className="space-y-4">
-        <h2 className="mt-0 text-base font-semibold">Mensagem de boas-vindas</h2>
-        <p className="-mt-3 mb-0 text-sm text-muted-foreground">Escolha o canal e escreva uma mensagem que o Wumpus envia quando alguém entra.</p>
+        <div><h2 className="m-0 text-base font-semibold">Cargos padrão</h2><p className="m-0 mt-1 text-sm text-muted-foreground">Escolha cargos disponíveis neste servidor; eles serão resolvidos pelo nome nos grupos sincronizados.</p></div>
+        <div><Label>Cargos atribuídos a novos membros</Label><DiscordMultiSelect value={Array.isArray(rolesMod.config.defaultRoleIds) ? rolesMod.config.defaultRoleIds as string[] : []} onChange={(defaultRoleIds) => updateConfig("roles", { defaultRoleIds })} placeholder="Adicionar cargo padrão…" /></div>
+      </Card>
+      <Card className="space-y-4">
+        <h2 className="mt-0 text-base font-semibold">Boas-vindas e despedidas</h2>
+        <p className="-mt-3 mb-0 text-sm text-muted-foreground">Escolha os canais e personalize o que o Wumpus envia quando alguém entra ou sai.</p>
         <div>
-          <Label>Canal</Label>
-          <Input
-            className="mt-1"
-            list="server-text-channels"
-            defaultValue={asString(servers.config.announceJoinChannelId)}
-            onBlur={(e) => updateConfig("servers", { announceJoinChannelId: e.target.value.trim() })}
-            placeholder="Digite ou escolha #canal"
-          />
-          <datalist id="server-text-channels">{channels.filter((channel) => channel.type === "text").flatMap((channel) => [<option key={channel.id} value={channel.name} />, <option key={`${channel.id}-hash`} value={`#${channel.name}`} />, <option key={`${channel.id}-id`} value={channel.id} />])}</datalist>
+          <Label>Canal de boas-vindas</Label>
+          <DiscordSelect kind="text" value={asString(servers.config.announceJoinChannelId)} onChange={(announceJoinChannelId) => updateConfig("servers", { announceJoinChannelId })} placeholder="Selecione um canal" />
         </div>
         <div>
-          <Label>Mensagem · use {"{user}"}</Label>
+          <Label>Mensagem de boas-vindas · use {"{user}"}</Label>
           <Textarea
             className="mt-1"
             defaultValue={asString(servers.config.joinMessage)}
             onBlur={(e) => updateConfig("servers", { joinMessage: e.target.value })}
           />
         </div>
+        <div><Label>Canal de despedida</Label><DiscordSelect kind="text" value={asString(servers.config.announceLeaveChannelId)} onChange={(announceLeaveChannelId) => updateConfig("servers", { announceLeaveChannelId })} placeholder="Desativar mensagem de despedida" /></div>
+        <div><Label>Mensagem de despedida · use {"{user}"}</Label><Textarea className="mt-1" defaultValue={asString(servers.config.leaveMessage)} onBlur={(e) => updateConfig("servers", { leaveMessage: e.target.value })} /></div>
         <div className="rounded-xl border border-border bg-muted/40 px-3 py-2.5 text-sm"><span className="font-medium">Prévia da mensagem</span><p className="m-0 mt-1">{preview}</p></div>
-      </Card>
-      <Card className="space-y-3">
-        <h2 className="mt-0 text-base font-semibold">Cargos na entrada</h2>
-        <p className="-mt-2 mb-0 text-sm text-muted-foreground">Esses cargos são atribuídos automaticamente a cada novo membro.</p>
-        <Input list="server-roles" defaultValue={Array.isArray(rolesMod.config.defaultRoleIds) ? (rolesMod.config.defaultRoleIds as string[]).join(", ") : ""} onBlur={(e) => updateConfig("roles", { defaultRoleIds: e.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} placeholder="Digite ou escolha cargos, separados por vírgula" />
-        <datalist id="server-roles">{roles.flatMap((role) => [<option key={role.id} value={role.name} />, <option key={`${role.id}-id`} value={role.id} />])}</datalist>
       </Card>
       <Card className="space-y-3">
         <div className="flex items-center justify-between gap-4">
@@ -156,7 +148,7 @@ function SettingsPage() {
           </div>
           <Switch checked={logsMod.enabled} onCheckedChange={(v) => setEnabled("logs", v)} />
         </div>
-        <div><Label htmlFor="server-log-channel">Canal de registros</Label><Input id="server-log-channel" list="server-text-channels" defaultValue={asString(logsMod.config.channelId)} onBlur={(e) => updateConfig("logs", { channelId: e.target.value.trim() })} placeholder="Digite ou escolha #canal" /></div>
+        <div><Label htmlFor="server-log-channel">Canal de registros</Label><DiscordSelect id="server-log-channel" kind="text" value={asString(logsMod.config.channelId)} onChange={(channelId) => updateConfig("logs", { channelId })} placeholder="Selecione um canal" /></div>
       </Card>
     </div>
   );

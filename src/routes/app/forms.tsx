@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { DiscordFormPreview, DiscordPanel } from "@/components/discord-panel";
+import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
@@ -586,8 +587,8 @@ function FormsPage() {
                 <h3 id="delivery-title" className="m-0 text-base font-semibold">Onde o formulário aparece</h3>
                 <p className="mb-4 mt-1 text-sm text-muted-foreground">O painel é a mensagem que a comunidade encontra no Discord.</p>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5"><Label htmlFor="form-channel">Canal do painel</Label><Input id="form-channel" list="form-text-channels" defaultValue={asString(fcfg.config.panelChannelId)} onBlur={(event) => updateConfig("forms", { panelChannelId: event.target.value.trim() })} placeholder="Digite ou escolha #canal" /></div>
-                  <div className="space-y-1.5"><Label htmlFor="form-review-channel">Canal para revisar respostas</Label><Input id="form-review-channel" list="form-text-channels" defaultValue={asString(fcfg.config.reviewChannelId)} onBlur={(event) => updateConfig("forms", { reviewChannelId: event.target.value.trim() })} placeholder="Digite ou escolha #canal" /></div>
+                  <div className="space-y-1.5"><Label htmlFor="form-channel">Canal do painel</Label><DiscordSelect id="form-channel" kind="text" value={asString(fcfg.config.panelChannelId)} onChange={(panelChannelId) => updateConfig("forms", { panelChannelId })} placeholder="Selecione um canal" /></div>
+                  <div className="space-y-1.5"><Label htmlFor="form-review-channel">Canal para revisar respostas</Label><DiscordSelect id="form-review-channel" kind="text" value={asString(fcfg.config.reviewChannelId)} onChange={(reviewChannelId) => updateConfig("forms", { reviewChannelId })} placeholder="Selecione um canal" /></div>
                   <datalist id="form-text-channels">{channels.filter((channel) => channel.type === "text").flatMap((channel) => [<option key={channel.id} value={channel.name} />, <option key={`${channel.id}-hash`} value={`#${channel.name}`} />, <option key={`${channel.id}-id`} value={channel.id} />])}</datalist>
                   <div className="space-y-1.5"><Label htmlFor="form-title">Título do painel</Label><Input id="form-title" value={asString(fcfg.config.panelTitle)} maxLength={256} onChange={(event) => updateConfig("forms", { panelTitle: event.target.value })} /></div>
                   <div className="space-y-1.5"><Label htmlFor="form-button">Texto do botão</Label><Input id="form-button" value={asString(fcfg.config.panelButtonLabel, "Preencher formulário")} maxLength={80} onChange={(event) => updateConfig("forms", { panelButtonLabel: event.target.value })} /></div>
@@ -604,7 +605,7 @@ function FormsPage() {
                   <div className="space-y-1.5"><Label htmlFor="form-cooldown">Intervalo entre envios (horas)</Label><Input id="form-cooldown" type="number" min={0} max={8760} value={Number(fcfg.config.cooldownHours ?? 24)} onChange={(event) => updateConfig("forms", { cooldownHours: Math.max(0, Number(event.target.value) || 0) })} /></div>
                   <div className="space-y-1.5"><Label htmlFor="form-limit">Envios por pessoa</Label><Input id="form-limit" type="number" min={1} max={100} value={Number(fcfg.config.maxSubmissionsPerUser ?? 3)} onChange={(event) => updateConfig("forms", { maxSubmissionsPerUser: Math.max(1, Number(event.target.value) || 1) })} /></div>
                   <div className="space-y-1.5"><Label htmlFor="form-account-age">Idade mínima da conta (dias)</Label><Input id="form-account-age" type="number" min={0} max={3650} value={Number(fcfg.config.minAccountAgeDays ?? 0)} onChange={(event) => updateConfig("forms", { minAccountAgeDays: Math.max(0, Number(event.target.value) || 0) })} /></div>
-                  <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="form-reviewers">Cargos que revisam</Label><Input id="form-reviewers" list="form-reviewer-roles" defaultValue={Array.isArray(fcfg.config.reviewerRoleIds) ? (fcfg.config.reviewerRoleIds as string[]).join(", ") : ""} onBlur={(event) => updateConfig("forms", { reviewerRoleIds: event.target.value.split(",").map((role) => role.trim()).filter(Boolean) })} placeholder="Digite ou escolha os cargos, separados por vírgula" /><datalist id="form-reviewer-roles">{roles.flatMap((role) => [<option key={role.id} value={role.name} />, <option key={`${role.id}-id`} value={role.id} />])}</datalist><p className="m-0 text-xs text-muted-foreground">Você pode usar o nome do cargo. Se a lista ainda não aparecer, digite o nome como está no Discord.</p></div>
+                  <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="form-reviewers">Cargos que revisam</Label><DiscordMultiSelect value={Array.isArray(fcfg.config.reviewerRoleIds) ? fcfg.config.reviewerRoleIds as string[] : []} onChange={(reviewerRoleIds) => updateConfig("forms", { reviewerRoleIds })} /></div>
                   <label className="flex min-h-10 items-center justify-between gap-4 text-sm"><span>Pré-análise com IA</span><Switch checked={Boolean(fcfg.config.useAiPreReview)} onCheckedChange={(value) => updateConfig("forms", { useAiPreReview: value })} disabled={!planAllows(guild.plan, "ai")} /></label>
                 </div>
               </section>

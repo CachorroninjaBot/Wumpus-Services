@@ -12,7 +12,7 @@ import { AuditLogEvent, ChannelType, PermissionFlagsBits, type Guild, type Guild
 import { bool, isEnabled, list, moduleConfig, num, str } from "./config.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
-import { resolveChannel, resolveRoles } from "./resolve.ts";
+import { resolveChannel, resolveRole, resolveRoles } from "./resolve.ts";
 import { asSendable } from "./resolve.ts";
 import { id } from "./ids.ts";
 import { buildPanelPayload, type ButtonSpec } from "./panels.ts";
@@ -42,8 +42,8 @@ async function saveVerificationState(state: VerificationState | null, guildId: s
 /** Apply and persist a reversible @everyone gate before sending the verification panel. */
 export async function setupVerification(guild: Guild, channelId: string, roleId: string): Promise<{ ok: boolean; detail: string }> {
   const me = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
-  const role = guild.roles.cache.get(roleId);
-  const verificationChannel = guild.channels.cache.get(channelId);
+  const role = resolveRole(guild, roleId);
+  const verificationChannel = resolveChannel(guild, channelId);
   if (!me?.permissions.has(PermissionFlagsBits.ManageChannels | PermissionFlagsBits.ManageRoles)) return { ok: false, detail: "O bot precisa de Gerenciar canais e Gerenciar cargos." };
   if (!role || role.managed || role.position >= me.roles.highest.position) return { ok: false, detail: "Cargo verificado inválido ou acima do cargo do bot." };
   if (!verificationChannel?.isTextBased() || !("permissionOverwrites" in verificationChannel)) return { ok: false, detail: "Canal de verificação inválido." };
@@ -52,11 +52,11 @@ export async function setupVerification(guild: Guild, channelId: string, roleId:
   const channels = [...guild.channels.cache.values()].filter((channel) => "permissionOverwrites" in channel);
   const snapshots: VerificationOverwrite[] = channels.map((channel) => {
     const everyone = channel.permissionOverwrites.cache.get(guild.roles.everyone.id);
-    const verified = channel.permissionOverwrites.cache.get(roleId);
+    const verified = channel.permissionOverwrites.cache.get(role.id);
     const bit = PermissionFlagsBits.ViewChannel;
     return { channelId: channel.id, everyoneExists: Boolean(everyone), everyoneAllow: Boolean(everyone?.allow.has(bit)), everyoneDeny: Boolean(everyone?.deny.has(bit)), roleExists: Boolean(verified), roleAllow: Boolean(verified?.allow.has(bit)), roleDeny: Boolean(verified?.deny.has(bit)) };
   });
-  const state: VerificationState = { guildId: guild.id, channelId, roleId, active: false, snapshots, updatedAt: Date.now() };
+  const state: VerificationState = { guildId: guild.id, channelId: verificationChannel.id, roleId: role.id, active: false, snapshots, updatedAt: Date.now() };
   await saveVerificationState(state, guild.id);
   try {
     for (const channel of channels) {
