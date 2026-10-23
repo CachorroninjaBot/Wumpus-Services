@@ -45,7 +45,14 @@ export async function setupVerification(guild: Guild, channelId: string, roleId:
   const role = resolveRole(guild, roleId);
   const verificationChannel = resolveChannel(guild, channelId);
   if (!me?.permissions.has(PermissionFlagsBits.ManageChannels | PermissionFlagsBits.ManageRoles)) return { ok: false, detail: "O bot precisa de Gerenciar canais e Gerenciar cargos." };
-  if (!role || role.managed || role.position >= me.roles.highest.position) return { ok: false, detail: "Cargo verificado inválido ou acima do cargo do bot." };
+  if (!role) return { ok: false, detail: "O cargo selecionado não foi encontrado neste servidor. Atualize os cargos e selecione novamente." };
+  if (role.managed) return { ok: false, detail: `O cargo "${role.name}" é gerenciado por uma integração do Discord e não pode ser atribuído pelo Wumpus. Escolha um cargo criado no servidor.` };
+  if (role.position >= me.roles.highest.position) {
+    return {
+      ok: false,
+      detail: `O cargo "${role.name}" está acima ou na mesma posição do cargo mais alto do Wumpus ("${me.roles.highest.name}"). Em Configurações do servidor > Cargos, mova o cargo do Wumpus acima de "${role.name}" e tente novamente.`,
+    };
+  }
   if (!verificationChannel?.isTextBased() || !("permissionOverwrites" in verificationChannel)) return { ok: false, detail: "Canal de verificação inválido." };
   const old = await verificationState(guild.id);
   if (old?.active) return { ok: false, detail: "A verificação já está ativa. Restaure as permissões antes de configurar novamente." };

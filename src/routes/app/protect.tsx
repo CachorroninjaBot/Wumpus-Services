@@ -35,6 +35,23 @@ type SecurityEvent = Awaited<ReturnType<typeof getGuildSecurityIncidents>>[numbe
 type PermissionKey = "manageMessages" | "manageChannels" | "manageRoles" | "moderateMembers" | "viewAuditLog" | "banMembers";
 type ConfirmAction = "lockdown_on" | "lockdown_off" | "restore_verification";
 
+function verificationRoleAdvice(detail: string): string | null {
+  const normalized = detail.toLocaleLowerCase("pt-BR");
+  if (normalized.includes("gerenciado por uma integração")) {
+    return "Escolha outro cargo, criado diretamente neste servidor. Cargos de bots e integrações não podem ser concedidos pelo painel.";
+  }
+  if (normalized.includes("não foi encontrado neste servidor")) {
+    return "Atualize a página para recarregar os cargos do Discord e escolha novamente o cargo que será dado após a verificação.";
+  }
+  if (
+    normalized.includes("acima ou na mesma posição") ||
+    normalized.includes("cargo verificado inválido ou acima do cargo do bot")
+  ) {
+    return "No Discord, abra Configurações do servidor > Cargos e arraste o cargo do Wumpus para uma posição acima do cargo verificado. Depois, tente publicar novamente.";
+  }
+  return null;
+}
+
 const sections: Array<{ id: ProtectSection; label: string; icon: typeof Shield }> = [
   { id: "overview", label: "Visão geral", icon: ShieldCheck },
   { id: "automod", label: "Mensagens", icon: MessageSquareWarning },
@@ -98,6 +115,7 @@ function ProtectPage() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionNote, setActionNote] = useState<string | null>(null);
+  const [actionFailed, setActionFailed] = useState(false);
   const [verificationChannelId, setVerificationChannelId] = useState(asString(security.config.verificationChannelId));
   const [verifiedRoleId, setVerifiedRoleId] = useState(asString(security.config.verifiedRoleId));
   const [memberId, setMemberId] = useState(members[0]?.id ?? "");
@@ -192,23 +210,28 @@ function ProtectPage() {
 
   const waitForAction = async (jobId: string, successText: string) => {
     setActionBusy(true);
+    setActionFailed(false);
     setActionNote("Pedido recebido. Aguardando o bot executar no Discord…");
     try {
       for (let attempt = 0; attempt < 20; attempt += 1) {
         const result = await getGuildSecurityActionStatus({ data: { token: getStoredSessionToken(), guildId, jobId } });
         if (result.status === "done") {
+          setActionFailed(false);
           setActionNote(result.detail || successText);
           return true;
         }
         if (result.status === "failed") {
+          setActionFailed(true);
           setActionNote(result.detail || "O bot não conseguiu concluir a ação. Confira as permissões e tente novamente.");
           return false;
         }
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
       }
+      setActionFailed(true);
       setActionNote("O pedido continua na fila. Consulte o estado do bot e tente novamente se ele não concluir.");
       return false;
     } catch (error) {
+      setActionFailed(true);
       setActionNote(error instanceof Error ? error.message : "Não foi possível consultar o resultado da ação.");
       return false;
     } finally {
@@ -219,6 +242,7 @@ function ProtectPage() {
   const executeConfirmedAction = async () => {
     if (!confirmAction || !guildId) return;
     if (confirmPermissionMissing) {
+      setActionFailed(true);
       setActionNote("O bot não tem as permissões necessárias para essa ação. Corrija o checklist antes de tentar novamente.");
       setConfirmAction(null);
       return;
@@ -226,6 +250,7 @@ function ProtectPage() {
     const action = confirmAction;
     setConfirmAction(null);
     setActionBusy(true);
+    setActionFailed(false);
     setActionNote("Enviando pedido ao bot…");
     try {
       if (action === "restore_verification") {
@@ -242,6 +267,7 @@ function ProtectPage() {
         }
       }
     } catch (error) {
+      setActionFailed(true);
       setActionNote(error instanceof Error ? error.message : "Não foi possível enviar a ação ao bot.");
       setActionBusy(false);
     }
@@ -253,12 +279,14 @@ function ProtectPage() {
       return;
     }
     setActionBusy(true);
+    setActionFailed(false);
     setActionNote("Enviando o painel de verificação ao bot…");
     try {
       const result = await requestPanelPublish({ data: { token: getStoredSessionToken(), guildId, target: "security-verification", channelRef: verificationChannelId, verificationRoleId: verifiedRoleId } });
       const sent = await waitForAction(result.jobId, "Painel publicado no Discord.");
       if (sent) await useWumpus.getState().updateConfig("security", { verificationChannelId, verifiedRoleId, verificationEnabled: true });
     } catch (error) {
+      setActionFailed(true);
       setActionNote(error instanceof Error ? error.message : "Não foi possível publicar o painel.");
       setActionBusy(false);
     }
@@ -309,7 +337,15 @@ function ProtectPage() {
       ) : null}
 
       {runtimeSyncError ? <p className="m-0 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{runtimeSyncError}</p> : null}
-      {actionNote ? <p className="m-0 rounded-lg bg-muted px-3 py-2 text-sm" role="status">{actionNote}</p> : null}
+      {actionNote ? (
+        <div className={`rounded-lg px-4 py-3 text-sm ${actionFailed ? "border border-destructive/25 bg-destructive/10" : "bg-muted"}`} role={actionFailed ? "alert" : "status"} aria-live={actionFailed ? "assertive" : "polite"}>
+          <p className="m-0 font-semibold">{actionFailed ? "Não foi possível concluir a ação" : actionNote}</p>
+          {actionFailed ? <p className="mb-0 mt-1">{actionNote}</p> : null}
+          {actionFailed && section === "verification" && verificationRoleAdvice(actionNote) ? (
+            <p className="mb-0 mt-2 text-muted-foreground">{verificationRoleAdvice(actionNote)}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <Tabs value={section} onValueChange={(value) => setSection(value as ProtectSection)}>
         <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-xl bg-transparent p-0">
@@ -459,7 +495,7 @@ function ProtectPage() {
               <div className="flex flex-wrap gap-2"><Button onClick={() => void publishVerification()} disabled={actionBusy || !verificationChannelId || !verifiedRoleId || permissions?.manageChannels === false || permissions?.manageRoles === false}>{security.config.verificationEnabled ? "Publicar painel novamente" : "Ativar e publicar painel"}</Button>{security.config.verificationEnabled ? <Button variant="outline" onClick={() => setConfirmAction("restore_verification")} disabled={actionBusy}>Restaurar permissões</Button> : null}</div>
               {security.config.verificationEnabled ? <p className="m-0 flex items-center gap-2 text-sm text-ok"><CircleCheck className="size-4" />Verificação marcada como ativa na configuração.</p> : null}
             </Card>
-            <div className="space-y-4"><Card className="space-y-3"><SectionTitle title="O que muda no Discord" /><p className="m-0 text-sm leading-6 text-muted-foreground">O bot restringe a visualização dos canais para @everyone e libera o cargo selecionado após a confirmação. Canais criados enquanto a verificação estiver ativa também recebem a regra.</p><p className="m-0 rounded-lg bg-warn/10 px-3 py-2 text-sm">Confira o acesso dos cargos de equipe antes de ativar. Use “Restaurar permissões” para desfazer as alterações salvas pelo Wumpus.</p></Card><Card className="space-y-3"><SectionTitle title="Permissões do bot" /><PermissionStatus label="Gerenciar canais" value={permissions?.manageChannels ?? null} botStatus={readiness?.status ?? "unknown"} /><PermissionStatus label="Gerenciar cargos" value={permissions?.manageRoles ?? null} botStatus={readiness?.status ?? "unknown"} /><p className="m-0 text-xs text-muted-foreground">O cargo do Wumpus também precisa ficar acima do cargo verificado na hierarquia do Discord; essa posição é validada pelo bot ao ativar.</p></Card></div>
+            <div className="space-y-4"><Card className="space-y-3"><SectionTitle title="O que muda no Discord" /><p className="m-0 text-sm leading-6 text-muted-foreground">O bot restringe a visualização dos canais para @everyone e libera o cargo selecionado após a confirmação. Canais criados enquanto a verificação estiver ativa também recebem a regra.</p><p className="m-0 rounded-lg bg-warn/10 px-3 py-2 text-sm">Confira o acesso dos cargos de equipe antes de ativar. Use “Restaurar permissões” para desfazer as alterações salvas pelo Wumpus.</p></Card><Card className="space-y-3"><SectionTitle title="Permissões do bot" /><PermissionStatus label="Gerenciar canais" value={permissions?.manageChannels ?? null} botStatus={readiness?.status ?? "unknown"} /><PermissionStatus label="Gerenciar cargos" value={permissions?.manageRoles ?? null} botStatus={readiness?.status ?? "unknown"} /><p className="m-0 rounded-lg bg-warn/10 px-3 py-2 text-sm">Para conceder o cargo, o cargo mais alto do Wumpus precisa ficar acima do cargo verificado. No Discord, ajuste essa ordem em Configurações do servidor &gt; Cargos.</p></Card></div>
           </div>
         </TabsContent>
 
