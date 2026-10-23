@@ -1,32 +1,24 @@
 # Segurança do OCR
 
-O bot valida as URLs de imagem como HTTPS e limita o host a
-`cdn.discordapp.com`. Também valida o endpoint OCR,
-limita cada imagem a 8 MiB, processa no máximo três imagens por mensagem e
-mantém até quatro solicitações OCR simultâneas. Respostas são limitadas a
-128 KiB e o texto reconhecido a 12.000 caracteres. Texto sem confiança numérica
-válida entre 0 e 1, ou abaixo da confiança mínima configurada, não é usado para
-moderação automatizada.
+O bot baixa imagens somente de `cdn.discordapp.com`, sem seguir
+redirecionamentos, confere a assinatura binária e envia o arquivo em multipart
+diretamente para `https://api.ocr.space/parse/image`. A chave fica em
+`OCR_SPACE_API_KEY`, enviada pelo header `apikey` e nunca colocada na URL ou nos
+logs. O processo iniciado com `npm start` carrega essa variável do `.env`;
+deployments podem fornecê-la pelo ambiente do serviço. `.env` não deve ser
+versionado.
 
-O serviço configurado por `WUMPUS_HAIZ_OCR_URL` não está neste repositório.
-Essas validações no bot não substituem validações do próprio serviço, pois ele
-é quem baixa e decodifica a imagem. O serviço deve:
+O código limita o arquivo a 1 MiB (limite do endpoint público gratuito), o
+processamento a três imagens por mensagem e quatro solicitações simultâneas.
+Downloads e respostas têm limites de bytes; a chamada tem timeout; o texto
+reconhecido é limitado a 12.000 caracteres. Apenas resultados de parsing
+explicitamente bem-sucedidos (`OCRExitCode` e `FileParseExitCode`) são usados.
 
-- validar novamente o esquema HTTPS e uma allowlist fixa de hosts antes de cada
-  download, sem confiar em URLs ou políticas enviadas pelo cliente;
-- desabilitar redirecionamentos ou validar cada destino após cada redirecionamento,
-  rejeitando IPs privados, loopback, link-local, endereços de metadata e IPv4/IPv6
-  mapeados;
-- resolver DNS com proteção contra rebinding e garantir que o IP efetivamente
-  conectado permaneça público e permitido;
-- impor limite de bytes durante o streaming (não apenas confiar em
-  `Content-Length`), timeout, limite de dimensões/pixels e formatos por
-  assinatura do arquivo; rejeitar SVG e arquivos truncados/malformados;
-- exigir `X-Internal-Key` por canal seguro, comparar em tempo constante, limitar
-  taxa e concorrência e nunca registrar a chave, URL assinada ou conteúdo da
-  imagem;
-- devolver JSON com `confidence` numérica normalizada de 0 a 1, aplicando os
-  mesmos limites de tamanho ao resultado.
+OCR.space não retorna score de confiança calibrado, portanto `confidenceThreshold`
+não mede a qualidade da transcrição nesse provedor. Uma transcrição bem-sucedida
+é encaminhada às regras existentes do AutoMod; o OCR não é, por si só, uma
+decisão de moderação. As regras devem ser configuradas para os tipos de conteúdo
+que a comunidade quer bloquear.
 
 `retainExtractedText` controla se o texto reconhecido é gravado no registro de
 auditoria do AutoMod. Com a opção desativada (padrão), o conteúdo e trechos

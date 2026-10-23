@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isAllowedDiscordImageUrl, isSafeOcrEndpoint } from "./ocr.ts";
+import { isAllowedDiscordImageUrl, OCR_SPACE_API_URL, parseOcrSpaceResponse } from "./ocr.ts";
 
 test("OCR aceita somente URLs HTTPS dos CDNs de imagem do Discord", () => {
   assert.equal(
@@ -23,14 +23,50 @@ test("OCR aceita somente URLs HTTPS dos CDNs de imagem do Discord", () => {
   assert.equal(isAllowedDiscordImageUrl("https://127.0.0.1/image.png"), false);
 });
 
-test("endpoint do OCR exige HTTPS e não aceita credenciais, query ou fragmento", () => {
-  assert.equal(isSafeOcrEndpoint("https://ocr.example.com/v1/read", "production"), true);
-  assert.equal(isSafeOcrEndpoint("http://ocr.example.com/v1/read", "production"), false);
-  assert.equal(isSafeOcrEndpoint("http://localhost:8080/ocr", "development"), true);
-  assert.equal(isSafeOcrEndpoint("http://localhost:8080/ocr", "production"), false);
-  assert.equal(isSafeOcrEndpoint("https://user:secret@ocr.example.com/ocr", "production"), false);
-  assert.equal(isSafeOcrEndpoint("https://ocr.example.com/ocr?key=secret", "production"), false);
-  const endpointWithCredentials = `https://${"user"}:${"pass"}@ocr.example.com/ocr`;
-  assert.equal(isSafeOcrEndpoint(endpointWithCredentials, "production"), false);
-  assert.equal(isSafeOcrEndpoint("not a URL", "production"), false);
+test("usa o endpoint oficial do OCR.space", () => {
+  assert.equal(OCR_SPACE_API_URL, "https://api.ocr.space/parse/image");
+});
+
+test("OCR.space retorna texto apenas para resultados de parsing bem-sucedidos", () => {
+  assert.deepEqual(
+    parseOcrSpaceResponse({
+      OCRExitCode: 1,
+      IsErroredOnProcessing: false,
+      ParsedResults: [{ FileParseExitCode: 1, ParsedText: "  texto reconhecido \n" }],
+    }),
+    { text: "texto reconhecido", confidence: null },
+  );
+  assert.equal(
+    parseOcrSpaceResponse({
+      OCRExitCode: 2,
+      IsErroredOnProcessing: false,
+      ParsedResults: [{ FileParseExitCode: "1", ParsedText: "resultado parcial válido" }],
+    })?.text,
+    "resultado parcial válido",
+  );
+  assert.equal(
+    parseOcrSpaceResponse({
+      OCRExitCode: 3,
+      IsErroredOnProcessing: false,
+      ParsedResults: [{ FileParseExitCode: 1, ParsedText: "não confiável" }],
+    }),
+    null,
+  );
+  assert.equal(
+    parseOcrSpaceResponse({
+      OCRExitCode: 1,
+      IsErroredOnProcessing: true,
+      ParsedResults: [{ FileParseExitCode: 1, ParsedText: "erro" }],
+    }),
+    null,
+  );
+  assert.equal(
+    parseOcrSpaceResponse({
+      OCRExitCode: 1,
+      IsErroredOnProcessing: false,
+      ParsedResults: [{ FileParseExitCode: 3, ParsedText: "falha" }],
+    }),
+    null,
+  );
+  assert.equal(parseOcrSpaceResponse(null), null);
 });

@@ -295,7 +295,7 @@ export async function handleImageContent(message: Message, log: Logger): Promise
 
   const images = [...message.attachments.values()]
     .filter((attachment) =>
-      ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"].includes(
+      ["image/jpeg", "image/png", "image/gif", "image/bmp", "image/tiff"].includes(
         (attachment.contentType ?? "").split(";")[0]!.trim().toLowerCase(),
       ),
     )

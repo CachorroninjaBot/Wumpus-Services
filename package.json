@@ -16,7 +16,7 @@
     "dev": "vite dev --host 0.0.0.0 --port 8080",
     "build": "node scripts/build-report.mjs && node scripts/sync-public.mjs",
     "db:migrate": "node scripts/migrate.mjs",
-    "start": "node scripts/start.mjs",
+    "start": "node --env-file-if-exists=.env scripts/start.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
     "preview": "node scripts/with-app-env.mjs vite preview",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/wumpus-typecheck.tsbuildinfo",

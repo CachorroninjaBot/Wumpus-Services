@@ -6,28 +6,60 @@
  * Nada disso existia no bot: imagem nunca era lida, entao print com golpe
  * passava direto pelo filtro.
  *
- * ATENCAO — contrato nao verificado: a API em `WUMPUS_HAIZ_OCR_URL` responde
- * 405 a GET, ou seja, existe e e POST-only, mas o formato do corpo nao esta
- * documentado em lugar nenhum do repositorio. Por isso a resposta e lida de
- * forma tolerante a varios formatos, e QUALQUER falha devolve `null` em vez de
- * lancar: OCR indisponivel nao pode impedir o automod de agir no texto.
+ * Integração com OCR.space: upload multipart e chave no header `apikey`.
  */
-import { bool, guildEntitlement, isEnabled, moduleConfig, num, str } from "./config.ts";
+import { bool, guildEntitlement, isEnabled, moduleConfig, num } from "./config.ts";
 import type { Logger } from "./logger.ts";
 import { isPlanId, monthlyOcrLimit, planAllows } from "../lib/wumpus/plan-features.ts";
 import { mutate } from "./store.ts";
 
 export type OcrResult = { text: string; confidence: number | null };
 
+export const OCR_SPACE_API_URL = "https://api.ocr.space/parse/image";
 /** Cache por URL: a mesma imagem nao precisa ser lida duas vezes. */
 const cache = new Map<string, { result: OcrResult | null; at: number }>();
 const CACHE_MAX = 300;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 1024 * 1024;
 export const OCR_MAX_IMAGES_PER_MESSAGE = 3;
 const MAX_CONCURRENT_REQUESTS = 4;
 const MAX_RESPONSE_BYTES = 128 * 1024;
 const MAX_OCR_TEXT_LENGTH = 12_000;
 const DISCORD_IMAGE_HOSTS = new Set(["cdn.discordapp.com"]);
+const IMAGE_TYPES = new Map<string, { extension: string; matches: (bytes: Uint8Array) => boolean }>(
+  [
+    [
+      "image/png",
+      {
+        extension: "png",
+        matches: (bytes) => bytes.subarray(0, 8).join(",") === "137,80,78,71,13,10,26,10",
+      },
+    ],
+    [
+      "image/jpeg",
+      {
+        extension: "jpg",
+        matches: (bytes) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff,
+      },
+    ],
+    [
+      "image/gif",
+      {
+        extension: "gif",
+        matches: (bytes) =>
+          ["GIF87a", "GIF89a"].includes(new TextDecoder().decode(bytes.subarray(0, 6))),
+      },
+    ],
+    ["image/bmp", { extension: "bmp", matches: (bytes) => bytes[0] === 0x42 && bytes[1] === 0x4d }],
+    [
+      "image/tiff",
+      {
+        extension: "tif",
+        matches: (bytes) =>
+          ["II*\0", "MM\0*"].includes(new TextDecoder().decode(bytes.subarray(0, 4))),
+      },
+    ],
+  ],
+);
 let activeRequests = 0;
 
 export function isAllowedDiscordImageUrl(value: string): boolean {
@@ -39,23 +71,6 @@ export function isAllowedDiscordImageUrl(value: string): boolean {
       !url.password &&
       (url.port === "" || url.port === "443") &&
       DISCORD_IMAGE_HOSTS.has(url.hostname.toLowerCase())
-    );
-  } catch {
-    return false;
-  }
-}
-
-export function isSafeOcrEndpoint(value: string, environment = process.env.NODE_ENV): boolean {
-  try {
-    const url = new URL(value);
-    const localHost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase());
-    return (
-      !url.username &&
-      !url.password &&
-      !url.hash &&
-      !url.search &&
-      (url.protocol === "https:" ||
-        (environment !== "production" && localHost && url.protocol === "http:"))
     );
   } catch {
     return false;
@@ -106,9 +121,9 @@ function cacheSet(key: string, result: OcrResult | null): void {
   cache.set(key, { result, at: Date.now() });
 }
 
-async function readJsonWithLimit(response: Response): Promise<unknown> {
+async function readResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
   const contentLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
     throw new Error("response_too_large");
   }
 
@@ -122,7 +137,7 @@ async function readJsonWithLimit(response: Response): Promise<unknown> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > MAX_RESPONSE_BYTES) {
+      if (total > maxBytes) {
         await reader.cancel();
         throw new Error("response_too_large");
       }
@@ -138,44 +153,37 @@ async function readJsonWithLimit(response: Response): Promise<unknown> {
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  return bytes;
+}
+
+async function readJsonWithLimit(response: Response): Promise<unknown> {
+  const bytes = await readResponseBytes(response, MAX_RESPONSE_BYTES);
   return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
 }
 
-/** Extrai o texto de uma resposta de formato desconhecido. */
-function extractText(payload: unknown): OcrResult | null {
-  if (!payload || typeof payload !== "object") return null;
-  const record = payload as Record<string, unknown>;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 
-  // Formatos plausiveis: { text }, { result: { text } }, { data: { text } },
-  // { text: { content } }, { results: [{ text }] }
-  const candidates: unknown[] = [
-    record.text,
-    record.ocr,
-    record.content,
-    record.message,
-    (record.result as Record<string, unknown> | undefined)?.text,
-    (record.data as Record<string, unknown> | undefined)?.text,
-    (record.text as Record<string, unknown> | undefined)?.content,
-    Array.isArray(record.results)
-      ? (record.results[0] as Record<string, unknown> | undefined)?.text
-      : undefined,
-    Array.isArray(record.lines) ? record.lines.join("\n") : undefined,
-  ];
+/** Extrai apenas resultados explicitamente marcados como parseados pelo OCR.space. */
+export function parseOcrSpaceResponse(payload: unknown): OcrResult | null {
+  if (!isRecord(payload) || payload.IsErroredOnProcessing === true) return null;
+  if (payload.OCRExitCode !== 1 && payload.OCRExitCode !== 2) return null;
+  if (!Array.isArray(payload.ParsedResults)) return null;
 
-  const text = candidates.find(
-    (value): value is string => typeof value === "string" && value.trim().length > 0,
-  );
+  const text = payload.ParsedResults.filter(isRecord)
+    .filter((result) => result.FileParseExitCode === 1 || result.FileParseExitCode === "1")
+    .map((result) => result.ParsedText)
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, MAX_OCR_TEXT_LENGTH);
+
   if (!text) return null;
 
-  const rawConfidence =
-    record.confidence ?? (record.result as Record<string, unknown> | undefined)?.confidence;
-  const parsedConfidence = typeof rawConfidence === "number" ? rawConfidence : Number.NaN;
-  const confidence =
-    Number.isFinite(parsedConfidence) && parsedConfidence >= 0 && parsedConfidence <= 1
-      ? parsedConfidence
-      : null;
-
-  return { text: text.trim().slice(0, MAX_OCR_TEXT_LENGTH), confidence };
+  // OCR.space não fornece confiança de transcrição no contrato de resposta.
+  return { text, confidence: null };
 }
 
 /**
@@ -193,14 +201,9 @@ export async function readImage(
   const config = await moduleConfig(guildId, "ocr");
   if (!isEnabled(config)) return null;
 
-  const endpoint = process.env.WUMPUS_HAIZ_OCR_URL;
-  const internalKey = process.env.WUMPUS_INTERNAL_KEY;
-  if (!endpoint || !internalKey) {
+  const apiKey = process.env.OCR_SPACE_API_KEY?.trim();
+  if (!apiKey) {
     options.log?.warn("OCR indisponivel", { guildId, reason: "missing_configuration" });
-    return null;
-  }
-  if (!isSafeOcrEndpoint(endpoint)) {
-    options.log?.warn("OCR indisponivel", { guildId, reason: "unsafe_endpoint_configuration" });
     return null;
   }
   if (!isAllowedDiscordImageUrl(imageUrl)) {
@@ -208,15 +211,16 @@ export async function readImage(
     return null;
   }
 
-  // Limite de tamanho: uma imagem enorme nao deve pendurar o handler.
-  const maxMb = Math.min(8, Math.max(1, num(config, "maxImageMb", 8)));
+  // O endpoint público gratuito do OCR.space limita arquivos enviados a 1 MiB.
+  const configuredMaxBytes = Math.max(1, Math.min(8, num(config, "maxImageMb", 8))) * 1024 * 1024;
+  const maxImageBytes = Math.min(MAX_IMAGE_BYTES, configuredMaxBytes);
   if (
     options.sizeBytes === undefined ||
     !Number.isFinite(options.sizeBytes) ||
     options.sizeBytes <= 0 ||
-    options.sizeBytes > Math.min(MAX_IMAGE_BYTES, maxMb * 1024 * 1024)
+    options.sizeBytes > maxImageBytes
   ) {
-    options.log?.info("imagem ignorada por tamanho", { guildId, maxMb });
+    options.log?.info("imagem ignorada por tamanho", { guildId, maxImageMb: 1 });
     return null;
   }
 
@@ -245,20 +249,42 @@ export async function readImage(
 
     const controller = new AbortController();
     timer = setTimeout(() => controller.abort(), 15_000);
-    const res = await fetch(endpoint, {
+    const imageResponse = await fetch(imageUrl, {
+      method: "GET",
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (!imageResponse.ok) {
+      options.log?.warn("não foi possível baixar imagem do Discord para OCR", {
+        guildId,
+        status: imageResponse.status,
+      });
+      return null;
+    }
+
+    const imageBytes = await readResponseBytes(imageResponse, maxImageBytes);
+    const imageType = [...IMAGE_TYPES].find(([, type]) => type.matches(imageBytes));
+    if (!imageType) {
+      options.log?.info("imagem ignorada por formato não suportado no OCR.space", { guildId });
+      return null;
+    }
+
+    const form = new FormData();
+    const fileBuffer = new ArrayBuffer(imageBytes.byteLength);
+    new Uint8Array(fileBuffer).set(imageBytes);
+    form.append(
+      "file",
+      new Blob([fileBuffer], { type: imageType[0] }),
+      `attachment.${imageType[1].extension}`,
+    );
+    form.append("OCREngine", "2");
+    form.append("isOverlayRequired", "false");
+
+    const res = await fetch(OCR_SPACE_API_URL, {
       method: "POST",
       redirect: "error",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Internal-Key": internalKey,
-      },
-      body: JSON.stringify({
-        imageUrl,
-        url: imageUrl,
-        guildId,
-        language: str(config, "language", "pt"),
-        provider: str(config, "provider", "hybrid"),
-      }),
+      headers: { apikey: apiKey },
+      body: form,
       signal: controller.signal,
     });
 
@@ -267,14 +293,15 @@ export async function readImage(
       return null;
     }
 
-    const result = extractText(await readJsonWithLimit(res));
+    const result = parseOcrSpaceResponse(await readJsonWithLimit(res));
 
-    // Sem confianca valida nao se usa OCR para moderacao automatica.
+    // Quando o provedor não oferece score, aceita-se apenas parse explicitamente
+    // bem-sucedido; um score disponível em outro contrato ainda respeita o limiar.
     const threshold = Math.min(1, Math.max(0, num(config, "confidenceThreshold", 0.7)));
-    if (result && (result.confidence === null || result.confidence < threshold)) {
+    if (result && result.confidence !== null && result.confidence < threshold) {
       options.log?.info("OCR sem confianca suficiente", {
         guildId,
-        confidence: result.confidence ?? "missing",
+        confidence: result.confidence,
         threshold,
       });
       if (useCache) cacheSet(key, null);
