@@ -26,7 +26,7 @@ SLA, transcript e feedback.
 | Transcript | ✅ `buildTranscript`: cabeçalho (quem abriu/assumiu/encerrou, motivo) + mensagens reais como `.txt` anexado; teto de 500 mensagens, mantendo as últimas |
 | Reabrir | ✅ botão na DM de feedback (`reopenEnabled`); cria canal novo com o transcript do anterior anexado; o original fica fechado (métricas intactas) |
 | Métricas por staff | ✅ `tickets-metrics.ts`: 1ª resposta (`firstResponseAt` = 1ª mensagem do atendente), resolução, CSAT, carga — no `/performance`, no plantão do `/stats` e no digest semanal |
-| Tickets na dashboard | ⚠️ usa o ESTADO LOCAL (localStorage) para claim/responder/encerrar. Os números reais do bot aparecem em `/performance` e `/stats` |
+| Tickets na dashboard | ✅ lê tickets persistidos pelo bot; claim, resposta, prioridade e encerramento atravessam a outbox; a tela consulta o estado atualizado |
 | Canal de saída (painel → bot) | ✅ construído e processado a cada 20s |
 
 Build: `npm run typecheck && npm test`. Os testes de tudo novo estão em
@@ -89,6 +89,7 @@ O bot guarda por servidor. `moduleConfig(guildId, "tickets")` lê o runtime.
   reason)`. `recordTicketMessage` grava `firstResponseAt` (1ª mensagem de quem
   assumiu) e `lastActivityAt` (qualquer um — autor ou staff).
 - **`commands.ts`** — `/performance [dias]`, com meta do módulo Equipe.
+- Dashboard de tickets lê `data/tickets.json` e `data/ticket_messages.json` por `createServerFn` com `requireGuildAccess`; ações passam pela outbox para o processo do bot.
 - Semântica de SLA é a MESMA da dashboard (`engine.ts` → `ticketSla`):
   `warning` = meta estourada, `breach` = 2x a meta; respondido dentro da meta
   não volta a estourar por idade. O alerta marca "já avisei" em `counters`

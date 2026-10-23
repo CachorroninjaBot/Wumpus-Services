@@ -13,7 +13,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { enqueueOutbox, readRuntime, writeRuntime, type OutboxJob } from "./runtime.server";
+import { enqueueOutbox, readBotCollection, readRuntime, writeRuntime, type BotTicketMessage, type BotTicketRecord, type OutboxJob } from "./runtime.server";
 import { requireGuildAccess } from "./session";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
@@ -130,7 +130,7 @@ export const getPublishStatus = createServerFn({ method: "POST" })
     const current = await readRuntime();
 
     return (current.outbox ?? [])
-      .filter((job) => job.guildId === data.guildId)
+      .filter((job) => job.guildId === data.guildId && job.kind === "panel")
       .slice(-20)
       .map((job) => ({
         id: job.id,
@@ -143,4 +143,98 @@ export const getPublishStatus = createServerFn({ method: "POST" })
         createdAt: job.createdAt,
         ...(job.at ? { at: job.at } : {})
       }));
+  });
+
+/** Real tickets are read from the bot's persisted collections, never localStorage. */
+export const getGuildTickets = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const [tickets, messages] = await Promise.all([
+      readBotCollection<BotTicketRecord>("tickets"),
+      readBotCollection<BotTicketMessage>("ticket_messages"),
+    ]);
+    return tickets
+      .filter((ticket) => ticket.guildId === data.guildId)
+      .sort((a, b) => b.id - a.id)
+      .slice(0, 500)
+      .map((ticket) => ({
+        id: String(ticket.id),
+        guildId: ticket.guildId,
+        number: ticket.id,
+        openerId: ticket.openerId,
+        claimedBy: ticket.claimedBy,
+        department: ticket.department ?? "Geral",
+        subject: messages.find((message) => message.ticketId === ticket.id && message.authorId === ticket.openerId)?.content.slice(0, 80) || `Atendimento #${ticket.id}`,
+        status: ticket.status,
+        priority: ticket.priority,
+        tags: [] as string[],
+        channelName: ticket.channelId,
+        createdAt: Date.parse(ticket.createdAt) || 0,
+        firstResponseAt: ticket.firstResponseAt ? Date.parse(ticket.firstResponseAt) || null : null,
+        closedAt: ticket.closedAt ? Date.parse(ticket.closedAt) || null : null,
+        feedback: ticket.feedback,
+        transcript: null as string | null,
+        messages: messages
+          .filter((message) => message.ticketId === ticket.id)
+          .slice(-500)
+          .map((message, index) => ({
+            id: `${ticket.id}-${index}`,
+            authorId: message.authorId,
+            authorName: message.authorName,
+            content: message.content,
+            at: Date.parse(message.at) || 0,
+            kind: message.authorId === ticket.openerId ? "user" as const : "staff" as const,
+          })),
+      }));
+  });
+
+export const requestTicketAction = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    ticketId: z.number().int().positive(),
+    actorId: z.string().regex(/^\d{17,20}$/),
+    action: z.enum(["claim", "reply", "close", "priority"]),
+    content: z.string().trim().min(1).max(2000).optional(),
+    priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+  }).strict().superRefine((input, ctx) => {
+    if (input.action === "reply" && !input.content) ctx.addIssue({ code: "custom", message: "A resposta não pode ficar vazia." });
+    if (input.action === "priority" && !input.priority) ctx.addIssue({ code: "custom", message: "Escolha uma prioridade válida." });
+  }).parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildAccess(data.token, data.guildId);
+    if (session.userId !== data.actorId) throw new Error("O atendente informado não corresponde à sessão.");
+    const job: OutboxJob = {
+      id: `ticket_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      guildId: data.guildId,
+      kind: "ticket_action",
+      target: "tickets",
+      channelRef: "",
+      action: data.action,
+      ticketId: data.ticketId,
+      actorId: data.actorId,
+      ...(data.content ? { content: data.content } : {}),
+      ...(data.priority ? { priority: data.priority } : {}),
+      createdAt: Date.now(),
+      status: "queued",
+    };
+    await enqueueOutbox(job);
+    return { jobId: job.id };
+  });
+
+export const getTicketActionStatus = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    jobId: z.string().min(1).max(100),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const job = (await readRuntime()).outbox?.find((entry) =>
+      entry.id === data.jobId && entry.guildId === data.guildId && entry.kind === "ticket_action");
+    return job ? { status: job.status, detail: job.detail ?? null } : { status: "missing" as const, detail: null };
   });

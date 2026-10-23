@@ -116,6 +116,43 @@ export async function recordTicketMessage(message: Message): Promise<void> {
   });
 }
 
+/** Sends a dashboard reply through the bot and records it with the real staff identity. */
+export async function sendTicketReply(
+  guild: Guild,
+  ticketId: number,
+  actorId: string,
+  content: string,
+  log: Logger
+): Promise<{ ok: boolean; error?: string }> {
+  const ticket = await getTicket(guild.id, ticketId);
+  if (!ticket || ticket.status === "closed") return { ok: false, error: "Este atendimento não está aberto." };
+  const channel = await guild.channels.fetch(ticket.channelId).catch(() => null);
+  if (!channel?.isTextBased() || !("send" in channel)) return { ok: false, error: "O canal do atendimento não está disponível." };
+  const member = await guild.members.fetch(actorId).catch(() => null);
+  const authorName = member?.displayName ?? actorId;
+  const at = new Date().toISOString();
+  try {
+    const safeAuthor = authorName.replace(/[*_]/g, "").replaceAll("`", "");
+    await channel.send({ content: `**${safeAuthor}**: ${content.slice(0, 2000)}`, allowedMentions: { parse: [] } });
+  } catch (error) {
+    log.warn("falha ao responder atendimento pela dashboard", { guildId: guild.id, ticketId, error: String(error) });
+    return { ok: false, error: "O Discord não aceitou a resposta neste canal." };
+  }
+  await mutate<TicketMessage>("ticket_messages", (rows) => {
+    rows.push({ ticketId, authorId: actorId, authorName, content: content.slice(0, 2000), at });
+    return rows;
+  });
+  await mutate<Ticket>("tickets", (rows) => {
+    const row = rows.find((entry) => entry.guildId === guild.id && entry.id === ticketId);
+    if (row) {
+      row.lastActivityAt = at;
+      if (row.claimedBy === actorId && !row.firstResponseAt) row.firstResponseAt = at;
+    }
+    return rows;
+  });
+  return { ok: true };
+}
+
 /**
  * Abre um atendimento: cria o canal privado, persiste o ticket e publica o
  * cabecalho com os botoes. O canal so nasce depois da checagem de limite, para
@@ -236,16 +273,18 @@ export async function openTicket(
           components: [
             { type: 2, style: 2, label: "Assumir", custom_id: id("ticket", "claim", ticketId) },
             { type: 2, style: 4, label: "Encerrar", custom_id: id("ticket", "close", ticketId) },
-            ...(
-              bool(config, "priorityEnabled", true)
-                ? [
-                    { type: 2, style: 2, label: "Prioridade", custom_id: id("ticket", "prio", ticketId, "high") },
-                    { type: 2, style: 2, label: "Urgente", custom_id: id("ticket", "prio", ticketId, "urgent") }
-                  ]
-                : []
-            )
+            ...(bool(config, "priorityEnabled", true)
+              ? [
+                  { type: 2, style: 2, label: "Baixa", custom_id: id("ticket", "prio", ticketId, "low") },
+                  { type: 2, style: 2, label: "Normal", custom_id: id("ticket", "prio", ticketId, "normal") },
+                  { type: 2, style: 2, label: "Alta", custom_id: id("ticket", "prio", ticketId, "high") },
+                ]
+              : [])
           ]
-        }
+        },
+        ...(bool(config, "priorityEnabled", true)
+          ? [{ type: 1, components: [{ type: 2, style: 2, label: "Urgente", custom_id: id("ticket", "prio", ticketId, "urgent") }] }]
+          : [])
       ]
     });
 
@@ -533,7 +572,6 @@ export async function checkSla(guild: Guild, log: Logger): Promise<number> {
   if (!isEnabled(config)) return 0;
 
   const slaMinutes = Math.trunc(num(config, "slaWarningMinutes", 0));
-  if (slaMinutes <= 0) return 0;
 
   const escalationRole = resolveRole(guild, str(config, "escalationRoleId"));
   const autoInactiveHours = Math.trunc(num(config, "autoCloseInactiveHours", 0));

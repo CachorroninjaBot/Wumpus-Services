@@ -8,10 +8,10 @@
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Guild } from "discord.js";
-import { pendingJobs, pruneOutbox, settleJob } from "./outbox.ts";
+import { pendingJobs, pruneOutbox, settleActionJob, settleJob } from "./outbox.ts";
 import { buildPanelPayload } from "./panels.ts";
 import { buildFormPanel } from "./forms.ts";
-import { buildTicketPanel } from "./tickets.ts";
+import { buildTicketPanel, claimTicket, closeTicket, sendTicketReply, setTicketPriority } from "./tickets.ts";
 import { asSendable, resolveChannel } from "./resolve.ts";
 import type { Logger } from "./logger.ts";
 import type { OutboxJob, RuntimeFile } from "../lib/wumpus/runtime.server.ts";
@@ -105,6 +105,11 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
   let outbox = runtime.outbox ?? [];
 
   for (const job of pending) {
+    if (job.kind === "ticket_action") {
+      const result = await processTicketAction(guild, job, log);
+      outbox = settleActionJob(outbox, job.id, result);
+      continue;
+    }
     const result = await publishPanel(guild, job);
     outbox = settleJob(outbox, job.id, result);
 
@@ -122,4 +127,25 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
 
   await writeRuntimeFile({ ...runtime, outbox: pruneOutbox(outbox), updatedAt: Date.now() });
   return pending.length;
+}
+
+async function processTicketAction(guild: Guild, job: OutboxJob, log: Logger): Promise<{ ok: boolean; detail: string }> {
+  if (!job.action || !job.ticketId || !job.actorId) return { ok: false, detail: "Pedido de atendimento incompleto." };
+  if (job.action === "claim") {
+    const result = await claimTicket(guild, job.ticketId, job.actorId, log);
+    if (result.ok || result.alreadyBy === job.actorId) return { ok: true, detail: "Atendimento assumido." };
+    return { ok: false, detail: result.alreadyBy ? "Este atendimento já foi assumido por outro atendente." : "Atendimento não encontrado ou encerrado." };
+  }
+  if (job.action === "reply") {
+    if (!job.content) return { ok: false, detail: "Resposta vazia." };
+    const result = await sendTicketReply(guild, job.ticketId, job.actorId, job.content, log);
+    return { ok: result.ok, detail: result.ok ? "Resposta enviada ao Discord." : result.error ?? "Não foi possível responder." };
+  }
+  if (job.action === "priority") {
+    if (!job.priority) return { ok: false, detail: "Prioridade inválida." };
+    const result = await setTicketPriority(guild, job.ticketId, job.priority, job.actorId, log);
+    return { ok: result, detail: result ? "Prioridade atualizada." : "Ticket encerrado, inexistente ou já está nessa prioridade." };
+  }
+  const result = await closeTicket(guild, job.ticketId, job.actorId, log);
+  return { ok: result.ok, detail: result.ok ? "Atendimento encerrado." : "Atendimento inexistente ou já encerrado." };
 }

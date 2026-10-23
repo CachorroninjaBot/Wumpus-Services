@@ -12,7 +12,9 @@ import { analyzeWithGrok } from "@/lib/wumpus/analyze";
 import { asList, asString, planAllows, searchArticles, shouldAutoClose, ticketSla, type SlaState } from "@/lib/wumpus/engine";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
-import type { Ticket, TicketPriority, TicketStatus } from "@/lib/wumpus/types";
+import { getGuildTickets, getTicketActionStatus, requestTicketAction } from "@/lib/wumpus/runtime-store";
+import { getStoredSessionToken } from "@/lib/wumpus/session-token";
+import type { Ticket, TicketPriority } from "@/lib/wumpus/types";
 import { cn, formatRelative, formatTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/tickets")({ component: TicketsPage });
@@ -27,40 +29,81 @@ function TicketsPage() {
   const gid = useWumpus((s) => s.activeGuildId);
   const guild = useActiveGuild();
   const user = useWumpus((s) => s.sessionUser);
-  const allTickets = useWumpus((s) => s.tickets);
-  const tickets = allTickets.filter((t) => t.guildId === gid);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [ticketsLoaded, setTicketsLoaded] = useState(false);
+  const [ticketLoadError, setTicketLoadError] = useState<string | null>(null);
   const members = useGuildMembers();
   const tcfg = useModule("tickets");
   const updateConfig = useWumpus((s) => s.updateConfig);
   const setEnabled = useWumpus((s) => s.setModuleEnabled);
-  const claim = useWumpus((s) => s.claimTicket);
-  const close = useWumpus((s) => s.closeTicket);
-  const archive = useWumpus((s) => s.archiveTicket);
-  const reopen = useWumpus((s) => s.reopenTicket);
-  const addMsg = useWumpus((s) => s.addTicketMessage);
-  const setPri = useWumpus((s) => s.setTicketPriority);
-  const setTags = useWumpus((s) => s.setTicketTags);
-  const openTicket = useWumpus((s) => s.openTicket);
-  const sweep = useWumpus((s) => s.sweepInactive);
   const articles = useWumpus((s) => s.articles);
   const kcfg = useModule("knowledge");
   const aiAllowed = planAllows(guild.plan, "ai") && Boolean(tcfg.config.aiSupportEnabled);
   const departments = (planAllows(guild.plan, "multiDepartment") ? asList(tcfg.config.departments) : asList(tcfg.config.departments).slice(0, 1));
 
-  const [filter, setFilter] = useState<"active" | TicketStatus>("active");
+  const [filter, setFilter] = useState<"active" | "closed">("active");
   const [selectedId, setSelectedId] = useState<string | null>(tickets[0]?.id ?? null);
   const [showTicketOnMobile, setShowTicketOnMobile] = useState(false);
   const [reply, setReply] = useState("");
   const [settings, setSettings] = useState(false);
-  const [compose, setCompose] = useState(false);
   const [ai, setAi] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
-  const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [pubBusy, setPubBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const firstTicketId = tickets[0]?.id ?? null;
+
+  useEffect(() => {
+    let stopped = false;
+    const refresh = async () => {
+      const token = getStoredSessionToken();
+      if (!token || !gid) {
+        if (!stopped) {
+          setTickets([]);
+          setTicketLoadError("Entre com Discord para consultar os tickets deste servidor.");
+          setTicketsLoaded(true);
+        }
+        return;
+      }
+      try {
+        const rows = await getGuildTickets({ data: { token, guildId: gid } });
+        if (!stopped) { setTickets(rows); setTicketLoadError(null); setTicketsLoaded(true); }
+      } catch (error) {
+        if (!stopped) { setTicketLoadError(error instanceof Error ? error.message : "Não foi possível carregar os atendimentos reais."); setTicketsLoaded(true); }
+      }
+    };
+    setTickets([]);
+    setTicketsLoaded(false);
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 10_000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [gid]);
+
+  async function runTicketAction(action: "claim" | "reply" | "close" | "priority", input: { content?: string; priority?: TicketPriority } = {}) {
+    if (!ticket) return false;
+    const token = getStoredSessionToken();
+    if (!token) { setNotice("Entre novamente com Discord para atender tickets."); return false; }
+    setActionBusy(true);
+    try {
+      const { jobId } = await requestTicketAction({ data: { token, guildId: gid, ticketId: ticket.number, actorId: user.id, action, ...input } });
+      for (let attempt = 0; attempt < 24; attempt++) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        const result = await getTicketActionStatus({ data: { token, guildId: gid, jobId } });
+        if (result.status === "done" || result.status === "failed") {
+          setNotice(result.detail ?? (result.status === "done" ? "Concluído." : "O bot não conseguiu executar a ação."));
+          const rows = await getGuildTickets({ data: { token, guildId: gid } });
+          setTickets(rows);
+          return result.status === "done";
+        }
+      }
+      setNotice("O bot ainda está processando. A fila será atualizada automaticamente.");
+      return false;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Não foi possível solicitar a ação ao bot.");
+      return false;
+    } finally { setActionBusy(false); }
+  }
 
   useEffect(() => {
     setSelectedId(firstTicketId);
@@ -103,20 +146,12 @@ function TicketsPage() {
         <Button variant="outline" size="sm" onClick={() => setSettings(true)}>
           Painel e SLA
         </Button>
-        <Button size="sm" variant="outline" onClick={() => {
-          const r = sweep();
-          setNotice(r.closed > 0 ? `${r.closed} atendimento(s) encerrado(s) por inatividade.` : r.error ?? "Nada ocioso.");
-        }}>
-          Fechar ociosos
-        </Button>
-        <Button size="sm" onClick={() => setCompose(true)}>
-          Simular ticket
-        </Button>
       </div>
 
       <p role="note" className="m-0 rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
-        Esta fila é uma demonstração local. Tickets reais são criados e atendidos pelo bot dentro do Discord; aqui você configura e publica o painel.
+        Esta fila lê os atendimentos persistidos pelo bot. As ações são encaminhadas ao Discord pelo bot.
       </p>
+      {ticketLoadError ? <p role="alert" className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn">{ticketLoadError}</p> : null}
 
       {!tcfg.enabled ? (
         <p className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn">Atendimento pausado neste servidor.</p>
@@ -130,7 +165,7 @@ function TicketsPage() {
       ) : null}
 
       <div className="flex flex-wrap gap-1.5">
-        {(["active", "closed", "archived"] as const).map((f) => (
+        {(["active", "closed"] as const).map((f) => (
           <button
             key={f}
             type="button"
@@ -140,7 +175,7 @@ function TicketsPage() {
               filter === f ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-muted",
             )}
           >
-            {f === "active" ? "Abertos" : f === "closed" ? "Encerrados" : "Arquivo"}
+            {f === "active" ? "Abertos" : "Encerrados"}
           </button>
         ))}
       </div>
@@ -151,10 +186,12 @@ function TicketsPage() {
             <div className="space-y-3 p-4">
               <div>
                 <h2 className="m-0 text-base font-semibold">
-                  {tickets.length === 0 ? "Sua fila começa aqui" : "Nenhum atendimento nesta vista"}
+                  {!ticketsLoaded ? "Carregando atendimentos…" : tickets.length === 0 ? "Sua fila começa aqui" : "Nenhum atendimento nesta vista"}
                 </h2>
                 <p className="mt-1 mb-0 text-sm text-muted-foreground">
-                  {tickets.length === 0
+                  {!ticketsLoaded
+                    ? "Buscando tickets reais no armazenamento do bot."
+                    : tickets.length === 0
                     ? "Configure o canal e os cargos de atendimento e publique o painel no Discord para receber os primeiros tickets."
                     : "Troque o filtro para consultar os atendimentos de outro estado."}
                 </p>
@@ -209,7 +246,7 @@ function TicketsPage() {
                 </Button>
                 <div className="min-w-0 flex-1">
                   <p className="m-0 text-xs text-muted-foreground">
-                    #{ticket.number} · #{ticket.channelName}
+                    #{ticket.number} · <a className="underline underline-offset-2" href={`https://discord.com/channels/${ticket.guildId}/${ticket.channelName}`} target="_blank" rel="noreferrer">Abrir canal</a>
                   </p>
                   <h2 className="mt-0.5 mb-0 text-lg font-semibold">{ticket.subject}</h2>
                 </div>
@@ -217,7 +254,8 @@ function TicketsPage() {
                   <NativeSelect
                     className="h-9 w-auto"
                     value={ticket.priority}
-                    onChange={(e) => setPri(ticket.id, e.target.value as TicketPriority)}
+                    disabled={actionBusy || ticket.status === "closed"}
+                    onChange={(e) => void runTicketAction("priority", { priority: e.target.value as TicketPriority })}
                   >
                     <option value="low">baixa</option>
                     <option value="normal">normal</option>
@@ -229,35 +267,20 @@ function TicketsPage() {
               <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <span>{ticket.department}</span>
                 <span>aberto {formatTime(ticket.createdAt)}</span>
-                {ticket.claimedBy ? <span>com {memberById(ticket.claimedBy)?.displayName}</span> : <span>sem dono</span>}
+                {ticket.claimedBy ? <span>com {memberById(ticket.claimedBy)?.displayName ?? ticket.claimedBy}</span> : <span>sem dono</span>}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {ticket.status === "open" || ticket.status === "claimed" ? (
                   <>
-                    <Button size="sm" variant="secondary" onClick={() => {
-                      const r = claim(ticket.id, user.id);
-                      setNotice(r.ok ? "Atendimento assumido." : r.error);
-                    }}>
+                    <Button size="sm" variant="secondary" disabled={actionBusy} onClick={() => void runTicketAction("claim")}>
                       Assumir
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => setCloseOpen(true)}>
+                    <Button size="sm" variant="outline" disabled={actionBusy} onClick={() => setCloseOpen(true)}>
                       Encerrar
                     </Button>
                     {aiAllowed ? (
                       <Button size="sm" variant="ghost" disabled={aiBusy} onClick={() => void runAi(ticket)}>
                         {aiBusy ? "Analisando…" : "Analisar com IA"}
-                      </Button>
-                    ) : null}
-                  </>
-                ) : null}
-                {ticket.status === "closed" ? (
-                  <>
-                    <Button size="sm" variant="secondary" onClick={() => archive(ticket.id)}>
-                      Arquivar
-                    </Button>
-                    {tcfg.config.reopenEnabled === true ? (
-                      <Button size="sm" variant="outline" onClick={() => reopen(ticket.id)}>
-                        Reabrir
                       </Button>
                     ) : null}
                   </>
@@ -273,7 +296,7 @@ function TicketsPage() {
                     {who ? <MemberAvatar name={who.displayName} hue={who.hue} size={28} /> : <span className="size-7" />}
                     <div className="min-w-0">
                       <p className="m-0 text-[11px] text-muted-foreground">
-                        {who?.displayName ?? "Sistema"} · {formatRelative(m.at)}
+                        {who?.displayName ?? m.authorName ?? "Sistema"} · {formatRelative(m.at)}
                       </p>
                       <p className="m-0 text-sm leading-relaxed">{m.content}</p>
                     </div>
@@ -304,8 +327,7 @@ function TicketsPage() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!reply.trim()) return;
-                  addMsg(ticket.id, user.id, reply.trim(), "staff");
-                  setReply("");
+                  void runTicketAction("reply", { content: reply.trim() }).then((ok) => { if (ok) setReply(""); });
                 }}
               >
                 <Input
@@ -313,27 +335,10 @@ function TicketsPage() {
                   onChange={(e) => setReply(e.target.value)}
                   placeholder="Responder como staff…"
                 />
-                <Button type="submit">Enviar</Button>
+                <Button type="submit" disabled={actionBusy}>Enviar</Button>
               </form>
             ) : null}
 
-            <div className="border-t border-border px-4 py-2">
-              <Label>Tags</Label>
-              <Input
-                className="mt-1 h-9"
-                defaultValue={ticket.tags.join(", ")}
-                key={ticket.id}
-                onBlur={(e) =>
-                  setTags(
-                    ticket.id,
-                    e.target.value
-                      .split(",")
-                      .map((x) => x.trim())
-                      .filter(Boolean),
-                  )
-                }
-              />
-            </div>
           </Card>
         ) : (
           <Card className={cn("min-h-64 place-items-center text-sm text-muted-foreground", showTicketOnMobile ? "grid" : "hidden lg:grid")}>
@@ -468,55 +473,14 @@ function TicketsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={compose} onOpenChange={setCompose}>
-        <DialogContent>
-          <DialogTitle>Simular ticket</DialogTitle>
-          <DialogDesc>Cria um registro local de demonstração; não abre um canal no Discord.</DialogDesc>
-          <ComposeForm
-            departments={departments}
-            members={members}
-            onCreate={(data) => {
-              const res = openTicket(data);
-              if (res.ok) {
-                setSelectedId(res.id);
-                setShowTicketOnMobile(true);
-                setCompose(false);
-              } else {
-                alert(res.error);
-              }
-            }}
-          />
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
         <DialogContent>
           <DialogTitle>Encerrar atendimento</DialogTitle>
-          <DialogDesc>A transcrição vai para o canal configurado. Opcional: registrar a nota do cliente.</DialogDesc>
-          {tcfg.config.feedbackEnabled ? (
-            <div className="mt-3 space-y-2">
-              <Label>Nota</Label>
-              <NativeSelect value={rating} onChange={(e) => setRating(Number(e.target.value))}>
-                {[5, 4, 3, 2, 1].map((n) => (
-                  <option key={n} value={n}>
-                    {n} / 5
-                  </option>
-                ))}
-              </NativeSelect>
-              <Textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Comentário" />
-            </div>
-          ) : null}
+          <DialogDesc>O bot encerrará o canal e enviará a pesquisa de satisfação configurada.</DialogDesc>
           <Button
             className="mt-4 w-full"
-            onClick={() => {
-              if (!ticket) return;
-              close(
-                ticket.id,
-                user.id,
-                tcfg.config.feedbackEnabled ? { rating, comment } : undefined,
-              );
-              setCloseOpen(false);
-            }}
+            disabled={actionBusy}
+            onClick={() => void runTicketAction("close").then((ok) => { if (ok) setCloseOpen(false); })}
           >
             Encerrar e gerar transcrição
           </Button>
@@ -532,58 +496,5 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <Label>{label}</Label>
       {children}
     </div>
-  );
-}
-
-function ComposeForm({
-  departments,
-  members,
-  onCreate,
-}: {
-  departments: string[];
-  members: ReturnType<typeof useGuildMembers>;
-  onCreate: (d: { openerId: string; department: string; subject: string; body: string }) => void;
-}) {
-  const [openerId, setOpenerId] = useState(members.find((m) => !m.roleIds.includes("role_staff"))?.id ?? members[0]?.id);
-  const [department, setDepartment] = useState(departments[0] ?? "Suporte");
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
-  return (
-    <form
-      className="mt-4 space-y-3"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!openerId || !subject.trim() || !body.trim()) return;
-        onCreate({ openerId, department, subject: subject.trim(), body: body.trim() });
-      }}
-    >
-      <Field label="Membro">
-        <NativeSelect value={openerId} onChange={(e) => setOpenerId(e.target.value)}>
-          {members.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.displayName}
-            </option>
-          ))}
-        </NativeSelect>
-      </Field>
-      <Field label="Departamento">
-        <NativeSelect value={department} onChange={(e) => setDepartment(e.target.value)}>
-          {departments.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </NativeSelect>
-      </Field>
-      <Field label="Assunto">
-        <Input value={subject} onChange={(e) => setSubject(e.target.value)} required />
-      </Field>
-      <Field label="Primeira mensagem">
-        <Textarea value={body} onChange={(e) => setBody(e.target.value)} required />
-      </Field>
-      <Button type="submit" className="w-full">
-        Abrir
-      </Button>
-    </form>
   );
 }
