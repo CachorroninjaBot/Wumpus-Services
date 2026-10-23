@@ -8,7 +8,6 @@ import { renderTemplate, asString } from "@/lib/wumpus/engine";
 import { plans as fallbackPlans, type PlanId } from "@/lib/wumpus/brand";
 import { planById, serverLimit } from "@/lib/wumpus/catalog";
 import { useBilling } from "@/lib/wumpus/use-billing";
-import { isPlatformOwner } from "@/lib/wumpus/owner";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 
 export const Route = createFileRoute("/app/settings")({ component: SettingsPage });
@@ -30,7 +29,7 @@ function SettingsPage() {
   const sessionUser = useWumpus((s) => s.sessionUser);
   // Trocar de plano pela interface e poder de dono (ferramenta de suporte).
   // Cliente so muda de plano pagando: o botao vira link de checkout.
-  const isOwner = isPlatformOwner(sessionUser.id);
+  const isOwner = sessionUser.isAdmin;
   const sample = members[0];
   const preview = renderTemplate(asString(servers.config.joinMessage), {
     user: sample?.displayName ?? "membro",

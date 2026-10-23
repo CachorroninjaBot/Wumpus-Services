@@ -4,7 +4,6 @@ import { channelNameFor, effectiveStrikes, evaluateNuke, evaluateRaid, nextModer
 import { defaultsFor, presets, type ModuleKey, type PresetId } from "./defaults";
 import { mergeModuleDefaults } from "./merge-modules";
 import { publishGuildRuntime } from "./runtime-store";
-import { isPlatformOwner } from "./owner";
 import type { PlanId } from "./catalog";
 import { normalizePlan } from "./catalog";
 import { getStoredSessionToken } from "./session-token";
@@ -256,6 +255,9 @@ export const useWumpus = create<WumpusStore>((set, get) => {
     try {
       const access = await resolveAccess({ data: { token } });
       if (!access.ok) {
+        const current = get();
+        set({ sessionUser: { ...current.sessionUser, isAdmin: false } });
+        persist(pick(get()));
         console.error(`Não foi possível validar o acesso ao dashboard: ${access.error}`);
         return;
       }
@@ -267,7 +269,11 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       const activeGuildId = guildIds.has(current.activeGuildId)
         ? current.activeGuildId
         : guilds[0]?.id ?? "";
-      set({ guilds, activeGuildId });
+      set({
+        guilds,
+        activeGuildId,
+        sessionUser: { ...current.sessionUser, isAdmin: access.entitlements.isOwner },
+      });
       persist(pick(get()));
       publishModules(get());
     } catch (error) {
@@ -323,14 +329,12 @@ export const useWumpus = create<WumpusStore>((set, get) => {
             const guilds = (parsed.guilds ?? base.guilds).map((g) => ({ ...g, plan: normalizePlan(g.plan) }));
             const licenses = (parsed.licenses ?? base.licenses).map((l) => ({ ...l, plan: normalizePlan(l.plan) }));
 
-            // Sessao salva antes desta correcao traz `isAdmin: true` para todo
-            // mundo. Revalidar aqui e o que impede um login antigo de continuar
-            // entrando na area restrita — sem isso a correcao so valeria para
-            // quem entrasse de novo.
+            // Não confiar em `isAdmin` do localStorage. O valor válido volta
+            // na checagem assinada que roda logo após hidratar a sessão.
             const stored = parsed.sessionUser ?? base.sessionUser;
             const sessionUser = {
               ...stored,
-              isAdmin: isPlatformOwner(stored.id),
+              isAdmin: false,
             };
 
             // Os defaults entram POR BAIXO do que esta salvo. Sem isto, chave
@@ -388,8 +392,8 @@ export const useWumpus = create<WumpusStore>((set, get) => {
     // para abrir a area restrita.
     setAdmin: (on) => {
       const current = get().sessionUser;
-      if (on && !isPlatformOwner(current.id)) return;
-      write({ sessionUser: { ...current, isAdmin: on && isPlatformOwner(current.id) } });
+      if (on && !current.isAdmin) return;
+      write({ sessionUser: { ...current, isAdmin: on && current.isAdmin } });
     },
 
     updateConfig: (module, patch) => {
@@ -1134,7 +1138,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       // Só o dono troca plano por aqui. O cliente muda de plano pagando na
       // ShardPay — sem esta trava, o botao da tela de servidor dava Escala de
       // graca a qualquer sessao.
-      if (!isPlatformOwner(state.sessionUser.id)) return;
+      if (!state.sessionUser.isAdmin) return;
       write({
         guilds: state.guilds.map((g) => (g.id === state.activeGuildId ? { ...g, plan } : g)),
         licenses: state.licenses.map((l) => {

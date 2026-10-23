@@ -23,7 +23,6 @@ import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { brand, groupLabels, navItems, type ModuleGroupId, type NavId } from "@/lib/wumpus/brand";
-import { isPlatformOwner } from "@/lib/wumpus/owner";
 import { SESSION_TOKEN_KEY } from "@/lib/wumpus/session-token";
 import { useWumpus } from "@/lib/wumpus/store";
 import { cn } from "@/lib/utils";
@@ -134,7 +133,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const active = useActiveNav();
   const nextTheme = theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
-  const isOwner = isPlatformOwner(user.id);
+  const isOwner = user.isAdmin;
 
   useEffect(() => { hydrate(); }, [hydrate]);
 
@@ -170,12 +169,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <BrandMark size={46} />
           <h1 className="mb-2 mt-6 text-2xl font-semibold">Vamos preparar seu servidor</h1>
           <p className="mb-6 mt-0 text-sm leading-6 text-muted-foreground">
-            Instale o Wumpus em um servidor que você administra e conecte seu plano para começar a configurar.
+            {isOwner
+              ? "Seu acesso de dono da plataforma está ativo. Adicione o Wumpus a um servidor que você administra para começar."
+              : "Instale o Wumpus em um servidor que você administra e conecte seu plano para começar a configurar."}
           </p>
           <a href={brand.invite} target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
             Adicionar o Wumpus ao Discord
           </a>
-          <Link to="/" className="mt-4 block text-center text-sm text-muted-foreground hover:text-foreground">Ver planos e recursos</Link>
+          {!isOwner ? <Link to="/" className="mt-4 block text-center text-sm text-muted-foreground hover:text-foreground">Ver planos e recursos</Link> : null}
         </section>
       </div>
     );

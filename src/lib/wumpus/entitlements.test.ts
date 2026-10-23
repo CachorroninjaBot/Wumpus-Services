@@ -36,8 +36,12 @@ function input(over: Partial<Parameters<typeof resolveEntitlements>[0]> = {}) {
 
 /* ---------------------------------------------------------------- owner --- */
 
-test("o dono e reconhecido pelo id", () => {
-  assert.ok(isPlatformOwner(OWNER_DISCORD_ID));
+test("o dono configurado e reconhecido pelo id", () => {
+  const configured = [process.env.WUMPUS_OWNER_ID, process.env.wumpus_owner_id]
+    .find((value) => Boolean(value?.trim()))
+    ?.split(/[\s,;]+/)
+    .find((value) => /^\d{17,20}$/.test(value));
+  assert.ok(isPlatformOwner(configured ?? OWNER_DISCORD_ID));
 });
 
 test("qualquer outro id nao e dono", () => {

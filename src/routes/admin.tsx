@@ -4,7 +4,6 @@ import { BrandMark } from "@/components/brand";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { isPlatformOwner } from "@/lib/wumpus/owner";
 import { forceGuildResync, getAdminOverview } from "@/lib/wumpus/admin";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { useWumpus } from "@/lib/wumpus/store";
@@ -41,8 +40,8 @@ function AdminPage() {
   }
 
   useEffect(() => {
-    if (hydrated && user.signedIn && isPlatformOwner(user.id)) void refresh();
-  }, [hydrated, user.id, user.signedIn]);
+    if (hydrated && user.signedIn && user.isAdmin) void refresh();
+  }, [hydrated, user.isAdmin, user.signedIn]);
 
   async function resync(guildId: string, guildName: string) {
     setBusyGuild(guildId);
@@ -61,7 +60,7 @@ function AdminPage() {
     return <div className="grid min-h-dvh place-items-center text-muted-foreground">Carregando…</div>;
   }
 
-  if (!user.signedIn || !isPlatformOwner(user.id)) {
+  if (!user.signedIn || !user.isAdmin) {
     return (
       <main className="grid min-h-dvh place-items-center bg-background px-4 text-foreground">
         <Card className="w-full max-w-sm space-y-4">
