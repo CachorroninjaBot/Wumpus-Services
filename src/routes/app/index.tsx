@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { ArrowRight, AlertTriangle, Clock3, Ticket, Shield } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, AlertTriangle, Clock3, ClipboardCheck, Ticket, Shield } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -22,6 +22,9 @@ function Overview() {
   const [statusError, setStatusError] = useState<string | null>(null);
   const [tickets, setTickets] = useState<WumpusTicket[]>([]);
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof getGuildActivity>> | null>(null);
+  // #3 — loading state para feedback visual do refresh periódico
+  const [loading, setLoading] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
 
   const submissions = activity?.pendingForms ?? 0;
   const logs = activity?.recentEvents ?? [];
@@ -30,9 +33,13 @@ function Overview() {
   const latestAttempt = [...publishStatuses].sort((a, b) => (b.at ?? b.createdAt) - (a.at ?? a.createdAt))[0];
   const latestConfirmed = publishStatuses.filter((job) => job.status === "done").sort((a, b) => (b.at ?? b.createdAt) - (a.at ?? a.createdAt))[0];
 
+  // #7 — Map id→member para lookup O(1) em vez de .find() O(n) por ticket
+  const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
+
   useEffect(() => {
     let active = true;
     const refreshStatus = async () => {
+      if (active) setLoading(true);
       try {
         const token = getStoredSessionToken();
         if (!token) {
@@ -49,9 +56,12 @@ function Overview() {
           setTickets(liveTickets);
           setActivity(liveActivity);
           setStatusError(null);
+          setLastUpdatedAt(new Date());
         }
       } catch (error) {
         if (active) setStatusError(error instanceof Error ? error.message : "Não foi possível consultar o estado real do bot.");
+      } finally {
+        if (active) setLoading(false);
       }
     };
     void refreshStatus();
@@ -76,6 +86,7 @@ function Overview() {
         {lockdown ? <Badge tone="danger">Lockdown ativo</Badge> : null}
       </header>
 
+      {/* Barra de status do bot */}
       <div className="grid gap-2 rounded-xl border border-border bg-card px-3 py-3 text-sm sm:grid-cols-3" aria-label="Estado do bot e das publicações">
         <StatusLine label="Bot neste servidor" tone={activity?.bot.status === "online" ? "ok" : activity?.bot.status === "offline" ? "danger" : "warn"}>
           {activity?.bot.status === "online" ? `Conectado${activity.bot.pingMs == null ? "" : ` · ${activity.bot.pingMs} ms`}` : activity?.bot.status === "offline" ? "Sem conexão recente" : "Estado indisponível"}
@@ -89,7 +100,28 @@ function Overview() {
           {latestAttempt?.status === "failed" ? <span className="block text-xs text-muted-foreground">Última tentativa falhou · {formatRelative(latestAttempt.at ?? latestAttempt.createdAt)}</span> : null}
         </StatusLine>
       </div>
-      {statusError ? <p className="m-0 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">Não foi possível atualizar o estado: {statusError}</p> : null}
+
+      {/* #3 — Feedback de última atualização */}
+      <div className="flex items-center justify-between">
+        {statusError ? <p className="m-0 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">Não foi possível atualizar o estado: {statusError}</p> : <span />}
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+          {loading ? (
+            <><span className="inline-block size-2 animate-pulse rounded-full bg-warn" />Atualizando…</>
+          ) : lastUpdatedAt ? (
+            <>Atualizado às {lastUpdatedAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</>
+          ) : null}
+        </span>
+      </div>
+
+      {/* #1 — KPIs acima da tabela de tickets */}
+      <dl className="grid grid-cols-2 gap-y-3 rounded-xl border border-border bg-card px-4 py-3 lg:grid-cols-4 lg:divide-x lg:divide-border">
+        <Summary label="Tickets abertos" value={String(open.length)} hint="sem encerrar" />
+        <Summary label="SLA em atraso" value={String(breaches.length)} hint="sem primeira resposta" warn={breaches.length > 0} />
+        <Summary label="Formulários" value={String(submissions)} hint="aguardando revisão" />
+        {/* #6 — Hint orientado à ação quando não há avaliações */}
+        <Summary label="Satisfação" value={avg} hint={csat.length > 0 ? `${csat.length} avaliações` : "Solicite feedback nos tickets"} />
+      </dl>
+
       {breaches.length > 0 ? (
         <Card className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="grid size-10 place-items-center rounded-xl bg-destructive/15 text-destructive">
@@ -115,7 +147,8 @@ function Overview() {
           <div><h2 className="m-0 text-lg font-semibold">Próximos atendimentos</h2><p className="m-0 mt-1 text-sm text-muted-foreground">Acompanhe responsável, prioridade e prazo numa única leitura.</p></div>
           <Link to="/app/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-primary">Abrir fila completa <ArrowRight className="size-4" /></Link>
         </div>
-        <div className="hidden grid-cols-[90px_minmax(180px,1fr)_130px_140px_100px_110px] gap-3 border-b border-border pb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground lg:grid">
+        {/* #5 — text-[11px] → text-xs (12px mínimo) */}
+        <div className="hidden grid-cols-[90px_minmax(180px,1fr)_130px_140px_100px_110px] gap-3 border-b border-border pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground lg:grid">
           <span>Registro</span><span>Assunto</span><span>Departamento</span><span>Responsável</span><span>Prioridade</span><span>Prazo</span>
         </div>
         <ul className="m-0 divide-y divide-border p-0">
@@ -125,7 +158,8 @@ function Overview() {
             return <li key={t.id} className="grid gap-2 py-3 lg:grid-cols-[90px_minmax(180px,1fr)_130px_140px_100px_110px] lg:items-center lg:gap-3">
               <span className="font-mono-num text-sm font-semibold text-primary">#{t.number}</span>
               <span className="min-w-0"><a href={`/app/tickets?ticket=${encodeURIComponent(t.id)}`} className="block truncate text-sm font-medium text-foreground underline-offset-2 hover:text-primary hover:underline">{t.subject || `Ticket #${t.number}`}</a><small className="text-muted-foreground">Aberto {formatRelative(t.createdAt)}</small></span>
-              <span className="text-sm">{t.department}</span><span className="text-sm text-muted-foreground">{t.claimedBy ? `Em atendimento · ${members.find((member) => member.id === t.claimedBy)?.displayName ?? t.claimedBy}` : "Aguardando equipe"}</span>
+              {/* #7 — lookup O(1) via memberById */}
+              <span className="text-sm">{t.department}</span><span className="text-sm text-muted-foreground">{t.claimedBy ? `Em atendimento · ${memberById.get(t.claimedBy)?.displayName ?? t.claimedBy}` : "Aguardando equipe"}</span>
               <Badge tone={t.priority === "urgent" ? "danger" : t.priority === "high" ? "warn" : "default"}>{t.priority === "urgent" ? "Urgente" : t.priority === "high" ? "Alta" : t.priority === "low" ? "Baixa" : "Normal"}</Badge>
               <Badge tone={tone}>{sla === "ok" ? "No prazo" : sla === "warning" ? "Atenção" : "Atrasado"}</Badge>
             </li>;
@@ -134,39 +168,34 @@ function Overview() {
         </ul>
       </section>
 
-      <dl className="grid grid-cols-2 gap-y-3 rounded-xl border border-border bg-card px-4 py-3 lg:grid-cols-4 lg:divide-x lg:divide-border">
-        <Summary label="Tickets abertos" value={String(open.length)} hint="sem encerrar" />
-        <Summary label="SLA em atraso" value={String(breaches.length)} hint="sem primeira resposta" warn={breaches.length > 0} />
-        <Summary label="Formulários" value={String(submissions)} hint="aguardando revisão" />
-        <Summary label="Satisfação" value={avg} hint={`${csat.length} avaliações`} />
-      </dl>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="m-0 text-base font-semibold">Auditoria recente do bot</h2>
-            <Link to="/app/logs" className="text-sm text-primary">
-              Ver logs
-            </Link>
-          </div>
-          <ul className="m-0 space-y-2 p-0">
-            {logs.map((event) => (
-              <li key={event.id} className="flex gap-3 text-sm">
-                <Clock3 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0">
-                  <strong className="font-medium">{eventLabel(event.eventType)}</strong>
-                  <span className="block truncate text-xs text-muted-foreground">{moduleLabel(event.module)} · {event.actorId ? members.find((member) => member.id === event.actorId)?.displayName ?? "Equipe" : "Wumpus"} · {formatRelative(event.at)}</span>
-                </span>
-              </li>
-            ))}
-            {logs.length === 0 ? <li className="text-sm text-muted-foreground">Nenhum evento retornado pelo bot.</li> : null}
-          </ul>
-        </Card>
-      </div>
+      {/* #4 — Auditoria em largura total (sem grid de 2 colunas vazio) */}
+      <Card>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="m-0 text-base font-semibold">Auditoria recente do bot</h2>
+          <Link to="/app/logs" className="text-sm text-primary">
+            Ver logs
+          </Link>
+        </div>
+        <ul className="m-0 space-y-2 p-0">
+          {logs.map((event) => (
+            <li key={event.id} className="flex gap-3 text-sm">
+              <Clock3 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0">
+                <strong className="font-medium">{eventLabel(event.eventType)}</strong>
+                {/* #7 — memberById também no log de auditoria */}
+                <span className="block truncate text-xs text-muted-foreground">{moduleLabel(event.module)} · {event.actorId ? memberById.get(event.actorId)?.displayName ?? "Equipe" : "Wumpus"} · {formatRelative(event.at)}</span>
+              </span>
+            </li>
+          ))}
+          {logs.length === 0 ? <li className="text-sm text-muted-foreground">Nenhum evento retornado pelo bot.</li> : null}
+        </ul>
+      </Card>
 
       <div className="grid gap-3 sm:grid-cols-3">
+        {/* #8 — Quick usa Link do TanStack Router para navegação client-side */}
         <Quick to={priorityTicket ? `/app/tickets?ticket=${encodeURIComponent(priorityTicket.id)}` : "/app/tickets"} icon={<Ticket className="size-4" />} title={priorityTicket ? breaches.length ? `Abrir ticket atrasado #${priorityTicket.number}` : `Abrir ticket #${priorityTicket.number}` : "Abrir fila de tickets"} />
-        <Quick to="/app/forms" icon={<Ticket className="size-4" />} title="Revisar formulários" />
+        {/* #2 — Ícone correto para formulários */}
+        <Quick to="/app/forms" icon={<ClipboardCheck className="size-4" />} title="Revisar formulários" />
         <Quick to="/app/protect" icon={<Shield className="size-4" />} title="Testar o AutoMod" />
       </div>
 
@@ -188,18 +217,20 @@ function Summary({ label, value, hint, warn }: { label: string; value: string; h
   return (
     <div className="min-w-0 px-2 first:pl-0 lg:px-4">
       <dt className="truncate text-xs text-muted-foreground">{label}</dt>
-      <dd className={`m-0 mt-0.5 inline-flex items-baseline gap-2 font-mono-num text-lg font-semibold ${warn ? "text-destructive" : ""}`}>{value}<span className="font-sans text-[11px] font-normal text-muted-foreground">{hint}</span></dd>
+      {/* #5 — text-[11px] → text-xs no hint */}
+      <dd className={`m-0 mt-0.5 inline-flex items-baseline gap-2 font-mono-num text-lg font-semibold ${warn ? "text-destructive" : ""}`}>{value}<span className="font-sans text-xs font-normal text-muted-foreground">{hint}</span></dd>
     </div>
   );
 }
 
+// #8 — Quick usa Link do TanStack Router em vez de <a href> nativo
 function Quick({ to, icon, title }: { to: string; icon: React.ReactNode; title: string }) {
   return (
-    <a href={to} className="flex min-h-12 items-center gap-2 rounded-2xl bg-card px-4 text-sm font-medium shadow-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <Link to={to} className="flex min-h-12 items-center gap-2 rounded-2xl bg-card px-4 text-sm font-medium shadow-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       {icon}
       {title}
       <ArrowRight className="ml-auto size-4 text-muted-foreground" />
-    </a>
+    </Link>
   );
 }
 
