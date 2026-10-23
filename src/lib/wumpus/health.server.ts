@@ -6,6 +6,7 @@ export type BotHealthRecord = {
   at: number;
   startedAt: number;
   guildCount: number;
+  guildIds: string[];
   pingMs: number | null;
 };
 
@@ -38,6 +39,7 @@ export async function readBotHealth(): Promise<BotHealthRecord | null> {
     typeof record.at !== "number" ||
     typeof record.startedAt !== "number" ||
     typeof record.guildCount !== "number" ||
+    (record.guildIds !== undefined && (!Array.isArray(record.guildIds) || !record.guildIds.every((id) => typeof id === "string"))) ||
     (typeof record.pingMs !== "number" && record.pingMs !== null)
   ) return null;
   return {
@@ -45,6 +47,7 @@ export async function readBotHealth(): Promise<BotHealthRecord | null> {
     at: record.at,
     startedAt: record.startedAt,
     guildCount: record.guildCount,
+    guildIds: Array.isArray(record.guildIds) ? record.guildIds.filter((id): id is string => typeof id === "string" && /^\d{17,20}$/.test(id)) : [],
     pingMs: record.pingMs,
   };
 }

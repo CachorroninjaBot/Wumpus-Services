@@ -5,31 +5,21 @@
  * nao onde o Wumpus foi instalado — por isso servidor sem o bot aparecia no
  * painel e "configurava" coisa que ninguem ia ler.
  *
- * Consulta a API do Discord com o token do bot (que fica no servidor, nunca no
- * cliente). O resultado e cacheado porque a lista muda raramente e isto roda a
- * cada carregamento de painel.
+ * A lista e publicada pelo processo do bot no arquivo compartilhado de saúde.
+ * O token do bot não oferece uma lista de guildas por essa rota OAuth: ela
+ * exige um token de usuário com o escopo `guilds`.
  */
 import { createServerFn } from "@tanstack/react-start";
+import { readBotHealth } from "./health.server";
 
 const TTL_MS = 60_000;
 
 let cache: { ids: string[]; at: number } | null = null;
 
 export async function loadBotGuildIds(): Promise<string[]> {
-  const token = process.env.DISCORD_TOKEN || process.env.WUMPUS_DISCORD_TOKEN;
-  if (!token) return [];
-
-  const res = await fetch("https://discord.com/api/v10/users/@me/guilds?limit=200", {
-    headers: { Authorization: `Bot ${token}` },
-    signal: AbortSignal.timeout(10_000),
-  });
-
-  if (!res.ok) return [];
-
-  const rows = (await res.json()) as Array<{ id?: string }>;
-  if (!Array.isArray(rows)) return [];
-
-  return rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
+  const health = await readBotHealth();
+  if (!health || health.status !== "online" || Date.now() - health.at > 90_000) return [];
+  return health.guildIds;
 }
 
 /**

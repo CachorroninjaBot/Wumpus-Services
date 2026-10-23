@@ -487,6 +487,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
       at: Date.now(),
       startedAt,
       guildCount: client.guilds.cache.size,
+      guildIds: [...client.guilds.cache.keys()],
       pingMs: client.ws.ping >= 0 ? client.ws.ping : null,
     });
   const startedAt = Date.now();
@@ -502,6 +503,11 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
 
   client.on(Events.GuildCreate, (guild: Guild) => {
     log.info("entrou em servidor", { guildId: guild.id, name: guild.name, members: guild.memberCount });
+    void reportHealth("online").catch((error) => log.error("falha ao sincronizar servidores do bot", { error: String(error) }));
+  });
+
+  client.on(Events.GuildDelete, () => {
+    void reportHealth("online").catch((error) => log.error("falha ao sincronizar servidores do bot", { error: String(error) }));
   });
 
   client.on(Events.GuildMemberAdd, (member) => {
