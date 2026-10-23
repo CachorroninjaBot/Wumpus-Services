@@ -16,6 +16,8 @@ export type RuntimeArticle = {
   title: string;
   body: string;
   tags: string[];
+  category?: string;
+  exampleQuestions?: string[];
   approved: boolean;
 };
 

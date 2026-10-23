@@ -119,7 +119,7 @@ type Actions = {
   testAutomod: (userId: string, text: string) => ReturnType<typeof scanMessage>;
   toggleLockdown: () => void;
   closeIncident: (id: string) => void;
-  addArticle: (title: string, body: string, tags: string[]) => void;
+  addArticle: (title: string, body: string, tags: string[], options?: Partial<Pick<Article, "category" | "exampleQuestions" | "approved" | "reviewRequested">>) => void;
   updateArticle: (id: string, patch: Partial<Article>) => void;
   deleteArticle: (id: string) => void;
   addDashboardMember: (username: string, role: DashboardMember["role"]) => void;
@@ -174,6 +174,7 @@ function persist(slice: PersistSlice) {
 export const useWumpus = create<WumpusStore>((set, get) => {
   /** Ultimo objeto de módulos publicado — evita republicar sem mudança real. */
   let publishedModules: unknown = null;
+  let publishedArticles: unknown = null;
   let publishedGuildId = "";
   let publishRevision = 0;
   let publishQueue: Promise<void> = Promise.resolve();
@@ -192,8 +193,9 @@ export const useWumpus = create<WumpusStore>((set, get) => {
      const modules = state.modules[guildId];
      const token = getStoredSessionToken();
      if (!guildId || !modules || !token || !authorizedGuildIds?.has(guildId)) return;
-     if (state.modules === publishedModules && guildId === publishedGuildId) return;
+     if (state.modules === publishedModules && state.articles === publishedArticles && guildId === publishedGuildId) return;
      publishedModules = state.modules;
+     publishedArticles = state.articles;
      publishedGuildId = guildId;
      const revision = ++publishRevision;
 
@@ -219,6 +221,8 @@ export const useWumpus = create<WumpusStore>((set, get) => {
             title: article.title,
             body: article.body,
             tags: article.tags,
+            category: article.category,
+            exampleQuestions: article.exampleQuestions,
             approved: article.approved,
           })),
       },
@@ -238,6 +242,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
           : "Verifique a conexão com o servidor e tente alterar ou salvar a configuração novamente.";
       set({ runtimeSyncStatus: "failed", runtimeSyncError: `A configuração ficou salva no navegador, mas não chegou ao bot. ${nextStep} (${detail})` });
       publishedModules = null;
+      publishedArticles = null;
       publishedGuildId = "";
     });
   };
@@ -925,7 +930,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       });
     },
 
-    addArticle: (title, body, tags) => {
+    addArticle: (title, body, tags, options = {}) => {
       const state = get();
       const article: Article = {
         id: uid("a"),
@@ -933,22 +938,38 @@ export const useWumpus = create<WumpusStore>((set, get) => {
         title,
         body,
         tags,
-        approved: true,
+        category: options.category?.trim() || "Geral",
+        exampleQuestions: options.exampleQuestions ?? [],
+        approved: options.approved ?? false,
+        reviewRequested: options.reviewRequested ?? false,
         updatedAt: Date.now(),
       };
       write({ articles: [article, ...state.articles] });
-      audit("knowledge", `Artigo “${title}” publicado.`);
+      audit("knowledge", `Artigo “${title}” criado como ${article.approved ? "aprovado" : article.reviewRequested ? "aguardando revisão" : "rascunho"}.`);
     },
 
     updateArticle: (id, patch) => {
+      const current = get().articles.find((article) => article.id === id);
+      const editedContent = current && (patch.title !== undefined || patch.body !== undefined || patch.tags !== undefined || patch.category !== undefined || patch.exampleQuestions !== undefined);
       write({
-        articles: get().articles.map((a) => (a.id === id ? { ...a, ...patch, updatedAt: Date.now() } : a)),
+        articles: get().articles.map((a) => (a.id === id ? {
+          ...a,
+          ...(editedContent ? { history: [...(a.history ?? []), { title: a.title, body: a.body, tags: [...a.tags], category: a.category, exampleQuestions: [...(a.exampleQuestions ?? [])], at: a.updatedAt }].slice(-20) } : {}),
+          ...patch,
+          updatedAt: Date.now(),
+        } : a)),
       });
+      const updated = get().articles.find((article) => article.id === id);
+      if (updated) {
+        const change = patch.approved ? "aprovado" : patch.reviewRequested ? "enviado para revisão" : "atualizado";
+        audit("knowledge", `Artigo “${updated.title}” ${change}.`);
+      }
     },
 
     deleteArticle: (id) => {
+      const title = get().articles.find((article) => article.id === id)?.title;
       write({ articles: get().articles.filter((a) => a.id !== id) });
-      audit("knowledge", "Artigo removido.");
+      audit("knowledge", title ? `Artigo “${title}” removido.` : "Artigo removido.");
     },
 
     addDashboardMember: (username, role) => {

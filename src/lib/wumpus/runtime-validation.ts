@@ -75,6 +75,8 @@ export const publishInputSchema = z.object({
     title: z.string().max(200),
     body: z.string().max(8000),
     tags: z.array(z.string().max(64)).max(25),
+    category: z.string().max(80).optional(),
+    exampleQuestions: z.array(z.string().max(200)).max(12).optional(),
     approved: z.boolean(),
   }).strict()).max(200).optional(),
 }).strict().superRefine((input, ctx) => {

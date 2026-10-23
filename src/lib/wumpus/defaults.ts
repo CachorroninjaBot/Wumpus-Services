@@ -203,6 +203,11 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     minQuestionLength: 12,
     cooldownSeconds: 20,
     autoSuggest: true,
+    mentionRequired: false,
+    suggestInAllChannels: false,
+    maxArticlesPerSearch: 5,
+    similarityThreshold: 0.6,
+    logSearches: false,
   },
   statistics: {
     retentionDays: 180,

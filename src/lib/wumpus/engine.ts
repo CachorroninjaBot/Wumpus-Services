@@ -281,23 +281,35 @@ export function channelNameFor(pattern: string, username: string): string {
   return raw.slice(0, 90).replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
 }
 
-export function searchArticles<T extends { title: string; body: string; tags: string[]; approved: boolean }>(
+const knowledgeStopwords = new Set(["a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "um", "uma", "para", "por", "com", "que", "como", "se", "no", "na", "nos", "nas", "ao", "aos", "the", "of", "is", "it", "to", "and", "my", "me", "eu", "meu", "minha", "tem", "voce", "voces", "posso", "quero", "fazer", "onde", "qual", "quais"]);
+const normalizeKnowledgeText = (value: string) => value.toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ");
+const knowledgeTokens = (value: string) => normalizeKnowledgeText(value).split(/\s+/).filter((word) => word.length > 2 && !knowledgeStopwords.has(word));
+
+export function scoreKnowledgeArticle(article: { title: string; body: string; tags: string[]; category?: string; exampleQuestions?: string[] }, query: string): number {
+  const words = knowledgeTokens(query);
+  if (!words.length) return 0;
+  const title = new Set(knowledgeTokens(article.title));
+  const tags = new Set(article.tags.flatMap(knowledgeTokens));
+  const examples = new Set((article.exampleQuestions ?? []).flatMap(knowledgeTokens));
+  const category = new Set(knowledgeTokens(article.category ?? ""));
+  const body = new Set(knowledgeTokens(article.body));
+  const points = words.reduce((total, word) => total + (title.has(word) ? 3 : tags.has(word) || examples.has(word) || category.has(word) ? 2 : body.has(word) ? 1 : 0), 0);
+  return points / (words.length * 3);
+}
+
+export function searchArticles<T extends { title: string; body: string; tags: string[]; category?: string; exampleQuestions?: string[]; approved: boolean }>(
   query: string,
   articles: T[],
   requireApproved: boolean,
+  minScore = 0.25,
 ): T[] {
-  const q = query.trim().toLowerCase();
-  if (q.length < 2) return [];
+  if (normalizeKnowledgeText(query.trim()).length < 2) return [];
   return articles
-    .filter((a) => !requireApproved || a.approved)
-    .map((a) => {
-      const hay = `${a.title} ${a.body} ${a.tags.join(" ")}`.toLowerCase();
-      const score = q.split(/\s+/).reduce((s, word) => s + (hay.includes(word) ? 1 : 0), 0);
-      return { a, score };
-    })
-    .filter((x) => x.score > 0)
-    .sort((x, y) => y.score - x.score)
-    .map((x) => x.a);
+    .filter((article) => !requireApproved || article.approved)
+    .map((article) => ({ article, score: scoreKnowledgeArticle(article, query) }))
+    .filter((result) => result.score >= minScore)
+    .sort((a, b) => b.score - a.score)
+    .map((result) => result.article);
 }
 
 export function asStringList(value: unknown): string[] {

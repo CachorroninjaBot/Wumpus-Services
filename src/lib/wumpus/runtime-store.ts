@@ -69,7 +69,7 @@ export type PublishInput = {
   name?: string;
   modules: Record<string, Record<string, unknown>>;
   /** Base de conhecimento daquele servidor. */
-  articles?: Array<{ id: string; title: string; body: string; tags: string[]; approved: boolean }>;
+  articles?: Array<{ id: string; title: string; body: string; tags: string[]; category?: string; exampleQuestions?: string[]; approved: boolean }>;
 };
 
 export const publishGuildRuntime = createServerFn({ method: "POST" })
@@ -376,45 +376,135 @@ export const getGuildActivity = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({
     token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
     guildId: z.string().regex(/^\d{17,20}$/),
+    periodDays: z.union([z.literal(7), z.literal(30), z.literal(90)]).optional(),
+    slaGoalMinutes: z.number().int().min(0).max(10080).optional(),
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
     type DailyStat = { guildId: string; day: string; messages: number; joins: number; leaves: number; tickets: number };
-    type TicketRecord = { guildId: string; createdAt: string };
+    type TicketRecord = { id?: number; guildId: string; createdAt: string; closedAt?: string | null; firstResponseAt?: string | null; feedback?: { rating: number } | null; department?: string | null; status?: string };
     type ModerationRecord = { guildId: string; createdAt: string };
     type AuditRecord = { id: number; guildId: string; module: string; eventType: string; actorId?: string; severity: string; at: string };
     type FormRecord = { guildId: string; status: string };
-    const [ticketRows, dailyRows, moderationRows, auditRows, formRows] = await Promise.all([
+    const periodDays = data.periodDays ?? 7;
+    const slaGoalMinutes = data.slaGoalMinutes ?? 60;
+    const [ticketRows, dailyRows, moderationRows, auditRows, formRows, health] = await Promise.all([
       readBotCollection<TicketRecord>("tickets"),
       readBotCollection<DailyStat>("statistics"),
       readBotCollection<ModerationRecord>("moderation"),
       readBotCollection<AuditRecord>("audit"),
       readBotCollection<FormRecord>("forms"),
+      readBotHealth().catch(() => null),
     ]);
-    const days = Array.from({ length: 7 }, (_, index) => {
-      const date = new Date();
-      date.setUTCHours(0, 0, 0, 0);
-      date.setUTCDate(date.getUTCDate() - (6 - index));
+    const guildTickets = ticketRows.filter((row) => row.guildId === data.guildId);
+    const guildDailyRows = dailyRows.filter((row) => row.guildId === data.guildId);
+    const guildModerationRows = moderationRows.filter((row) => row.guildId === data.guildId);
+    const guildAuditRows = auditRows.filter((row) => row.guildId === data.guildId);
+    const guildForms = formRows.filter((row) => row.guildId === data.guildId);
+    const byDate = <T,>(rows: T[], dateOf: (row: T) => string | null | undefined) => {
+      const result = new Map<string, T[]>();
+      for (const row of rows) {
+        const date = dateOf(row)?.slice(0, 10);
+        if (!date) continue;
+        const bucket = result.get(date);
+        if (bucket) bucket.push(row);
+        else result.set(date, [row]);
+      }
+      return result;
+    };
+    const ticketsByCreatedDay = byDate(guildTickets, (row) => row.createdAt);
+    const ticketsByClosedDay = byDate(guildTickets, (row) => row.closedAt);
+    const activityByDay = byDate(guildDailyRows, (row) => row.day);
+    const moderationByDay = byDate(guildModerationRows, (row) => row.createdAt);
+    const automodByDay = byDate(guildAuditRows.filter((row) => row.module === "automod"), (row) => row.at);
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const end = today.toISOString().slice(0, 10);
+    const startDate = new Date(today);
+    startDate.setUTCDate(startDate.getUTCDate() - (periodDays - 1));
+    const start = startDate.toISOString().slice(0, 10);
+    const previousEndDate = new Date(startDate);
+    previousEndDate.setUTCDate(previousEndDate.getUTCDate() - 1);
+    const previousEnd = previousEndDate.toISOString().slice(0, 10);
+    const previousStartDate = new Date(previousEndDate);
+    previousStartDate.setUTCDate(previousStartDate.getUTCDate() - (periodDays - 1));
+    const previousStart = previousStartDate.toISOString().slice(0, 10);
+    const within = (value: string | null | undefined, from: string, to: string) => Boolean(value && value.slice(0, 10) >= from && value.slice(0, 10) <= to);
+    const summarize = (from: string, to: string) => {
+      const rangeTickets = guildTickets.filter((row) => within(row.createdAt, from, to));
+      const resolved = guildTickets.filter((row) => within(row.closedAt, from, to));
+      const responded = rangeTickets.flatMap((row) => {
+        const created = Date.parse(row.createdAt);
+        const response = row.firstResponseAt ? Date.parse(row.firstResponseAt) : Number.NaN;
+        return Number.isFinite(created) && Number.isFinite(response) && response >= created ? [{ minutes: (response - created) / 60_000, row }] : [];
+      });
+      const responseTimes = responded.map((row) => row.minutes).sort((a, b) => a - b);
+      const medianResponseMinutes = responseTimes.length ? (responseTimes.length % 2 ? responseTimes[(responseTimes.length - 1) / 2]! : (responseTimes[responseTimes.length / 2 - 1]! + responseTimes[responseTimes.length / 2]!) / 2) : null;
+      const rated = resolved.flatMap((row) => row.feedback && row.feedback.rating >= 1 && row.feedback.rating <= 5 ? [row.feedback.rating] : []);
+      const metSla = responded.filter((row) => row.minutes <= slaGoalMinutes).length;
+      const overdueWithoutResponse = slaGoalMinutes > 0 ? rangeTickets.filter((row) => {
+        const created = Date.parse(row.createdAt);
+        return !row.firstResponseAt && Number.isFinite(created) && Date.now() - created > slaGoalMinutes * 60_000;
+      }).length : 0;
+      const slaDenominator = responded.length + overdueWithoutResponse;
+      const byDepartment = new Map<string, { opened: number; closed: number }>();
+      for (const row of rangeTickets) {
+        const key = row.department?.trim() || "Geral";
+        byDepartment.set(key, { opened: (byDepartment.get(key)?.opened ?? 0) + 1, closed: byDepartment.get(key)?.closed ?? 0 });
+      }
+      for (const row of resolved) {
+        const key = row.department?.trim() || "Geral";
+        byDepartment.set(key, { opened: byDepartment.get(key)?.opened ?? 0, closed: (byDepartment.get(key)?.closed ?? 0) + 1 });
+      }
+      return {
+        opened: rangeTickets.length,
+        closed: resolved.length,
+        medianResponseMinutes,
+        responseCount: responded.length,
+        slaMet: slaGoalMinutes > 0 && slaDenominator ? Math.round((metSla / slaDenominator) * 100) : null,
+        slaCount: slaGoalMinutes > 0 ? slaDenominator : 0,
+        csat: rated.length ? rated.reduce((sum, score) => sum + score, 0) / rated.length : null,
+        csatCount: rated.length,
+        departments: [...byDepartment.entries()].map(([department, counts]) => ({ department, ...counts })).sort((a, b) => b.opened - a.opened).slice(0, 8),
+        automod: guildAuditRows.filter((row) => row.module === "automod" && within(row.at, from, to)).length,
+        moderation: guildModerationRows.filter((row) => within(row.createdAt, from, to)).length,
+      };
+    };
+    const days = Array.from({ length: periodDays }, (_, index) => {
+      const date = new Date(startDate);
+      date.setUTCDate(date.getUTCDate() + index);
       const day = date.toISOString().slice(0, 10);
-      const existing = dailyRows.find((row) => row.guildId === data.guildId && row.day === day);
-      const tickets = ticketRows.filter((row) => row.guildId === data.guildId && row.createdAt.slice(0, 10) === day).length;
-      const automod = auditRows.filter((row) => row.guildId === data.guildId && row.module === "automod" && row.at.slice(0, 10) === day).length;
-      const moderation = moderationRows.filter((row) => row.guildId === data.guildId && row.createdAt.slice(0, 10) === day).length;
+      const existing = activityByDay.get(day)?.[0];
+      const tickets = ticketsByCreatedDay.get(day)?.length ?? 0;
+      const closed = ticketsByClosedDay.get(day)?.length ?? 0;
+      const automod = automodByDay.get(day)?.length ?? 0;
+      const moderation = moderationByDay.get(day)?.length ?? 0;
       return {
         day,
-        label: index === 6 ? "hoje" : new Intl.DateTimeFormat("pt-BR", { weekday: "short", timeZone: "UTC" }).format(date).replace(".", ""),
+        label: day === end ? "hoje" : new Intl.DateTimeFormat("pt-BR", periodDays > 7 ? { day: "2-digit", month: "short", timeZone: "UTC" } : { weekday: "short", timeZone: "UTC" }).format(date).replace(".", ""),
         messages: existing?.messages ?? 0,
         joins: existing?.joins ?? 0,
         tickets,
+        closed,
         automod,
         moderation,
       };
     });
+    const currentSummary = summarize(start, end);
+    const previousSummary = summarize(previousStart, previousEnd);
+    const unanswered = guildTickets.filter((row) => (row.status === "open" || row.status === "claimed") && !row.firstResponseAt).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))[0];
+    const healthForGuild = health?.guildIds.includes(data.guildId) ? health : null;
+    const botStatus = !healthForGuild ? "unavailable" as const : healthForGuild.status === "online" && Date.now() - healthForGuild.at <= 90_000 ? "online" as const : "offline" as const;
     return {
       days,
-      pendingForms: formRows.filter((row) => row.guildId === data.guildId && row.status === "pending").length,
-      recentEvents: auditRows
-        .filter((row) => row.guildId === data.guildId)
+      range: { start, end, ...currentSummary },
+      previousRange: { start: previousStart, end: previousEnd, ...previousSummary },
+      currentOpen: guildTickets.filter((row) => row.status === "open" || row.status === "claimed").length,
+      oldestUnanswered: unanswered ? { id: unanswered.id, department: unanswered.department ?? "Geral", createdAt: Date.parse(unanswered.createdAt) || 0 } : null,
+      refreshedAt: Date.now(),
+      bot: { status: botStatus, lastSeenAt: healthForGuild?.at ?? null, pingMs: healthForGuild?.pingMs ?? null },
+      pendingForms: guildForms.filter((row) => row.status === "pending").length,
+      recentEvents: guildAuditRows
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
         .slice(0, 6)
         .map((row) => ({ id: row.id, module: row.module, eventType: row.eventType, actorId: row.actorId ?? null, severity: row.severity, at: Date.parse(row.at) || 0 })),

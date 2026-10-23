@@ -12,10 +12,10 @@
  */
 import type { Guild, Message } from "discord.js";
 import { analyzeWithContext, fastModel, groqChat } from "./ai.ts";
-import { bool, isEnabled, list, moduleConfig, num, str } from "./config.ts";
+import { bool, isEnabled, moduleConfig, num, str } from "./config.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
-import { asSendable, resolveChannel, resolveRoles } from "./resolve.ts";
+import { asSendable, resolveChannel } from "./resolve.ts";
 import { readRuntime } from "./runtime.ts";
 
 export type KnowledgeArticle = {
@@ -23,6 +23,8 @@ export type KnowledgeArticle = {
   title: string;
   body: string;
   tags: string[];
+  category?: string;
+  exampleQuestions?: string[];
   approved: boolean;
 };
 
@@ -32,7 +34,7 @@ const STOPWORDS = new Set([
   "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "um", "uma",
   "para", "por", "com", "que", "como", "se", "no", "na", "nos", "nas", "ao", "aos",
   "the", "of", "is", "it", "to", "and", "my", "me", "eu", "meu", "minha", "tem",
-  "voce", "vocês", "você", "posso", "quero", "fazer", "onde", "qual", "quais"
+  "voce", "voces", "posso", "quero", "fazer", "onde", "qual", "quais"
 ]);
 
 /** Normaliza e remove acentos: "configuração" e "configuracao" devem casar. */
@@ -61,12 +63,15 @@ export function scoreArticle(article: KnowledgeArticle, query: string[]): number
 
   const title = new Set(tokens(article.title));
   const tags = new Set(article.tags.flatMap((tag) => tokens(tag)));
+  const examples = new Set((article.exampleQuestions ?? []).flatMap((question) => tokens(question)));
+  const category = new Set(tokens(article.category ?? ""));
   const body = new Set(tokens(article.body));
 
   let hits = 0;
   for (const word of query) {
     if (title.has(word)) hits += 3;
-    else if (tags.has(word)) hits += 2;
+    else if (tags.has(word) || examples.has(word)) hits += 2;
+    else if (category.has(word)) hits += 2;
     else if (body.has(word)) hits += 1;
   }
 
@@ -179,10 +184,11 @@ export async function shouldAnswer(guild: Guild, message: Message): Promise<bool
   const answerChannel = resolveChannel(guild, str(config, "answerChannelId"));
   const inChannel = Boolean(answerChannel && answerChannel.id === message.channelId);
   const mentioned = message.mentions.users.has(guild.client.user!.id);
+  const mentionRequired = bool(config, "mentionRequired", false);
+  const mentionsElsewhere = bool(config, "suggestInAllChannels", false);
 
-  if (bool(config, "mentionRequired", false)) return mentioned;
-  if (bool(config, "suggestInAllChannels", false)) return mentioned || inChannel;
-  return inChannel || mentioned;
+  if (inChannel) return !mentionRequired || mentioned;
+  return mentionsElsewhere && mentioned;
 }
 
 /** Ponto de entrada do modulo a partir de uma mensagem. */
@@ -272,7 +278,7 @@ export async function draftReply(
           "Isto e sugestao para o staff revisar — nunca vai direto ao membro."
         ].join(" ")
       },
-      { role: "user", content: `Historico do atendimento:\n${history}` }
+      { role: "user", content: `Contexto da equipe: ${staffRoles.join(", ") || "atendimento"}\nHistorico do atendimento:\n${history}` }
     ],
     { model, maxTokens: 400, noCache: true }
   );

@@ -1,101 +1,223 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { BookOpenCheck, Check, Clock3, FilePlus2, History, RotateCcw, Search, Send, Sparkles, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { DiscordSelect } from "@/components/discord-select";
+import { Dialog, DialogContent, DialogDesc, DialogTitle } from "@/components/ui/dialog";
+import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
-import { searchArticles } from "@/lib/wumpus/engine";
+import { scoreKnowledgeArticle, searchArticles } from "@/lib/wumpus/engine";
+import type { Article } from "@/lib/wumpus/types";
+import { formatRelative } from "@/lib/utils";
 import { useModule, useWumpus } from "@/lib/wumpus/store";
 
 export const Route = createFileRoute("/app/knowledge")({ component: KnowledgePage });
 
+type ArticleStatus = "all" | "approved" | "review" | "draft";
+type EditorDraft = { title: string; body: string; category: string; tags: string; examples: string };
+const EMPTY_DRAFT: EditorDraft = { title: "", body: "", category: "Geral", tags: "", examples: "" };
+
+function statusOf(article: Article): Exclude<ArticleStatus, "all"> {
+  if (article.approved) return "approved";
+  return article.reviewRequested ? "review" : "draft";
+}
+
 function KnowledgePage() {
   const gid = useWumpus((s) => s.activeGuildId);
+  return <KnowledgeWorkspace key={gid} gid={gid} />;
+}
+
+function KnowledgeWorkspace({ gid }: { gid: string }) {
+  const user = useWumpus((s) => s.sessionUser);
   const allArticles = useWumpus((s) => s.articles);
-  const articles = allArticles.filter((a) => a.guildId === gid);
   const add = useWumpus((s) => s.addArticle);
   const update = useWumpus((s) => s.updateArticle);
   const remove = useWumpus((s) => s.deleteArticle);
   const kcfg = useModule("knowledge");
   const updateConfig = useWumpus((s) => s.updateConfig);
+  const [query, setQuery] = useState("");
+  const [testQuestion, setTestQuestion] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ArticleStatus>("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<EditorDraft>(EMPTY_DRAFT);
+  const [deleteTarget, setDeleteTarget] = useState<Article | null>(null);
 
-  const [q, setQ] = useState("");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const hits = useMemo(
-    () => searchArticles(q, articles, Boolean(kcfg.config.requireApprovedArticles)),
-    [q, articles, kcfg.config.requireApprovedArticles],
-  );
+  const articles = useMemo(() => allArticles.filter((article) => article.guildId === gid), [allArticles, gid]);
+  const categoryNames = useMemo(() => [...new Set(articles.map((article) => article.category?.trim() || "Geral"))].sort((a, b) => a.localeCompare(b, "pt-BR")), [articles]);
+  const visibleArticles = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase("pt-BR");
+    return articles.filter((article) => {
+      const text = `${article.title} ${article.body} ${article.category ?? "Geral"} ${article.tags.join(" ")} ${(article.exampleQuestions ?? []).join(" ")}`.toLocaleLowerCase("pt-BR");
+      return (!normalized || text.includes(normalized))
+        && (statusFilter === "all" || statusOf(article) === statusFilter)
+        && (categoryFilter === "all" || (article.category?.trim() || "Geral") === categoryFilter);
+    }).sort((a, b) => Number(b.approved) - Number(a.approved) || b.updatedAt - a.updatedAt);
+  }, [articles, categoryFilter, query, statusFilter]);
+  const minQuestionLength = Number(kcfg.config.minQuestionLength ?? 12);
+  const similarityThreshold = Number(kcfg.config.similarityThreshold ?? 0.6);
+  const maxArticlesPerSearch = Number(kcfg.config.maxArticlesPerSearch ?? 5);
+  const testHits = useMemo(() => testQuestion.trim().length >= minQuestionLength
+    ? searchArticles(testQuestion, articles, Boolean(kcfg.config.requireApprovedArticles), similarityThreshold).slice(0, maxArticlesPerSearch)
+    : [], [testQuestion, articles, kcfg.config.requireApprovedArticles, minQuestionLength, maxArticlesPerSearch, similarityThreshold]);
+  const counts = useMemo(() => ({
+    approved: articles.filter((article) => article.approved).length,
+    review: articles.filter((article) => !article.approved && article.reviewRequested).length,
+    draft: articles.filter((article) => !article.approved && !article.reviewRequested).length,
+  }), [articles]);
+
+  function startNew() {
+    setEditingId(null);
+    setDraft(EMPTY_DRAFT);
+  }
+
+  function edit(article: Article) {
+    setEditingId(article.id);
+    setDraft({ title: article.title, body: article.body, category: article.category ?? "Geral", tags: article.tags.join(", "), examples: (article.exampleQuestions ?? []).join("\n") });
+  }
+
+  function save(mode: "draft" | "review") {
+    const title = draft.title.trim();
+    const body = draft.body.trim();
+    if (!title || !body) return;
+    const tags = [...new Set(draft.tags.split(",").map((tag) => tag.trim().slice(0, 64)).filter(Boolean))].slice(0, 25);
+    const exampleQuestions = [...new Set(draft.examples.split("\n").map((question) => question.trim().slice(0, 200)).filter(Boolean))].slice(0, 12);
+    const content = { title, body, category: draft.category.trim() || "Geral", tags, exampleQuestions };
+    if (editingId) update(editingId, { ...content, approved: false, reviewRequested: mode === "review", reviewedBy: undefined, reviewedAt: undefined });
+    else add(title, body, tags, { category: content.category, exampleQuestions, approved: false, reviewRequested: mode === "review" });
+    startNew();
+  }
+
+  function approve(article: Article) {
+    update(article.id, { approved: true, reviewRequested: false, reviewedAt: Date.now(), reviewedBy: user.globalName });
+  }
 
   return (
-    <div className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-[1fr_320px]">
-      <div className="space-y-4">
-        <h1 className="m-0 text-xl font-semibold tracking-tight">Inteligência</h1>
-        <Card>
-          <Label>Perguntar à base</Label>
-          <Input
-            className="mt-1"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Como recebo o produto?"
-          />
-          <ul className="mt-3 m-0 space-y-2 p-0">
-            {(q ? hits : articles).map((a) => (
-              <li key={a.id} className="rounded-xl bg-muted px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <p className="m-0 text-sm font-medium">{a.title}</p>
-                  {a.approved ? <Badge tone="ok">aprovado</Badge> : <Badge>rascunho</Badge>}
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="mb-1 mt-0 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary"><BookOpenCheck className="size-4" />Analisar</p>
+          <h1 className="m-0 text-2xl font-semibold tracking-tight">Base de conhecimento</h1>
+          <p className="mb-0 mt-1 max-w-2xl text-sm text-muted-foreground">Respostas confiáveis para apoiar a equipe e a IA nos atendimentos.</p>
+        </div>
+        <Button onClick={startNew}><FilePlus2 className="size-4" />Novo artigo</Button>
+      </header>
+
+      <section aria-label="Resumo dos artigos" className="grid gap-3 sm:grid-cols-3">
+        <SummaryCard icon={<Check className="size-4" />} label="Aprovados" value={counts.approved} detail="Disponíveis para a IA" tone="ok" />
+        <SummaryCard icon={<Clock3 className="size-4" />} label="Aguardando revisão" value={counts.review} detail="Precisam da aprovação da equipe" tone="warn" />
+        <SummaryCard icon={<FilePlus2 className="size-4" />} label="Rascunhos" value={counts.draft} detail="Ainda não entram na revisão" />
+      </section>
+
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(350px,0.75fr)]">
+        <Card className="min-w-0 space-y-4 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h2 className="m-0 text-base font-semibold">Artigos do servidor</h2><p className="m-0 mt-1 text-xs text-muted-foreground">{articles.length} {articles.length === 1 ? "artigo" : "artigos"} no total</p></div>
+            <div className="flex flex-wrap gap-2">
+              <NativeSelect aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ArticleStatus)} className="h-9 w-auto min-w-36 text-xs">
+                <option value="all">Todos os status</option><option value="approved">Aprovados</option><option value="review">Aguardando revisão</option><option value="draft">Rascunhos</option>
+              </NativeSelect>
+              <NativeSelect aria-label="Filtrar por categoria" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="h-9 w-auto min-w-32 text-xs">
+                <option value="all">Todas as categorias</option>{categoryNames.map((category) => <option key={category} value={category}>{category}</option>)}
+              </NativeSelect>
+            </div>
+          </div>
+          <div className="relative">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input aria-label="Buscar artigos" className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por título, resposta, categoria ou tag" />
+          </div>
+          {visibleArticles.length ? <ul className="m-0 space-y-3 p-0">
+            {visibleArticles.map((article) => {
+              const status = statusOf(article);
+              const selected = editingId === article.id;
+              return <li key={article.id} className={`list-none rounded-2xl border p-4 transition-colors ${selected ? "border-primary/50 bg-primary/5" : "border-border bg-background/50"}`}>
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2"><h3 className="m-0 text-sm font-semibold">{article.title}</h3><StatusBadge status={status} /><Badge>{article.category || "Geral"}</Badge></div>
+                    <p className="mb-0 mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{article.body}</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">{article.tags.map((tag) => <Badge key={tag} className="font-normal">#{tag}</Badge>)}{article.reviewedBy ? <span className="ml-auto text-[11px] text-muted-foreground">Revisado por {article.reviewedBy}{article.reviewedAt ? ` · ${formatRelative(article.reviewedAt)}` : ""}</span> : null}<span className="text-[11px] text-muted-foreground">Atualizado {formatRelative(article.updatedAt)}</span></div>
+                  </div>
                 </div>
-                <p className="m-0 text-sm text-muted-foreground">{a.body}</p>
-                <div className="mt-2 flex gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => update(a.id, { approved: !a.approved })}>
-                    {a.approved ? "Desaprovar" : "Aprovar"}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => remove(a.id)}>
-                    Remover
-                  </Button>
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                  <Button size="sm" variant="outline" onClick={() => edit(article)}>{selected ? "Editando" : "Editar artigo"}</Button>
+                  {status === "review" ? <><Button size="sm" onClick={() => approve(article)}><Check className="size-3.5" />Aprovar</Button><Button size="sm" variant="outline" onClick={() => update(article.id, { approved: false, reviewRequested: false, reviewedBy: undefined, reviewedAt: undefined })}>Devolver para rascunho</Button></> : status === "approved" ? <Button size="sm" variant="ghost" onClick={() => update(article.id, { approved: false, reviewRequested: false })}>Voltar para rascunho</Button> : <Button size="sm" variant="secondary" onClick={() => update(article.id, { reviewRequested: true })}><Send className="size-3.5" />Enviar para revisão</Button>}
+                  {article.history?.length ? <details className="ml-auto text-xs text-muted-foreground"><summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-2 hover:bg-muted"><History className="size-3.5" />Histórico ({article.history.length})</summary><ol className="mt-2 max-h-64 space-y-2 overflow-y-auto border-t border-border pt-2">{[...article.history].reverse().slice(0, 5).map((revision, index) => <li key={`${revision.at}-${index}`}><details><summary className="cursor-pointer font-medium text-foreground">{revision.title} · {formatRelative(revision.at)}</summary><p className="mb-1 mt-2 whitespace-pre-wrap leading-5">{revision.body}</p><p className="m-0 text-[11px]">{revision.category || "Geral"}{revision.tags.length ? ` · ${revision.tags.map((tag) => `#${tag}`).join(" ")}` : ""}</p>{revision.exampleQuestions?.length ? <p className="mb-2 mt-1 whitespace-pre-wrap text-[11px]">Perguntas: {revision.exampleQuestions.join(" · ")}</p> : null}<Button size="sm" variant="outline" className="mt-2" onClick={() => update(article.id, { title: revision.title, body: revision.body, category: revision.category ?? "Geral", tags: [...revision.tags], exampleQuestions: [...(revision.exampleQuestions ?? [])], approved: false, reviewRequested: false, reviewedBy: undefined, reviewedAt: undefined })}><RotateCcw className="size-3.5" />Restaurar como rascunho</Button></details></li>)}</ol></details> : null}
+                  <Button size="icon-sm" variant="ghost" className="text-muted-foreground hover:text-destructive" aria-label={`Remover ${article.title}`} onClick={() => setDeleteTarget(article)}><Trash2 className="size-4" /></Button>
                 </div>
-              </li>
-            ))}
-          </ul>
+              </li>;
+            })}
+          </ul> : <div className="rounded-2xl border border-dashed border-border px-5 py-10 text-center">
+            <BookOpenCheck className="mx-auto size-8 text-muted-foreground" />
+            <h3 className="mb-1 mt-3 text-sm font-semibold">{articles.length ? "Nenhum artigo corresponde" : "Sua base começa aqui"}</h3>
+            <p className="mx-auto mb-4 mt-0 max-w-md text-sm text-muted-foreground">{articles.length ? "Mude a busca ou os filtros para encontrar outro artigo." : "Adicione respostas aprovadas para perguntas recorrentes, regras e procedimentos do servidor."}</p>
+            {!articles.length ? <Button size="sm" onClick={startNew}><FilePlus2 className="size-4" />Criar primeiro artigo</Button> : null}
+          </div>}
         </Card>
-        <Card className="space-y-3">
-          <h2 className="mt-0 text-base font-semibold">Novo artigo</h2>
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título" />
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Resposta aprovada" />
-          <Button
-            onClick={() => {
-              if (!title.trim() || !body.trim()) return;
-              add(title.trim(), body.trim(), []);
-              setTitle("");
-              setBody("");
-            }}
-          >
-            Publicar
-          </Button>
-        </Card>
+
+        <div className="space-y-4">
+          <Card key={gid} className="space-y-4 p-4 sm:p-5">
+            <div><p className="mb-1 mt-0 text-xs font-semibold uppercase tracking-[0.12em] text-primary">{editingId ? "Edição" : "Novo conteúdo"}</p><h2 className="m-0 text-base font-semibold">{editingId ? "Editar artigo" : "Escreva uma resposta"}</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">Artigos ficam como rascunho até serem enviados para revisão e aprovados.</p></div>
+            <EditorField id="article-title" label="Título"><Input id="article-title" maxLength={200} value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Ex.: Como recuperar minha conta?" /></EditorField>
+            <EditorField id="article-body" label="Resposta"><Textarea id="article-body" rows={5} maxLength={8000} value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} placeholder="Escreva a resposta que a equipe gostaria que o bot usasse. Inclua passos claros e links confiáveis." /><p className="m-0 text-right text-[11px] text-muted-foreground">{draft.body.length}/8000</p></EditorField>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <EditorField id="article-category" label="Categoria"><Input id="article-category" maxLength={80} value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))} placeholder="Suporte" /></EditorField>
+              <EditorField id="article-tags" label="Tags"><Input id="article-tags" value={draft.tags} onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))} placeholder="conta, acesso, senha" /><p className="m-0 text-xs text-muted-foreground">Separe as tags por vírgula.</p></EditorField>
+            </div>
+            <EditorField id="article-examples" label="Perguntas relacionadas"><Textarea id="article-examples" rows={3} value={draft.examples} onChange={(event) => setDraft((current) => ({ ...current, examples: event.target.value }))} placeholder={"Como recupero meu acesso?\nEsqueci a senha, o que faço?"} /><p className="m-0 text-xs text-muted-foreground">Uma forma de perguntar por linha. Ajuda a IA a encontrar este artigo.</p></EditorField>
+            <div className="flex flex-wrap justify-between gap-2 border-t border-border pt-4">
+              {editingId ? <Button variant="ghost" onClick={startNew}>Cancelar edição</Button> : <span />}
+              <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={!draft.title.trim() || !draft.body.trim()} onClick={() => save("draft")}>Salvar rascunho</Button><Button disabled={!draft.title.trim() || !draft.body.trim()} onClick={() => save("review")}>Enviar para revisão</Button></div>
+            </div>
+          </Card>
+
+          <Card className="space-y-4 p-4 sm:p-5">
+            <div><p className="mb-1 mt-0 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary"><Sparkles className="size-3.5" />Teste antes de usar</p><h2 className="m-0 text-base font-semibold">Que resposta o bot encontraria?</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">A busca segue o filtro de aprovação e as regras atuais do servidor.</p></div>
+            <Input aria-label="Pergunta de teste" value={testQuestion} onChange={(event) => setTestQuestion(event.target.value)} placeholder="Ex.: esqueci a senha, como entro?" />
+            {testQuestion.trim().length < minQuestionLength ? <p className="m-0 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">Digite uma pergunta com pelo menos {minQuestionLength} caracteres, como um membro faria no Discord.</p> : testHits.length ? <ol className="m-0 space-y-2 p-0">{testHits.map((article, index) => <li key={article.id} className="list-none rounded-xl bg-muted/60 p-3"><div className="flex flex-wrap items-center gap-2"><Badge tone={index === 0 ? "primary" : "default"}>{index === 0 ? "Melhor resultado" : `Resultado ${index + 1}`}</Badge><Badge>{article.category || "Geral"}</Badge><span className="ml-auto text-xs text-muted-foreground">Correspondência {Math.round(scoreKnowledgeArticle(article, testQuestion) * 100)}%</span></div><p className="mb-1 mt-2 text-sm font-medium">{article.title}</p><p className="m-0 line-clamp-3 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">{article.body}</p></li>)}</ol> : <p className="m-0 rounded-xl bg-warn/10 px-3 py-2 text-sm text-muted-foreground">Nenhum artigo passou pelo limite de correspondência atual ({Math.round(similarityThreshold * 100)}%). Revise tags, perguntas relacionadas ou conteúdo.</p>}
+            <div className="space-y-4 border-t border-border pt-4">
+              <h3 className="m-0 text-sm font-semibold">Como o bot responde</h3>
+              <EditorField id="knowledge-channel" label="Canal de perguntas">
+                <DiscordSelect id="knowledge-channel" kind="text" value={String(kcfg.config.answerChannelId ?? "")} onChange={(answerChannelId) => updateConfig("knowledge", { answerChannelId })} placeholder="Selecione um canal" />
+              </EditorField>
+              <div className="flex items-start justify-between gap-3"><div><Label htmlFor="knowledge-ai">Respostas com IA ligadas</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">O bot responde apenas quando encontra material suficiente.</p></div><Switch id="knowledge-ai" checked={Boolean(kcfg.config.useAi)} onCheckedChange={(value) => updateConfig("knowledge", { useAi: value })} /></div>
+              <div className="flex items-start justify-between gap-3"><div><Label htmlFor="approved-only">Exigir artigos aprovados</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">Recomendado para respostas consistentes.</p></div><Switch id="approved-only" checked={Boolean(kcfg.config.requireApprovedArticles)} onCheckedChange={(value) => updateConfig("knowledge", { requireApprovedArticles: value })} /></div>
+              <div className="flex items-start justify-between gap-3"><div><Label htmlFor="mention-required">Exigir menção no canal de perguntas</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">Sem isso, o bot responde perguntas enviadas diretamente no canal escolhido.</p></div><Switch id="mention-required" checked={Boolean(kcfg.config.mentionRequired)} onCheckedChange={(value) => updateConfig("knowledge", { mentionRequired: value })} /></div>
+              <div className="flex items-start justify-between gap-3"><div><Label htmlFor="all-channels">Aceitar menções em outros canais</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">Permite que a IA responda quando alguém mencionar o bot fora do canal escolhido.</p></div><Switch id="all-channels" checked={Boolean(kcfg.config.suggestInAllChannels)} onCheckedChange={(value) => updateConfig("knowledge", { suggestInAllChannels: value })} /></div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                <EditorField id="minimum-length" label="Tamanho mínimo da pergunta"><Input id="minimum-length" type="number" min={1} max={2000} defaultValue={minQuestionLength} onBlur={(event) => updateConfig("knowledge", { minQuestionLength: Math.max(1, Math.min(2000, Number(event.target.value) || 1)) })} /></EditorField>
+                <EditorField id="knowledge-similarity" label="Correspondência mínima (%)"><Input id="knowledge-similarity" type="number" min={10} max={100} step={5} defaultValue={Math.round(similarityThreshold * 100)} onBlur={(event) => updateConfig("knowledge", { similarityThreshold: Math.max(0.1, Math.min(1, (Number(event.target.value) || 60) / 100)) })} /></EditorField>
+              </div>
+              <EditorField id="max-articles" label="Artigos de contexto por resposta"><Input id="max-articles" type="number" min={1} max={10} defaultValue={maxArticlesPerSearch} onBlur={(event) => updateConfig("knowledge", { maxArticlesPerSearch: Math.max(1, Math.min(10, Number(event.target.value) || 1)) })} /></EditorField>
+              <EditorField id="knowledge-cooldown" label="Intervalo entre respostas (segundos)"><Input id="knowledge-cooldown" type="number" min={0} max={3600} defaultValue={Number(kcfg.config.cooldownSeconds ?? 20)} onBlur={(event) => updateConfig("knowledge", { cooldownSeconds: Math.max(0, Math.min(3600, Number(event.target.value) || 0)) })} /></EditorField>
+              <div className="flex items-start justify-between gap-3"><div><Label htmlFor="knowledge-logs">Registrar buscas na auditoria</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">Inclui o texto da pergunta e os artigos usados nos logs.</p></div><Switch id="knowledge-logs" checked={Boolean(kcfg.config.logSearches)} onCheckedChange={(value) => updateConfig("knowledge", { logSearches: value })} /></div>
+            </div>
+          </Card>
+        </div>
       </div>
-      <Card className="h-fit space-y-4">
-        <h2 className="mt-0 text-base font-semibold">Regras da base</h2>
-        <p className="m-0 text-sm text-muted-foreground">
-          A IA de ticket usa só artigos aprovados. Nunca responde sozinha no canal do cliente.
-        </p>
-        <div className="flex items-center justify-between">
-          <Label>Só artigos aprovados</Label>
-          <Switch
-            checked={Boolean(kcfg.config.requireApprovedArticles)}
-            onCheckedChange={(v) => updateConfig("knowledge", { requireApprovedArticles: v })}
-          />
-        </div>
-        <div className="flex items-center justify-between">
-          <Label>Sugerir no chat</Label>
-          <Switch
-            checked={Boolean(kcfg.config.autoSuggest)}
-            onCheckedChange={(v) => updateConfig("knowledge", { autoSuggest: v })}
-          />
-        </div>
-      </Card>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent>
+          <DialogTitle>Remover artigo?</DialogTitle>
+          <DialogDesc>“{deleteTarget?.title}” deixará de aparecer para a equipe e para a IA.</DialogDesc>
+          <div className="mt-5 flex justify-end gap-2"><Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancelar</Button><Button variant="destructive" onClick={() => { if (deleteTarget) remove(deleteTarget.id); setDeleteTarget(null); }}>Remover artigo</Button></div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+function SummaryCard({ icon, label, value, detail, tone = "default" }: { icon: React.ReactNode; label: string; value: number; detail: string; tone?: "default" | "ok" | "warn" }) {
+  return <Card className="flex items-center gap-3 p-4"><span className={`grid size-10 shrink-0 place-items-center rounded-xl ${tone === "ok" ? "bg-ok/10 text-ok" : tone === "warn" ? "bg-warn/10 text-warn" : "bg-muted text-muted-foreground"}`}>{icon}</span><div className="min-w-0"><p className="m-0 text-xs text-muted-foreground">{label}</p><p className="mb-0 mt-0.5 text-2xl font-semibold">{value}</p><p className="m-0 truncate text-[11px] text-muted-foreground">{detail}</p></div></Card>;
+}
+
+function StatusBadge({ status }: { status: Exclude<ArticleStatus, "all"> }) {
+  const labels = { approved: "Aprovado", review: "Em revisão", draft: "Rascunho" };
+  const tones = { approved: "ok", review: "warn", draft: "default" } as const;
+  return <Badge tone={tones[status]}>{labels[status]}</Badge>;
+}
+
+function EditorField({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
+  return <div className="space-y-1.5"><Label htmlFor={id}>{label}</Label>{children}</div>;
 }

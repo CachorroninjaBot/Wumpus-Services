@@ -135,7 +135,13 @@ export type Article = {
   title: string;
   body: string;
   tags: string[];
+  category?: string;
+  exampleQuestions?: string[];
   approved: boolean;
+  reviewRequested?: boolean;
+  reviewedAt?: number;
+  reviewedBy?: string;
+  history?: Array<{ title: string; body: string; tags: string[]; category?: string; exampleQuestions?: string[]; at: number }>;
   updatedAt: number;
 };
 
