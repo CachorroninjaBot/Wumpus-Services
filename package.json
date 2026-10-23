@@ -4,7 +4,7 @@
   "sideEffects": false,
   "type": "module",
   "engines": {
-    "node": "24.x"
+    "node": "26.x"
   },
   "overrides": {
     "nf3": "0.3.17",
@@ -14,7 +14,7 @@
   },
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 8080",
-    "build": "node scripts/build-report.mjs && node scripts/sync-public.mjs && node scripts/migrate.mjs && node scripts/typecheck-report.mjs && node scripts/test-report.mjs",
+    "build": "node scripts/build-report.mjs && node scripts/sync-public.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "start": "node scripts/start.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
@@ -22,9 +22,7 @@
     "preview:restart": "node scripts/preview.mjs restart",
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/wumpus-typecheck.tsbuildinfo",
-    "typecheck:report": "node scripts/typecheck-report.mjs",
     "test": "node --experimental-strip-types --test --test-concurrency=4 src/bot/*.test.ts",
-    "test:report": "node scripts/test-report.mjs",
     "verify": "npm run typecheck && npm run test",
     "lint": "eslint .",
     "format": "prettier --write ."

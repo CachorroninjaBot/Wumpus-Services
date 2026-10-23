@@ -115,10 +115,10 @@ Não dá para testar OAuth nem enviar mensagem no Discord por script. O caminho 
 - **Rate limit de edição**: ~8 edições `edit_file` no mesmo turno disparam 429
   HTTP (limite real, não transient). Quando o lote é grande, `rewrite_file` do
   arquivo inteiro ou dividir entre turnos — não insistir no `edit_file`.
-- `npm run build` roda typecheck E testes. Um teste falhando **não** para o
-  deploy, mas erro de tipo aparece no log.
-- Build leva ~40s. Vários restarts seguidos colidem ("graceful restart already
-  in progress"). Esperar.
+- `npm run verify` roda typecheck e testes na validação do GitHub; falhas
+  bloqueiam a integração. O deploy executa apenas build, migrações e start.
+- Vários restarts seguidos colidem ("graceful restart already in progress").
+  Esperar.
 
 ## Pendências fora do escopo de tickets
 
