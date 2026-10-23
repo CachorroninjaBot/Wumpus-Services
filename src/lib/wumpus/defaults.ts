@@ -4,6 +4,7 @@ export type ModuleKey =
   | "forms"
   | "moderation"
   | "automod"
+  | "ocr"
   | "security"
   | "logs"
   | "staff"
@@ -14,7 +15,8 @@ export type ModuleKey =
 export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
   servers: {
     announceJoinChannelId: "",
-    joinMessage: "Bem-vindo(a) à Aurora, {user}. Leia as regras em #regras e abra um ticket se precisar.",
+    joinMessage:
+      "Bem-vindo(a) à Aurora, {user}. Leia as regras em #regras e abra um ticket se precisar.",
     announceLeaveChannelId: "",
     leaveMessage: "{user} saiu do servidor.",
     maintenanceMode: false,
@@ -43,7 +45,8 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     priorityEnabled: true,
     slaWarningMinutes: 60,
     namingPattern: "atendimento-{user}",
-    welcomeMessage: "Olá! Descreva o que você precisa com o máximo de detalhes. A equipe já foi notificada.",
+    welcomeMessage:
+      "Olá! Descreva o que você precisa com o máximo de detalhes. A equipe já foi notificada.",
     departments: ["Compras", "Suporte", "Denúncia"],
   },
   forms: {
@@ -135,6 +138,19 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     minLength: 0,
     maxLength: 0,
     antiGhostPing: true,
+  },
+  ocr: {
+    provider: "ocr.space",
+    language: "pt",
+    model: "",
+    retainExtractedText: false,
+    maxImageMb: 1,
+    reviewChannelId: "",
+    confidenceThreshold: 0.7,
+    cacheResults: true,
+    cacheTtlMinutes: 60,
+    autoDeleteSuspicious: false,
+    logChannelId: "",
   },
   security: {
     alertChannelId: "ch_alerts",
@@ -248,7 +264,13 @@ export const presets: Record<
     label: "Comunidade",
     blurb: "Spam e convites bloqueados, raid inteligente, tickets simples.",
     patch: {
-      automod: { blockInvites: true, blockLinks: false, action: "delete", capsThresholdPercent: 85, mentionLimit: 6 },
+      automod: {
+        blockInvites: true,
+        blockLinks: false,
+        action: "delete",
+        capsThresholdPercent: 85,
+        mentionLimit: 6,
+      },
       security: { raidMode: "smart", raidJoinThreshold: 15, minAccountAgeHours: 12 },
       tickets: { slaWarningMinutes: 120, departments: ["Suporte", "Denúncia"] },
     },
@@ -271,7 +293,13 @@ export const presets: Record<
     label: "Roleplay",
     blurb: "Mais permissivo no chat, anti-raid estrito, denúncias com prioridade.",
     patch: {
-      automod: { blockInvites: true, blockLinks: false, capsThresholdPercent: 100, mentionLimit: 12, action: "warn" },
+      automod: {
+        blockInvites: true,
+        blockLinks: false,
+        capsThresholdPercent: 100,
+        mentionLimit: 12,
+        action: "warn",
+      },
       security: { raidMode: "strict", quarantineNewMembers: true, minAccountAgeHours: 72 },
       tickets: { slaWarningMinutes: 45, departments: ["Denúncia", "Whitelist", "Staff"] },
     },

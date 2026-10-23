@@ -23,6 +23,7 @@ const MODULES: ModuleKey[] = [
   "forms",
   "moderation",
   "automod",
+  "ocr",
   "security",
   "logs",
   "staff",
@@ -74,14 +75,22 @@ export function buildWorkspace(
   }));
 
   const modules: Record<string, GuildModules> = {};
-  const channels: Record<string, { id: string; name: string; type: "text" | "category" | "voice"; parentId: string | null }[]> = {};
-  const roles: Record<string, { id: string; name: string; color: string; position: number; staff?: boolean }[]> = {};
+  const channels: Record<
+    string,
+    { id: string; name: string; type: "text" | "category" | "voice"; parentId: string | null }[]
+  > = {};
+  const roles: Record<
+    string,
+    { id: string; name: string; color: string; position: number; staff?: boolean }[]
+  > = {};
   const formQuestions: Record<string, { id: string; label: string; required: boolean }[]> = {};
 
   for (const g of list) {
     modules[g.id] = emptyModules();
     channels[g.id] = [];
-    roles[g.id] = [{ id: `owner-${g.id}`, name: "Dono", color: "#f5d76e", position: 50, staff: true }];
+    roles[g.id] = [
+      { id: `owner-${g.id}`, name: "Dono", color: "#f5d76e", position: 50, staff: true },
+    ];
     formQuestions[g.id] = [
       { id: "q1", label: "Qual o seu nome ou apelido?", required: true },
       { id: "q2", label: "Por que quer fazer parte da equipe?", required: true },
@@ -153,7 +162,9 @@ export function buildWorkspace(
     modules,
     channels,
     roles,
-    dashboardMembers: [{ id: user.id, username: user.username, role: "owner" as const, addedAt: Date.now() }],
+    dashboardMembers: [
+      { id: user.id, username: user.username, role: "owner" as const, addedAt: Date.now() },
+    ],
     licenses,
     posts: [],
     publishQueue: [],

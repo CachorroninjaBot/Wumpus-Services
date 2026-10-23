@@ -18,7 +18,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     joinMessage: "Bem-vindo(a) ao servidor, {user}!",
     leaveMessage: "{user} saiu do servidor.",
     maintenanceMode: false,
-    maintenanceMessage: "O servidor está em manutenção. Volte mais tarde."
+    maintenanceMessage: "O servidor está em manutenção. Volte mais tarde.",
   },
   statistics: {
     retentionDays: 180,
@@ -32,7 +32,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     exportFormat: "json",
     highlightTopMembers: 5,
     trackReactions: false,
-    trackCommands: true
+    trackCommands: true,
   },
   staff: {
     staffRoleIds: [],
@@ -45,7 +45,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     autoArchiveDays: 7,
     escalationRoleId: "",
     maxConcurrentTickets: 5,
-    responseTimeGoalMinutes: 30
+    responseTimeGoalMinutes: 30,
   },
   roles: {
     allowAiDrafts: true,
@@ -57,7 +57,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     maxRolesPerMember: 25,
     autoSyncIntervalHours: 24,
     hierarchyLimit: 10,
-    defaultRoleIds: []
+    defaultRoleIds: [],
   },
   automations: {
     requireApprovalForDestructiveActions: true,
@@ -71,7 +71,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     maxRetries: 3,
     cooldownSeconds: 5,
     allowSendMessage: true,
-    allowNicknameChange: false
+    allowNicknameChange: false,
   },
   integrations: {
     webhookAllowlist: [],
@@ -83,7 +83,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     rateLimitPerMinute: 60,
     healthCheckIntervalMinutes: 5,
     logPayloads: false,
-    customHeaders: []
+    customHeaders: [],
   },
   moderation: {
     logChannelId: "",
@@ -98,7 +98,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     strikeExpiryDays: 30,
     publicLogging: false,
     pardonsEnabled: true,
-    maxStrikesBeforeBan: 5
+    maxStrikesBeforeBan: 5,
   },
   automod: {
     logChannelId: "",
@@ -113,14 +113,13 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     ignoredChannelIds: [],
     ignoredRoleIds: [],
     mentionLimit: 8,
-    scanImages: true,
     warnMessage: "Sua mensagem foi removida pelo filtro automático.",
     blockLinks: false,
     allowedDomains: [],
     capsThresholdPercent: 70,
     minLength: 0,
     maxLength: 0,
-    antiGhostPing: true
+    antiGhostPing: true,
   },
   security: {
     alertChannelId: "",
@@ -148,7 +147,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     alertOnMassRoleDelete: true,
     alertOnMassWebhookCreate: true,
     alertOnMassInviteCreate: true,
-    alertOnEveryoneMentions: true
+    alertOnEveryoneMentions: true,
   },
   logs: {
     channelId: "",
@@ -172,7 +171,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     compactMode: false,
     includeTimestamp: true,
     mentionOnCritical: false,
-    mentionRoleId: ""
+    mentionRoleId: "",
   },
   tickets: {
     panelChannelId: "",
@@ -201,7 +200,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     // de escolha nunca aparecia.
     departments: ["Suporte geral", "Denuncias", "Parcerias"],
     slaWarningMinutes: 60,
-    escalationRoleId: ""
+    escalationRoleId: "",
   },
   forms: {
     panelChannelId: "",
@@ -224,7 +223,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     questions: [
       "Qual o seu nome ou apelido?",
       "Por que quer fazer parte da equipe?",
-      "Qual a sua experiência relevante?"
+      "Qual a sua experiência relevante?",
     ],
     // Formulario profissional. `fields` tem precedencia sobre `questions`;
     // `questions` fica como compatibilidade para quem ja configurou antes.
@@ -237,7 +236,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
         options: ["Duvida", "Denuncia", "Parceria", "Suporte tecnico"],
         maxLength: 500,
         minLength: 0,
-        placeholder: "Escolha uma opção"
+        placeholder: "Escolha uma opção",
       },
       {
         id: "nome",
@@ -247,7 +246,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
         options: [],
         maxLength: 100,
         minLength: 0,
-        placeholder: "Digite sua resposta"
+        placeholder: "Digite sua resposta",
       },
       {
         id: "motivo",
@@ -257,7 +256,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
         options: [],
         maxLength: 1000,
         minLength: 0,
-        placeholder: "Escreva com detalhes"
+        placeholder: "Escreva com detalhes",
       },
       {
         id: "experiencia",
@@ -267,9 +266,9 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
         options: [],
         maxLength: 1000,
         minLength: 0,
-        placeholder: "Conte sua experiência"
-      }
-    ]
+        placeholder: "Conte sua experiência",
+      },
+    ],
   },
   knowledge: {
     answerChannelId: "",
@@ -287,21 +286,21 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     respondInAllChannels: false,
     includeArticleLink: true,
     logSearches: false,
-    logChannelId: ""
+    logChannelId: "",
   },
   ocr: {
-    provider: "hybrid",
+    provider: "ocr.space",
     language: "pt",
     model: "",
     retainExtractedText: false,
-    maxImageMb: 8,
+    maxImageMb: 1,
     reviewChannelId: "",
     confidenceThreshold: 0.7,
     cacheResults: true,
     cacheTtlMinutes: 60,
     autoDeleteSuspicious: false,
-    logChannelId: ""
-  }
+    logChannelId: "",
+  },
 };
 
 export function defaultsFor(module: ModuleId): Record<string, unknown> {

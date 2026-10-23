@@ -257,7 +257,6 @@ export const publishGuildRuntime = createServerFn({ method: "POST" })
       if (modules.knowledge) modules.knowledge.useAi = false;
     }
     if (!planAllows(plan ?? "essencial", "ocr")) {
-      if (modules.automod) modules.automod.scanImages = false;
       if (modules.ocr) modules.ocr.enabled = false;
     }
     if (!planAllows(plan ?? "essencial", "webhooks") && modules.integrations) {

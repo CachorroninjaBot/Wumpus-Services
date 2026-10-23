@@ -304,11 +304,8 @@ export async function handleGhostPing(
 }
 
 /**
- * Varredura de imagens: o painel tem `scanImages` ligado por padrao, mas o bot
- * nunca leu imagem — print com "free nitro" ou QR de golpe passava direto.
- *
- * So roda quando a mensagem tem anexo de imagem e o modulo permite. O texto
- * lido entra no MESMO scanner do texto, entao as regras valem igual.
+ * A leitura OCR tem ativação independente do AutoMod, mas reutiliza os termos
+ * bloqueados e a ação definidos no módulo de mensagens.
  */
 export async function handleImageContent(message: Message, log: Logger): Promise<void> {
   const guild = message.guild;
@@ -337,38 +334,44 @@ export async function handleImageContent(message: Message, log: Logger): Promise
     imageCount: images.length,
   });
 
-  const config = await moduleConfig(guild.id, "automod");
-  if (!config) {
+  const [ocrConfig, config] = await Promise.all([
+    moduleConfig(guild.id, "ocr"),
+    moduleConfig(guild.id, "automod"),
+  ]);
+  if (!ocrConfig) {
     const [entitlementStatus, runtime] = await Promise.all([
       guildEntitlementStatus(guild.id),
       loadRuntime(),
     ]);
-    const publishedModule = runtime.guilds[guild.id]?.automod;
-    log.warn("OCR ignorado: configuração do AutoMod indisponível para o bot", {
+    const publishedOcr = runtime.guilds[guild.id]?.ocr;
+    log.warn("OCR indisponível para o bot", {
       guildId: guild.id,
       entitlementStatus: entitlementStatus ?? "missing",
-      runtimeConfigPresent: Boolean(publishedModule && typeof publishedModule === "object"),
+      reason:
+        entitlementStatus === "active"
+          ? "ocr_config_missing_or_plan_not_eligible"
+          : "inactive_entitlement",
+      runtimeConfigPresent: Boolean(publishedOcr && typeof publishedOcr === "object"),
       runtimeUpdatedAt: runtime.updatedAt || "missing",
     });
     return;
   }
-  if (!isEnabled(config)) {
-    log.warn("OCR ignorado: AutoMod está desativado no runtime do bot", {
+  if (!isEnabled(ocrConfig)) {
+    log.warn("OCR pausado no runtime do bot", {
       guildId: guild.id,
-      runtimeEnabled: config.enabled ?? "missing",
+      runtimeEnabled: ocrConfig.enabled ?? "missing",
       runtimeUpdatedAt: (await loadRuntime()).updatedAt || "missing",
     });
     return;
   }
-  if (!bool(config, "scanImages", true)) {
-    log.info("OCR ignorado", { guildId: guild.id, reason: "image_scanning_disabled" });
+  if (!config) {
+    log.warn("OCR sem configuração de termos e ações do AutoMod", {
+      guildId: guild.id,
+      reason: "automod_config_missing",
+    });
     return;
   }
-  const retainExtractedText = bool(
-    await moduleConfig(guild.id, "ocr"),
-    "retainExtractedText",
-    false,
-  );
+  const retainExtractedText = bool(ocrConfig, "retainExtractedText", false);
 
   const supportedImages = images
     .filter((attachment) =>

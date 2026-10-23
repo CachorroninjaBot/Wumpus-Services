@@ -102,6 +102,7 @@ function modulesFor(preset: "shop" | "rp"): GuildModules {
     "forms",
     "moderation",
     "automod",
+    "ocr",
     "security",
     "logs",
     "staff",
@@ -152,14 +153,23 @@ function modulesFor(preset: "shop" | "rp"): GuildModules {
       minAccountAgeHours: 48,
     };
   } else {
-    out.automod.config = { ...out.automod.config, action: "warn", capsThresholdPercent: 100, mentionLimit: 12 };
+    out.automod.config = {
+      ...out.automod.config,
+      action: "warn",
+      capsThresholdPercent: 100,
+      mentionLimit: 12,
+    };
     out.tickets.config = {
       ...out.tickets.config,
       panelTitle: "Whitelist e denúncias",
       departments: ["Denúncia", "Whitelist", "Staff"],
       slaWarningMinutes: 45,
     };
-    out.security.config = { ...out.security.config, raidMode: "strict", quarantineNewMembers: true };
+    out.security.config = {
+      ...out.security.config,
+      raidMode: "strict",
+      quarantineNewMembers: true,
+    };
   }
   return out;
 }
@@ -176,7 +186,17 @@ export const members: Member[] = [
   m(DEMO_GUILD, "u_rico", "rico", "Rico", 12, ["role_mod"], 180, "dnd", 0),
   m(DEMO_GUILD, "u_bia", "bia", "Bia", 140, ["role_cliente", "role_membro"], 90, "online", 0),
   m(DEMO_GUILD, "u_davi", "davi", "Davi", 28, ["role_membro"], 40, "online", 2),
-  m(DEMO_GUILD, "u_nanda", "nanda", "Nanda", 300, ["role_cliente", "role_membro"], 70, "offline", 0),
+  m(
+    DEMO_GUILD,
+    "u_nanda",
+    "nanda",
+    "Nanda",
+    300,
+    ["role_cliente", "role_membro"],
+    70,
+    "offline",
+    0,
+  ),
   m(DEMO_GUILD, "u_kai", "kai", "Kai", 18, ["role_membro"], 12, "online", 4),
   m(DEMO_RP, "u_luna", "luna", "Luna", 262, ["role_owner", "role_staff"], 800, "online", 0),
   m(DEMO_RP, "u_gael", "gael", "Gael", 190, ["role_staff"], 120, "online", 0),
@@ -229,7 +249,12 @@ export const tickets: Ticket[] = [
     transcript: null,
     feedback: null,
     messages: [
-      msg("u_bia", "user", "Paguei o pack Aurora Pro há 2 horas e o cargo não caiu. Comprovante no e-mail.", minutesAgo(95)),
+      msg(
+        "u_bia",
+        "user",
+        "Paguei o pack Aurora Pro há 2 horas e o cargo não caiu. Comprovante no e-mail.",
+        minutesAgo(95),
+      ),
       msg("system", "system", "Ticket aberto no departamento Compras. SLA 30 min.", minutesAgo(95)),
     ],
   },
@@ -253,7 +278,12 @@ export const tickets: Ticket[] = [
     messages: [
       msg("u_nanda", "user", "O login da área de membros volta erro 403.", minutesAgo(40)),
       msg("system", "system", "Theo assumiu o atendimento.", minutesAgo(28)),
-      msg("u_theo", "staff", "Vi aqui — o e-mail da compra está diferente do Discord. Me confirma o e-mail usado no checkout?", minutesAgo(28)),
+      msg(
+        "u_theo",
+        "staff",
+        "Vi aqui — o e-mail da compra está diferente do Discord. Me confirma o e-mail usado no checkout?",
+        minutesAgo(28),
+      ),
       msg("u_nanda", "user", "Usei nanda.loja@gmail.com", minutesAgo(18)),
     ],
   },
@@ -329,7 +359,12 @@ export const tickets: Ticket[] = [
   },
 ];
 
-function msg(authorId: string, kind: Ticket["messages"][number]["kind"], content: string, at: number) {
+function msg(
+  authorId: string,
+  kind: Ticket["messages"][number]["kind"],
+  content: string,
+  at: number,
+) {
   return { id: uid("m"), authorId, kind, content, at };
 }
 
@@ -377,7 +412,8 @@ export const submissions: FormSubmission[] = [
     reviewedAt: null,
     reviewerId: null,
     reason: "",
-    aiNote: "Pouca substância nas respostas. Sem evidência de experiência. Sugerir rejeitar com pedido para tentar de novo em 30 dias.",
+    aiNote:
+      "Pouca substância nas respostas. Sem evidência de experiência. Sugerir rejeitar com pedido para tentar de novo em 30 dias.",
   },
   {
     id: "s_3",
@@ -529,15 +565,78 @@ export const articles: Article[] = [
 ];
 
 export const logs: AuditEvent[] = [
-  { id: uid("l"), guildId: DEMO_GUILD, at: minutesAgo(5), actor: "Wumpus", category: "automod", summary: "Mensagem apagada em #geral (convite)." },
-  { id: uid("l"), guildId: DEMO_GUILD, at: minutesAgo(28), actor: "Theo", category: "tickets", summary: "Assumiu o ticket #185." },
-  { id: uid("l"), guildId: DEMO_GUILD, at: minutesAgo(95), actor: "Bia", category: "tickets", summary: "Abriu ticket #184 em Compras." },
-  { id: uid("l"), guildId: DEMO_GUILD, at: hoursAgo(5), actor: "Rico", category: "moderation", summary: "Advertência em Kai — convite." },
-  { id: uid("l"), guildId: DEMO_GUILD, at: hoursAgo(6), actor: "Bia", category: "forms", summary: "Enviou candidatura à equipe." },
-  { id: uid("l"), guildId: DEMO_GUILD, at: hoursAgo(14), actor: "Maya", category: "moderation", summary: "Timeout de 60 min em Davi." },
-  { id: uid("l"), guildId: DEMO_GUILD, at: hoursAgo(26), actor: "Maya", category: "tickets", summary: "Encerrou #176 e publicou transcrição." },
-  { id: uid("l"), guildId: DEMO_GUILD, at: hoursAgo(36), actor: "Wumpus", category: "security", summary: "Incidente de raid contido." },
-  { id: uid("l"), guildId: DEMO_GUILD, at: hoursAgo(70), actor: "Luna", category: "forms", summary: "Aprovou candidatura de Nanda." },
+  {
+    id: uid("l"),
+    guildId: DEMO_GUILD,
+    at: minutesAgo(5),
+    actor: "Wumpus",
+    category: "automod",
+    summary: "Mensagem apagada em #geral (convite).",
+  },
+  {
+    id: uid("l"),
+    guildId: DEMO_GUILD,
+    at: minutesAgo(28),
+    actor: "Theo",
+    category: "tickets",
+    summary: "Assumiu o ticket #185.",
+  },
+  {
+    id: uid("l"),
+    guildId: DEMO_GUILD,
+    at: minutesAgo(95),
+    actor: "Bia",
+    category: "tickets",
+    summary: "Abriu ticket #184 em Compras.",
+  },
+  {
+    id: uid("l"),
+    guildId: DEMO_GUILD,
+    at: hoursAgo(5),
+    actor: "Rico",
+    category: "moderation",
+    summary: "Advertência em Kai — convite.",
+  },
+  {
+    id: uid("l"),
+    guildId: DEMO_GUILD,
+    at: hoursAgo(6),
+    actor: "Bia",
+    category: "forms",
+    summary: "Enviou candidatura à equipe.",
+  },
+  {
+    id: uid("l"),
+    guildId: DEMO_GUILD,
+    at: hoursAgo(14),
+    actor: "Maya",
+    category: "moderation",
+    summary: "Timeout de 60 min em Davi.",
+  },
+  {
+    id: uid("l"),
+    guildId: DEMO_GUILD,
+    at: hoursAgo(26),
+    actor: "Maya",
+    category: "tickets",
+    summary: "Encerrou #176 e publicou transcrição.",
+  },
+  {
+    id: uid("l"),
+    guildId: DEMO_GUILD,
+    at: hoursAgo(36),
+    actor: "Wumpus",
+    category: "security",
+    summary: "Incidente de raid contido.",
+  },
+  {
+    id: uid("l"),
+    guildId: DEMO_GUILD,
+    at: hoursAgo(70),
+    actor: "Luna",
+    category: "forms",
+    summary: "Aprovou candidatura de Nanda.",
+  },
 ];
 
 export const dashboardMembers: DashboardMember[] = [
@@ -547,8 +646,22 @@ export const dashboardMembers: DashboardMember[] = [
 ];
 
 export const licenses: License[] = [
-  { id: "lic_1", guildName: "Aurora Store", plan: "pro", seats: 5, expires: "2026-12-01", status: "active" },
-  { id: "lic_2", guildName: "Nexus RP", plan: "escala", seats: 8, expires: "2027-03-12", status: "active" },
+  {
+    id: "lic_1",
+    guildName: "Aurora Store",
+    plan: "pro",
+    seats: 5,
+    expires: "2026-12-01",
+    status: "active",
+  },
+  {
+    id: "lic_2",
+    guildName: "Nexus RP",
+    plan: "escala",
+    seats: 8,
+    expires: "2027-03-12",
+    status: "active",
+  },
 ];
 
 export function cloneSeed() {

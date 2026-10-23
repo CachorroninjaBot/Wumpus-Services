@@ -39,6 +39,12 @@ export function mergeGuildModules(saved: GuildModules | undefined): GuildModules
     };
   }
 
+  const legacyScanImages = saved?.automod?.config?.scanImages;
+  if (!saved?.ocr && typeof legacyScanImages === "boolean") {
+    out.ocr.enabled = legacyScanImages;
+  }
+  delete out.automod.config.scanImages;
+
   return out;
 }
 

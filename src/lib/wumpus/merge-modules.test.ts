@@ -48,6 +48,15 @@ test("lista salva e substituida, nao misturada", () => {
   assert.deepEqual(merged.forms.config.questions, ["so uma"]);
 });
 
+test("migra a antiga opção de leitura de imagens para o módulo OCR independente", () => {
+  const merged = mergeGuildModules(
+    partial({ automod: { enabled: false, config: { scanImages: false } } }),
+  );
+  assert.equal(merged.automod.enabled, false);
+  assert.equal(merged.automod.config.scanImages, undefined);
+  assert.equal(merged.ocr.enabled, false);
+});
+
 /* ---------------------------------------------------------------- ligado --- */
 
 test("modulo desligado continua desligado", () => {

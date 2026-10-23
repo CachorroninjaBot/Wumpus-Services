@@ -2,7 +2,8 @@
  * OCR de imagens — leitura de texto em prints.
  *
  * O painel tem um modulo `ocr` inteiro (provider, idioma, limite de MB,
- * confianca minima, cache, retencao do texto) e o automod tem `scanImages`.
+ * confiança mínima, cache e retenção do texto) e o AutoMod fornece os termos
+ * bloqueados e a ação a aplicar quando houver correspondência.
  * Nada disso existia no bot: imagem nunca era lida, entao print com golpe
  * passava direto pelo filtro.
  *

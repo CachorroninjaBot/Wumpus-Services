@@ -97,7 +97,6 @@ export async function moduleConfig(guildId: string, module: string): Promise<Mod
     if (module === "tickets") config.aiSupportEnabled = false;
     if (module === "forms") config.useAiPreReview = false;
   }
-  if (!planAllows(planId, "ocr") && module === "automod") config.scanImages = false;
   return config;
 }
 

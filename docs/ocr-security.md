@@ -16,12 +16,19 @@ explicitamente bem-sucedidos (`OCRExitCode` e `FileParseExitCode`) são usados.
 
 OCR.space não retorna score de confiança calibrado, portanto `confidenceThreshold`
 não mede a qualidade da transcrição nesse provedor. Após uma leitura bem-sucedida,
-o AutoMod procura somente os `blockedTerms` configurados pelo usuário, sem
+o módulo OCR, ativado separadamente em Proteção > OCR, procura somente os
+`blockedTerms` configurados pelo usuário em Proteção > Mensagens, sem
 aplicar regras de convite, links, caixa alta ou flood ao texto da imagem. Se
 encontrar um termo, aplica a ação configurada no AutoMod e grava um evento de
 auditoria/log identificando o termo, a ação e a origem OCR. Sem correspondência,
 nenhuma ação de moderação nem evento de incidente é gerado. Os canais e cargos
 ignorados pelo AutoMod também são respeitados.
+
+A opção antiga `automod.config.scanImages` é migrada para `ocr.enabled` ao
+carregar a configuração salva e removida do módulo AutoMod. Desligar o AutoMod
+não desliga o OCR; os termos e a ação continuam editáveis em Proteção >
+Mensagens. O OCR ainda respeita o plano do servidor e requer `OCR_SPACE_API_KEY`
+configurada no ambiente do bot.
 
 `retainExtractedText` controla se o texto reconhecido é gravado no registro de
 auditoria do AutoMod. Com a opção desativada (padrão), o conteúdo e trechos
