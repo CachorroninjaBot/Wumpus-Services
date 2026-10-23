@@ -73,6 +73,14 @@ function domainAllowed(domain: string, allowed: string[]): boolean {
   });
 }
 
+function isImageAttachment(attachment: { contentType: string | null; name: string }): boolean {
+  const contentType = (attachment.contentType ?? "").split(";")[0]!.trim().toLowerCase();
+  return (
+    contentType.startsWith("image/") ||
+    /\.(?:png|jpe?g|gif|bmp|tiff?|webp|avif)$/i.test(attachment.name)
+  );
+}
+
 /**
  * Avalia uma mensagem e devolve a primeira regra violada.
  * Devolve `null` quando esta tudo certo — o caso comum.
@@ -297,15 +305,45 @@ export async function handleImageContent(message: Message, log: Logger): Promise
   const guild = message.guild;
   if (!guild || message.author.bot) return;
 
+  const attachments = [...message.attachments.values()];
+  if (!attachments.length) return;
+  const images = attachments.filter(isImageAttachment);
+  if (!images.length) {
+    log.info("anexos ignorados pelo OCR: nenhum reconhecido como imagem", {
+      guildId: guild.id,
+      attachmentCount: attachments.length,
+      contentTypes: [
+        ...new Set(attachments.map((attachment) => attachment.contentType ?? "unknown")),
+      ]
+        .join(",")
+        .slice(0, 200),
+    });
+    return;
+  }
+
+  log.info("imagem detectada para verificação OCR", {
+    guildId: guild.id,
+    channelId: message.channelId,
+    attachmentCount: attachments.length,
+    imageCount: images.length,
+  });
+
   const config = await moduleConfig(guild.id, "automod");
-  if (!isEnabled(config) || !bool(config, "scanImages", true)) return;
+  if (!isEnabled(config)) {
+    log.info("OCR ignorado", { guildId: guild.id, reason: "automod_module_disabled" });
+    return;
+  }
+  if (!bool(config, "scanImages", true)) {
+    log.info("OCR ignorado", { guildId: guild.id, reason: "image_scanning_disabled" });
+    return;
+  }
   const retainExtractedText = bool(
     await moduleConfig(guild.id, "ocr"),
     "retainExtractedText",
     false,
   );
 
-  const images = [...message.attachments.values()]
+  const supportedImages = images
     .filter((attachment) =>
       ["image/jpeg", "image/png", "image/gif", "image/bmp", "image/tiff"].includes(
         (attachment.contentType ?? "").split(";")[0]!.trim().toLowerCase(),
@@ -313,11 +351,19 @@ export async function handleImageContent(message: Message, log: Logger): Promise
     )
     .map((attachment) => ({ url: attachment.url, size: attachment.size }));
 
-  if (!images.length) return;
-  if (images.length > OCR_MAX_IMAGES_PER_MESSAGE) {
+  if (!supportedImages.length) {
+    log.warn("OCR ignorado: formato de imagem não suportado", {
+      guildId: guild.id,
+      contentTypes: [
+        ...new Set(images.map((attachment) => attachment.contentType ?? "unknown")),
+      ].join(","),
+    });
+    return;
+  }
+  if (supportedImages.length > OCR_MAX_IMAGES_PER_MESSAGE) {
     log.info("anexos de imagem ignorados pelo limite do OCR", {
       guildId: guild.id,
-      count: images.length,
+      count: supportedImages.length,
       limit: OCR_MAX_IMAGES_PER_MESSAGE,
     });
   }
@@ -337,11 +383,24 @@ export async function handleImageContent(message: Message, log: Logger): Promise
     return;
   }
 
-  const text = await extractTextFromAttachments(guild.id, images, log);
-  if (!text.trim()) return;
+  const text = await extractTextFromAttachments(guild.id, supportedImages, log);
+  if (!text.trim()) {
+    log.info("OCR concluído sem texto extraído", {
+      guildId: guild.id,
+      imageCount: Math.min(supportedImages.length, OCR_MAX_IMAGES_PER_MESSAGE),
+    });
+    return;
+  }
 
   const hit = scanImageText(text, config);
-  if (!hit) return;
+  if (!hit) {
+    log.info("OCR concluído: nenhum termo bloqueado encontrado", {
+      guildId: guild.id,
+      textLength: text.length,
+      blockedTermCount: list(config, "blockedTerms").length,
+    });
+    return;
+  }
 
   const warnMessage = str(
     config,

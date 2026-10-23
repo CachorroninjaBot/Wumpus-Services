@@ -196,10 +196,15 @@ export async function readImage(
   options: { sizeBytes?: number; log?: Logger } = {},
 ): Promise<OcrResult | null> {
   const entitlement = await guildEntitlement(guildId);
-  if (!entitlement || !isPlanId(entitlement.planId) || !planAllows(entitlement.planId, "ocr"))
+  if (!entitlement || !isPlanId(entitlement.planId) || !planAllows(entitlement.planId, "ocr")) {
+    options.log?.info("OCR ignorado", { guildId, reason: "plan_not_entitled" });
     return null;
+  }
   const config = await moduleConfig(guildId, "ocr");
-  if (!isEnabled(config)) return null;
+  if (!isEnabled(config)) {
+    options.log?.info("OCR ignorado", { guildId, reason: "ocr_module_disabled" });
+    return null;
+  }
 
   const apiKey = process.env.OCR_SPACE_API_KEY?.trim();
   if (!apiKey) {
@@ -230,7 +235,14 @@ export async function readImage(
 
   if (useCache) {
     const hit = cacheGet(key, ttlMinutes);
-    if (hit !== undefined) return hit;
+    if (hit !== undefined) {
+      options.log?.info("OCR cache consultado", {
+        guildId,
+        textFound: Boolean(hit?.text),
+        textLength: hit?.text.length ?? 0,
+      });
+      return hit;
+    }
   }
 
   if (activeRequests >= MAX_CONCURRENT_REQUESTS) {
@@ -265,9 +277,18 @@ export async function readImage(
     const imageBytes = await readResponseBytes(imageResponse, maxImageBytes);
     const imageType = [...IMAGE_TYPES].find(([, type]) => type.matches(imageBytes));
     if (!imageType) {
-      options.log?.info("imagem ignorada por formato não suportado no OCR.space", { guildId });
+      options.log?.warn("OCR não reconheceu o formato da imagem", {
+        guildId,
+        imageBytes: imageBytes.byteLength,
+      });
       return null;
     }
+
+    options.log?.info("imagem enviada ao OCR.space", {
+      guildId,
+      imageType: imageType[0],
+      imageBytes: imageBytes.byteLength,
+    });
 
     const form = new FormData();
     const fileBuffer = new ArrayBuffer(imageBytes.byteLength);
@@ -293,7 +314,19 @@ export async function readImage(
       return null;
     }
 
-    const result = parseOcrSpaceResponse(await readJsonWithLimit(res));
+    const payload = await readJsonWithLimit(res);
+    const result = parseOcrSpaceResponse(payload);
+    const responseData = isRecord(payload) ? payload : {};
+    options.log?.info("OCR.space respondeu", {
+      guildId,
+      ocrExitCode: responseData.OCRExitCode ?? "missing",
+      processingError: responseData.IsErroredOnProcessing === true,
+      parsedResultCount: Array.isArray(responseData.ParsedResults)
+        ? responseData.ParsedResults.length
+        : 0,
+      textFound: Boolean(result?.text),
+      textLength: result?.text.length ?? 0,
+    });
 
     // Quando o provedor não oferece score, aceita-se apenas parse explicitamente
     // bem-sucedido; um score disponível em outro contrato ainda respeita o limiar.

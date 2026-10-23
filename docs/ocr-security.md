@@ -28,3 +28,8 @@ auditoria do AutoMod. Com a opção desativada (padrão), o conteúdo e trechos
 derivados dele não são incluídos nos eventos de auditoria. O cache em memória
 continua sendo temporário e controlado separadamente por `cacheResults` e
 `cacheTtlMinutes`.
+
+O processo do bot também escreve no console etapas de diagnóstico do OCR:
+detecção de anexos, motivo de ignorar a leitura, envio ao provedor, código de
+resposta, quantidade de texto reconhecido e resultado da busca de termos. Os
+logs não incluem a chave, URL da imagem nem o texto reconhecido.
