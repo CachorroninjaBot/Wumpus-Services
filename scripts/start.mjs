@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 process.chdir(root);
@@ -25,4 +25,4 @@ if (token) {
   console.log("[bot] sem token do Discord — só o painel sobe.");
 }
 
-await import(join(root, ".output", "server", "index.mjs"));
+await import(pathToFileURL(join(root, ".output", "server", "index.mjs")).href);

@@ -12,12 +12,14 @@
  * limpo da para trocar por bloqueante.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const tsc = join(root, "node_modules", "typescript", "bin", "tsc");
+const cacheDir = join(root, "node_modules", ".cache");
+const buildInfo = join(cacheDir, "wumpus-typecheck.tsbuildinfo");
 
 if (!existsSync(tsc)) {
   console.log("[tipos] Verificação ignorada: TypeScript não encontrado.");
@@ -25,8 +27,9 @@ if (!existsSync(tsc)) {
 }
 
 console.log("[tipos] Conferindo o código…");
+mkdirSync(cacheDir, { recursive: true });
 
-const result = spawnSync(process.execPath, [tsc, "--noEmit"], {
+const result = spawnSync(process.execPath, [tsc, "--noEmit", "--incremental", "--tsBuildInfoFile", buildInfo], {
   cwd: root,
   encoding: "utf8",
   timeout: 180_000,

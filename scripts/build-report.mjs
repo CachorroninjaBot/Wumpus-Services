@@ -8,6 +8,10 @@ const viteCli = join(root, "node_modules", "vite", "bin", "vite.js");
 const result = spawnSync(process.execPath, [viteCli, "build", "--logLevel", "error"], {
   cwd: root,
   encoding: "utf8",
+  env: {
+    ...process.env,
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, "--max-old-space-size=768"].filter(Boolean).join(" "),
+  },
   timeout: 300_000,
 });
 

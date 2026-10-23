@@ -51,7 +51,7 @@ console.log(`[testes] Verificando ${files.length} arquivos…`);
 // `--experimental-strip-types` porque os testes importam os modulos .ts do bot.
 const result = spawnSync(
   process.execPath,
-  ["--experimental-strip-types", "--test", ...files],
+  ["--experimental-strip-types", "--test", "--test-concurrency=4", ...files],
   { cwd: root, encoding: "utf8", timeout: 120_000 }
 );
 
