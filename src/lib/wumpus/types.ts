@@ -52,6 +52,7 @@ export type TicketPriority = "low" | "normal" | "high" | "urgent";
 export type TicketMessage = {
   id: string;
   authorId: string;
+  authorName?: string;
   content: string;
   at: number;
   kind: "user" | "staff" | "system";
@@ -73,7 +74,7 @@ export type Ticket = {
   firstResponseAt: number | null;
   closedAt: number | null;
   messages: TicketMessage[];
-  feedback: { rating: number; comment: string } | null;
+  feedback: { rating: number; comment: string | null } | null;
   transcript: string | null;
 };
 

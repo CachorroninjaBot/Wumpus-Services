@@ -53,11 +53,16 @@ export type OutboxJob = {
   id: string;
   guildId: string;
   /** O que publicar. */
-  kind: "panel";
+  kind: "panel" | "ticket_action";
   /** "tickets" | "forms" — decide o modulo de config a usar. */
   target: string;
   /** Referencia de canal da config (nome como "ch_atendimento" ou snowflake). */
   channelRef: string;
+  action?: "claim" | "reply" | "close" | "priority";
+  ticketId?: number;
+  actorId?: string;
+  content?: string;
+  priority?: "low" | "normal" | "high" | "urgent";
   createdAt: number;
   status: "queued" | "done" | "failed";
   /** Preenchido pelo bot. */
@@ -65,6 +70,29 @@ export type OutboxJob = {
   channelId?: string;
   messageId?: string;
   at?: number;
+};
+
+export type BotTicketRecord = {
+  id: number;
+  guildId: string;
+  channelId: string;
+  openerId: string;
+  department: string | null;
+  status: "open" | "claimed" | "closed";
+  claimedBy: string | null;
+  createdAt: string;
+  closedAt: string | null;
+  priority: "low" | "normal" | "high" | "urgent";
+  firstResponseAt: string | null;
+  feedback: { rating: number; comment: string | null } | null;
+};
+
+export type BotTicketMessage = {
+  ticketId: number;
+  authorId: string;
+  authorName: string;
+  content: string;
+  at: string;
 };
 
 export type RuntimeFile = {
@@ -92,6 +120,17 @@ export async function readRuntime(): Promise<RuntimeFile> {
     };
   } catch {
     return { updatedAt: 0, guilds: {}, articles: {}, outbox: [] };
+  }
+}
+
+/** Bot collections shared on disk; malformed or missing files return empty lists. */
+export async function readBotCollection<T>(name: "tickets" | "ticket_messages"): Promise<T[]> {
+  try {
+    const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
+    const parsed: unknown = JSON.parse(await readFile(join(directory, `${name}.json`), "utf8"));
+    return Array.isArray(parsed) ? parsed as T[] : [];
+  } catch {
+    return [];
   }
 }
 

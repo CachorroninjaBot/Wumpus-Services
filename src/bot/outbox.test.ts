@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { outboxSummary, pendingJobs, pruneOutbox, settleJob } from "./outbox.ts";
+import { outboxSummary, pendingJobs, pruneOutbox, settleActionJob, settleJob } from "./outbox.ts";
 import type { OutboxJob } from "../lib/wumpus/runtime.server.ts";
 
 function job(over: Partial<OutboxJob> = {}): OutboxJob {
@@ -75,6 +75,20 @@ test("settle devolve lista nova, sem mutar a entrada", () => {
   const out = settleJob(jobs, "j1", { ok: true, channelId: "c", messageId: "m" });
   assert.notEqual(out, jobs);
   assert.equal(jobs[0]!.status, "queued", "a entrada nao pode ser alterada");
+});
+
+test("ação de ticket concluída fica consultável pela dashboard", () => {
+  const action = job({ kind: "ticket_action", action: "claim", ticketId: 42, actorId: "staff" });
+  const out = settleActionJob([action], action.id, { ok: true, detail: "Atendimento assumido." });
+  assert.equal(out[0]!.status, "done");
+  assert.equal(out[0]!.detail, "Atendimento assumido.");
+  assert.equal(action.status, "queued", "a entrada permanece imutável");
+});
+
+test("falha de ação de ticket guarda o detalhe e limita o tamanho", () => {
+  const out = settleActionJob([job({ kind: "ticket_action" })], "j1", { ok: false, detail: "x".repeat(5000) });
+  assert.equal(out[0]!.status, "failed");
+  assert.equal(out[0]!.detail?.length, 300);
 });
 
 /* --------------------------------------------------------------- limpeza --- */
