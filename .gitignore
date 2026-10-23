@@ -1,6 +1,5 @@
 node_modules
 dist
-.vercel
 .nitro
 .secrets
 .env
