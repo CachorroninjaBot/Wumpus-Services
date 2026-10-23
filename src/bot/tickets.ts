@@ -26,6 +26,7 @@ import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
 import { buildPanelPayload } from "./panels.ts";
 import { resolveChannel, resolveRole, resolveRoles } from "./resolve.ts";
+import { bump } from "./statistics.ts";
 import { mutate, nextId, read } from "./store.ts";
 import { autoCloseCandidate, buildTranscript, slaState, slaNotice } from "./tickets-sla.ts";
 
@@ -257,6 +258,7 @@ export async function openTicket(
       rows.push(ticket);
       return rows;
     });
+    await bump(guild.id, "tickets");
 
     const ping = bool(config, "pingStaffOnOpen", true) && staffRoles.length
       ? staffRoles.map((role) => `<@&${role.id}>`).join(" ")

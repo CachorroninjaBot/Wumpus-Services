@@ -125,7 +125,10 @@ type Actions = {
   removeDashboardMember: (id: string) => void;
 };
 
-export type WumpusStore = PersistSlice & Actions;
+export type WumpusStore = PersistSlice & Actions & {
+  runtimeSyncStatus: "idle" | "syncing" | "synced" | "failed";
+  runtimeSyncError: string | null;
+};
 
 function pick(s: PersistSlice): PersistSlice {
   return {
@@ -171,6 +174,8 @@ export const useWumpus = create<WumpusStore>((set, get) => {
   /** Ultimo objeto de módulos publicado — evita republicar sem mudança real. */
   let publishedModules: unknown = null;
   let publishedGuildId = "";
+  let publishRevision = 0;
+  let publishQueue: Promise<void> = Promise.resolve();
   let authorizedGuildIds: Set<string> | null = null;
   let accessRefreshPending = false;
 
@@ -189,6 +194,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
      if (state.modules === publishedModules && guildId === publishedGuildId) return;
      publishedModules = state.modules;
      publishedGuildId = guildId;
+     const revision = ++publishRevision;
 
     const payload: Record<string, Record<string, unknown>> = {};
     for (const [key, value] of Object.entries(modules)) {
@@ -197,7 +203,8 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       payload[key] = { ...(value.config ?? {}), enabled: value.enabled !== false };
     }
 
-    void publishGuildRuntime({
+    set({ runtimeSyncStatus: "syncing", runtimeSyncError: null });
+    const request = {
       data: {
         token,
         guildId,
@@ -214,8 +221,23 @@ export const useWumpus = create<WumpusStore>((set, get) => {
             approved: article.approved,
           })),
       },
+    };
+    // Keep disk writes ordered so a slow earlier request cannot overwrite a
+    // newer configuration after the UI has already moved on.
+    publishQueue = publishQueue.then(() => publishGuildRuntime(request)).then(() => {
+      if (revision === publishRevision) set({ runtimeSyncStatus: "synced", runtimeSyncError: null });
     }).catch((error: unknown) => {
       console.error("Não foi possível sincronizar a configuração com o bot.", error);
+      if (revision !== publishRevision) return;
+      const detail = error instanceof Error ? error.message : "erro desconhecido";
+      const nextStep = /permiss|403|50013/i.test(detail)
+        ? "Confira as permissões do Wumpus no servidor."
+        : /inválid|invalid|módulo|configuração/i.test(detail)
+          ? "Revise os campos da configuração e tente novamente."
+          : "Verifique a conexão com o servidor e tente alterar ou salvar a configuração novamente.";
+      set({ runtimeSyncStatus: "failed", runtimeSyncError: `A configuração ficou salva no navegador, mas não chegou ao bot. ${nextStep} (${detail})` });
+      publishedModules = null;
+      publishedGuildId = "";
     });
   };
 
@@ -282,6 +304,8 @@ export const useWumpus = create<WumpusStore>((set, get) => {
   return {
     ...seedSlice(),
     hydrated: false,
+    runtimeSyncStatus: "idle",
+    runtimeSyncError: null,
 
     hydrate: () => {
       if (typeof window === "undefined") {

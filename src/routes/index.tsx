@@ -23,7 +23,7 @@ const faqs = [
   },
   {
     q: "Preciso decorar comandos?",
-    a: "Não. Os painéis publicados no Discord abrem tickets e formulários. A fila de tickets desta prévia ainda é demonstrativa; as ações de atendimento não são sincronizadas com o bot.",
+    a: "Não. Os painéis publicados no Discord abrem tickets e formulários. A equipe acompanha os tickets reais na dashboard, enquanto o bot mantém as ações sincronizadas com os canais do servidor.",
   },
   {
     q: "Como eu entro no MEU painel?",

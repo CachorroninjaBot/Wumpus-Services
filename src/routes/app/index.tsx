@@ -8,20 +8,17 @@ import { Input } from "@/components/ui/input";
 import { ticketSla } from "@/lib/wumpus/engine";
 import { useActiveGuild, useModule, useWumpus } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
-import { getPublishStatus, type PublishStatus } from "@/lib/wumpus/runtime-store";
+import { getGuildActivity, getGuildTickets, getPublishStatus, type PublishStatus } from "@/lib/wumpus/runtime-store";
 import { getPublicBotHealth, type PublicBotHealth } from "@/lib/wumpus/health";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
+import type { Ticket as WumpusTicket } from "@/lib/wumpus/types";
 
 export const Route = createFileRoute("/app/")({ component: Overview });
 
 function Overview() {
   const guild = useActiveGuild();
   const gid = useWumpus((s) => s.activeGuildId);
-  const allTickets = useWumpus((s) => s.tickets);
   const tcfg = useModule("tickets");
-  const allIncidents = useWumpus((s) => s.incidents);
-  const allLogs = useWumpus((s) => s.logs);
-  const allSubs = useWumpus((s) => s.submissions);
   const lockdown = Boolean(useModule("security").config.lockdown);
   const automod = useModule("automod");
   const [cmd, setCmd] = useState("/config status");
@@ -29,11 +26,11 @@ function Overview() {
   const [publishStatuses, setPublishStatuses] = useState<PublishStatus[]>([]);
   const [botHealth, setBotHealth] = useState<PublicBotHealth | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [tickets, setTickets] = useState<WumpusTicket[]>([]);
+  const [activity, setActivity] = useState<Awaited<ReturnType<typeof getGuildActivity>> | null>(null);
 
-  const tickets = allTickets.filter((t) => t.guildId === gid);
-  const incidents = allIncidents.filter((i) => i.guildId === gid && i.status !== "closed");
-  const logs = allLogs.filter((l) => l.guildId === gid).slice(0, 6);
-  const submissions = allSubs.filter((x) => x.guildId === gid && x.status === "pending");
+  const submissions = activity?.pendingForms ?? 0;
+  const logs = activity?.recentEvents ?? [];
   const pendingSync = publishStatuses.filter((job) => job.status === "queued").length;
   const latestSync = [...publishStatuses].sort((a, b) => (b.at ?? b.createdAt) - (a.at ?? a.createdAt))[0];
 
@@ -41,13 +38,18 @@ function Overview() {
     let active = true;
     const refreshStatus = async () => {
       try {
-        const [health, statuses] = await Promise.all([
+        const token = getStoredSessionToken();
+        const [health, statuses, liveTickets, liveActivity] = await Promise.all([
           getPublicBotHealth(),
-          getPublishStatus({ data: { token: getStoredSessionToken(), guildId: gid } }),
+          getPublishStatus({ data: { token, guildId: gid } }),
+          getGuildTickets({ data: { token, guildId: gid } }),
+          getGuildActivity({ data: { token, guildId: gid } }),
         ]);
         if (active) {
           setBotHealth(health);
           setPublishStatuses(statuses);
+          setTickets(liveTickets);
+          setActivity(liveActivity);
           setStatusError(null);
         }
       } catch (error) {
@@ -78,7 +80,7 @@ function Overview() {
       return;
     }
     if (name === "stats") {
-      setCmdOut(`Abertos ${open.length} · SLA atrasado ${breaches.length} · CSAT ${avg} · candidaturas ${submissions.length}`);
+      setCmdOut(`Abertos ${open.length} · SLA atrasado ${breaches.length} · CSAT ${avg} · candidaturas ${submissions}`);
       return;
     }
     if (name === "ticket") {
@@ -133,10 +135,11 @@ function Overview() {
         {statusError ? <p className="mt-3 mb-0 text-xs text-destructive">{statusError}</p> : null}
       </Card>
 
+      <p className="m-0 -mt-3 text-xs text-muted-foreground">Fila e SLA vêm dos tickets persistidos pelo bot.</p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Fila aberta" value={String(open.length)} hint="tickets sem encerrar" />
         <Stat label="SLA em atraso" value={String(breaches.length)} hint="sem 1ª resposta a tempo" warn={breaches.length > 0} />
-        <Stat label="Candidaturas" value={String(submissions.length)} hint="esperando review" />
+        <Stat label="Candidaturas" value={String(submissions)} hint="esperando review · dados do bot" />
         <Stat label="CSAT" value={avg} hint={`${csat.length} avaliações`} />
       </div>
 
@@ -193,21 +196,22 @@ function Overview() {
 
         <Card>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="m-0 text-base font-semibold">Auditoria recente</h2>
+            <h2 className="m-0 text-base font-semibold">Auditoria recente do bot</h2>
             <Link to="/app/logs" className="text-sm text-primary">
               Ver logs
             </Link>
           </div>
           <ul className="m-0 space-y-2 p-0">
-            {logs.map((l) => (
-              <li key={l.id} className="flex gap-3 text-sm">
+            {logs.map((event) => (
+              <li key={event.id} className="flex gap-3 text-sm">
                 <Clock3 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                 <span>
-                  <span className="text-muted-foreground">{l.actor} · </span>
-                  {l.summary}
+                  <span className="text-muted-foreground">{event.module} · {event.actorId ?? "Sistema"} · {formatRelative(event.at)} · </span>
+                  {event.eventType.replaceAll("_", " ")}
                 </span>
               </li>
             ))}
+            {logs.length === 0 ? <li className="text-sm text-muted-foreground">Nenhum evento retornado pelo bot.</li> : null}
           </ul>
         </Card>
       </div>
@@ -234,12 +238,12 @@ function Overview() {
         <Quick to="/app/protect" icon={<Shield className="size-4" />} title="Testar o AutoMod" />
       </div>
 
-      {incidents.length > 0 ? (
+      {logs.some((event) => event.module === "security" && event.severity === "critical") ? (
         <Card>
-          <h2 className="mt-0 mb-2 text-base font-semibold">Incidentes abertos</h2>
-          {incidents.map((i) => (
-            <p key={i.id} className="m-0 text-sm text-muted-foreground">
-              {i.title} — {i.detail}
+          <h2 className="mt-0 mb-2 text-base font-semibold">Alertas críticos recentes</h2>
+          {logs.filter((event) => event.module === "security" && event.severity === "critical").slice(0, 3).map((event) => (
+            <p key={event.id} className="m-0 text-sm text-muted-foreground">
+              {event.eventType.replaceAll("_", " ")} · {formatRelative(event.at)}
             </p>
           ))}
         </Card>

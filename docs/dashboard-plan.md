@@ -8,8 +8,8 @@
 - [x] Estado do bot exposto na landing, overview e admin por heartbeat do processo.
 - [x] Tokens consolidados para tema claro/escuro/sistema e navegação mobile adaptada.
 - [x] Tickets reorganizados por resultado, com configurações de SLA, cargos,
-  feedback e painel; lista e ações de atendimento continuam demonstrativas e
-  locais, não sincronizadas com o bot.
+  feedback e painel; a lista e claim, resposta, prioridade e encerramento usam
+  o estado persistido do bot pela outbox.
 - [x] Landing pública separada do painel, com planos ShardPay, FAQ, status,
   convite e prévias visuais dos módulos. As prévias são componentes React, não
   screenshots estáticos do produto.
@@ -18,7 +18,9 @@
 - [x] Validação server-side das configurações publicadas e dos pedidos de
   publicação.
 - [x] Publicação de tickets e formulários aguarda o resultado real do bot; a
-  página distingue fila local demonstrativa de configuração/publicação real.
+  tela de atendimento e as estatísticas consultam dados reais persistidos.
+- [x] Erros ao sincronizar configuração e publicar painéis mostram os próximos
+  passos para corrigir acesso, campos ou permissões do bot.
 
 **Condições operacionais:** admin e bot precisam compartilhar o volume de
 `data/` (ou os caminhos configurados por `WUMPUS_HEALTH_PATH`,

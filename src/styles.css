@@ -15,6 +15,9 @@
   --wumpus-type-body: 0.875rem;
   --wumpus-type-title: 1.25rem;
   --wumpus-type-display: 2rem;
+  --wumpus-chart-grid: rgba(243, 244, 247, 0.08);
+  --wumpus-chart-tickets: color-mix(in srgb, var(--color-primary) 25%, transparent);
+  --wumpus-chart-automod: color-mix(in srgb, var(--color-info) 15%, transparent);
 }
 
 @theme {
@@ -28,6 +31,7 @@
   --color-popover: #16161d;
   --color-popover-foreground: #f3f4f7;
   --color-primary: #7c5cff;
+  --color-primary-hover: #8b6fff;
   --color-primary-foreground: #ffffff;
   --color-secondary: #1a1a22;
   --color-secondary-foreground: #e8e9ee;
@@ -43,6 +47,13 @@
   --color-warn: #e8a54b;
   --color-info: #5b8def;
   --color-discord: #5865f2;
+  --color-discord-surface: #313338;
+  --color-discord-surface-deep: #1e1f22;
+  --color-discord-text: #dbdee1;
+  --color-discord-muted: #949ba4;
+  --color-discord-label: #b5bac1;
+
+  --shadow-primary: 0 8px 24px rgba(124, 92, 255, 0.28);
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -67,6 +78,7 @@ html[data-theme="light"] {
   --color-muted-foreground: #5c6370;
   --color-border: rgba(18, 20, 26, 0.1);
   --color-input: rgba(18, 20, 26, 0.12);
+  --wumpus-chart-grid: rgba(18, 20, 26, 0.1);
 }
 
 @media (prefers-color-scheme: light) {
@@ -84,6 +96,7 @@ html[data-theme="light"] {
     --color-muted-foreground: #5c6370;
     --color-border: rgba(18, 20, 26, 0.1);
     --color-input: rgba(18, 20, 26, 0.12);
+    --wumpus-chart-grid: rgba(18, 20, 26, 0.1);
   }
 }
 

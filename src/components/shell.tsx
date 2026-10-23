@@ -84,6 +84,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const setActive = useWumpus((s) => s.setActiveGuild);
   const theme = useWumpus((s) => s.theme);
   const setTheme = useWumpus((s) => s.setTheme);
+  const runtimeSyncStatus = useWumpus((s) => s.runtimeSyncStatus);
+  const runtimeSyncError = useWumpus((s) => s.runtimeSyncError);
   const user = useWumpus((s) => s.sessionUser);
   const guild = guilds.find((g) => g.id === activeId) ?? guilds[0];
   const [open, setOpen] = useState(false);
@@ -265,7 +267,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             <LogOut className="size-4" />
           </Link>
         </header>
-        <main className="app-page flex-1 overflow-x-hidden p-4 sm:p-6">{children}</main>
+        <main className="app-page flex-1 overflow-x-hidden p-4 sm:p-6">
+          {runtimeSyncStatus === "syncing" ? (
+            <p role="status" className="mx-auto mb-4 max-w-6xl rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">Enviando a configuração deste servidor ao bot…</p>
+          ) : null}
+          {runtimeSyncError ? (
+            <p role="alert" className="mx-auto mb-4 max-w-6xl rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{runtimeSyncError}</p>
+          ) : null}
+          {children}
+        </main>
       </div>
     </div>
   );

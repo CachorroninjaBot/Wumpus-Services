@@ -238,3 +238,60 @@ export const getTicketActionStatus = createServerFn({ method: "POST" })
       entry.id === data.jobId && entry.guildId === data.guildId && entry.kind === "ticket_action");
     return job ? { status: job.status, detail: job.detail ?? null } : { status: "missing" as const, detail: null };
   });
+
+/** Actual bot activity for the overview chart, aggregated before crossing the server boundary. */
+export const getGuildActivity = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    type DailyStat = { guildId: string; day: string; messages: number; joins: number; leaves: number; tickets: number };
+    type TicketRecord = { guildId: string; createdAt: string };
+    type ModerationRecord = { guildId: string; createdAt: string };
+    type AuditRecord = { id: number; guildId: string; module: string; eventType: string; actorId?: string; severity: string; at: string };
+    type FormRecord = { guildId: string; status: string };
+    const [ticketRows, dailyRows, moderationRows, auditRows, formRows] = await Promise.all([
+      readBotCollection<TicketRecord>("tickets"),
+      readBotCollection<DailyStat>("statistics"),
+      readBotCollection<ModerationRecord>("moderation"),
+      readBotCollection<AuditRecord>("audit"),
+      readBotCollection<FormRecord>("forms"),
+    ]);
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date();
+      date.setUTCHours(0, 0, 0, 0);
+      date.setUTCDate(date.getUTCDate() - (6 - index));
+      const day = date.toISOString().slice(0, 10);
+      const existing = dailyRows.find((row) => row.guildId === data.guildId && row.day === day);
+      const tickets = ticketRows.filter((row) => row.guildId === data.guildId && row.createdAt.slice(0, 10) === day).length;
+      const automod = auditRows.filter((row) => row.guildId === data.guildId && row.module === "automod" && row.at.slice(0, 10) === day).length;
+      const moderation = moderationRows.filter((row) => row.guildId === data.guildId && row.createdAt.slice(0, 10) === day).length;
+      return {
+        day,
+        label: index === 6 ? "hoje" : new Intl.DateTimeFormat("pt-BR", { weekday: "short", timeZone: "UTC" }).format(date).replace(".", ""),
+        messages: existing?.messages ?? 0,
+        joins: existing?.joins ?? 0,
+        tickets,
+        automod,
+        moderation,
+      };
+    });
+    return {
+      days,
+      pendingForms: formRows.filter((row) => row.guildId === data.guildId && row.status === "pending").length,
+      recentEvents: auditRows
+        .filter((row) => row.guildId === data.guildId)
+        .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+        .slice(0, 6)
+        .map((row) => ({ id: row.id, module: row.module, eventType: row.eventType, actorId: row.actorId ?? null, severity: row.severity, at: Date.parse(row.at) || 0 })),
+      totals: days.reduce((total, row) => ({
+        messages: total.messages + row.messages,
+        joins: total.joins + row.joins,
+        tickets: total.tickets + row.tickets,
+        automod: total.automod + row.automod,
+        moderation: total.moderation + row.moderation,
+      }), { messages: 0, joins: 0, tickets: 0, automod: 0, moderation: 0 }),
+    };
+  });

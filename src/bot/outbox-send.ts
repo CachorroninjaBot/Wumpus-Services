@@ -86,7 +86,14 @@ async function publishPanel(guild: Guild, job: OutboxJob): Promise<
     const message = await target.send({ flags: panel.flags, components: panel.components } as never);
     return { ok: true, channelId: message.channelId, messageId: message.id };
   } catch (error) {
-    return { ok: false, error: `Discord recusou: ${String(error).slice(0, 200)}` };
+    const detail = String(error);
+    if (/50013|missing permissions|missing access/i.test(detail)) {
+      const required = job.target === "tickets"
+        ? "Dê ao bot Ver canais e Enviar mensagens no canal do painel. Para abrir tickets, ele também precisa de Gerenciar canais."
+        : "Dê ao bot Ver canais e Enviar mensagens no canal do formulário.";
+      return { ok: false, error: `O bot não tem permissão para publicar em #${job.channelRef}. ${required}` };
+    }
+    return { ok: false, error: `Discord recusou a publicação: ${detail.slice(0, 200)}. Confira se o canal existe e aceite mensagens.` };
   }
 }
 
