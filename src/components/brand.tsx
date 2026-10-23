@@ -3,12 +3,13 @@ import { cn, initials } from "@/lib/utils";
 export function BrandMark({ size = 36, className }: { size?: number; className?: string }) {
   return (
     <span
-      className={cn("grid place-items-center rounded-[10px] bg-primary text-white", className)}
+      className={cn("grid place-items-center rounded-[10px] bg-primary text-primary-foreground", className)}
       style={{ width: size, height: size }}
       aria-hidden
     >
-      <svg viewBox="0 0 24 24" width={size * 0.58} height={size * 0.58} fill="none">
-        <path d="M4 5.5h4.2l3.8 10.2L15.8 5.5H20L13.7 20h-3.4L4 5.5Z" fill="currentColor" />
+      <svg viewBox="0 0 24 24" width={size * 0.64} height={size * 0.64} fill="none">
+        <path d="M4 7.2 8.1 17l3.9-7.4 3.9 7.4L20 7.2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M5 19.2h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity=".78" />
       </svg>
     </span>
   );

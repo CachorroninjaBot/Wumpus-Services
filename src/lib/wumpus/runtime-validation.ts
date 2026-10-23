@@ -25,7 +25,7 @@ function matchesDefault(value: unknown, example: unknown, depth = 0, key = "", r
     const itemExample = example[0];
     return itemExample === undefined
       ? value.every((item) => typeof item === "string" && item.length <= 256)
-      : value.every((item) => matchesDefault(item, itemExample, depth + 1, "", true));
+      : value.every((item) => matchesDefault(item, itemExample, depth + 1, "", key !== "fields"));
   }
   if (example !== null && typeof example === "object") {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -81,4 +81,33 @@ export const publishInputSchema = z.object({
   if (JSON.stringify(input).length > 64_000) {
     ctx.addIssue({ code: "custom", message: "A configuração excede o limite de tamanho." });
   }
+  const fields = input.modules.forms?.fields;
+  if (!Array.isArray(fields)) return;
+  const textFields = fields.filter((field) => field && typeof field === "object" && (field as Record<string, unknown>).type !== "select");
+  const selectFields = fields.filter((field) => field && typeof field === "object" && (field as Record<string, unknown>).type === "select");
+  if (fields.length > 10 || textFields.length > 5 || selectFields.length > 5) {
+    ctx.addIssue({ code: "custom", message: "O Discord aceita até 5 perguntas de texto e 5 escolhas por formulário." });
+  }
+  fields.forEach((field, index) => {
+    if (!field || typeof field !== "object") return;
+    const row = field as Record<string, unknown>;
+    if (typeof row.label !== "string" || !row.label.trim() || row.label.length > 45) {
+      ctx.addIssue({ code: "custom", message: `A pergunta ${index + 1} precisa ter um rótulo de até 45 caracteres.` });
+    }
+    if (typeof row.placeholder === "string" && row.placeholder.length > 100) {
+      ctx.addIssue({ code: "custom", message: `O exemplo da pergunta ${index + 1} deve ter até 100 caracteres.` });
+    }
+    if (row.type === "select") {
+      const options = Array.isArray(row.options) ? row.options : [];
+      if (options.length < 2 || options.length > 25 || options.some((option) => typeof option !== "string" || option.length > 100)) {
+        ctx.addIssue({ code: "custom", message: `A pergunta ${index + 1} precisa ter de 2 a 25 opções de até 100 caracteres.` });
+      }
+    } else {
+      const minLength = typeof row.minLength === "number" ? row.minLength : 0;
+      const maxLength = typeof row.maxLength === "number" ? row.maxLength : 1000;
+      if (minLength < 0 || minLength > maxLength || maxLength > 4000) {
+        ctx.addIssue({ code: "custom", message: `Confira o tamanho mínimo e máximo da pergunta ${index + 1}.` });
+      }
+    }
+  });
 });

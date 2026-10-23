@@ -13,7 +13,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { enqueueOutbox, readBotCollection, readRuntime, writeRuntime, type BotTicketMessage, type BotTicketRecord, type OutboxJob } from "./runtime.server";
+import { enqueueOutbox, readBotCollection, readRuntime, writeRuntime, type BotFormRecord, type BotTicketMessage, type BotTicketRecord, type OutboxJob } from "./runtime.server";
 import { requireGuildAccess } from "./session";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
@@ -210,6 +210,76 @@ export const getGuildTickets = createServerFn({ method: "POST" })
             kind: message.authorId === ticket.openerId ? "user" as const : "staff" as const,
           })),
       }));
+  });
+
+/** Formulários recebidos de verdade pelo bot, convertidos para o modelo da caixa. */
+export const getGuildFormSubmissions = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const forms = await readBotCollection<BotFormRecord>("forms");
+    return forms
+      .filter((form) => form.guildId === data.guildId)
+      .sort((a, b) => b.id - a.id)
+      .slice(0, 500)
+      .map((form) => ({
+        id: String(form.id),
+        guildId: form.guildId,
+        userId: form.userId,
+        answers: Object.fromEntries(form.questions.map((question, index) => [question, form.answers[index] ?? ""])),
+        status: form.status,
+        createdAt: Date.parse(form.createdAt) || 0,
+        reviewedAt: form.reviewedAt ? Date.parse(form.reviewedAt) || null : null,
+        reviewerId: form.reviewedBy,
+        reason: form.reviewReason ?? "",
+        aiNote: null,
+      }));
+  });
+
+/** Envia uma decisão de revisão ao processo do bot pelo runtime compartilhado. */
+export const requestFormReview = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    formId: z.number().int().positive(),
+    actorId: z.string().regex(/^\d{17,20}$/),
+    decision: z.enum(["approved", "rejected"]),
+    reason: z.string().max(500).optional(),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildAccess(data.token, data.guildId);
+    if (session.userId !== data.actorId) throw new Error("O revisor informado não corresponde à sessão.");
+    const job: OutboxJob = {
+      id: `form_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      guildId: data.guildId,
+      kind: "form_action",
+      target: "forms",
+      channelRef: "",
+      action: data.decision === "approved" ? "approve_form" : "reject_form",
+      formId: data.formId,
+      actorId: data.actorId,
+      ...(data.reason?.trim() ? { reason: data.reason.trim() } : {}),
+      createdAt: Date.now(),
+      status: "queued",
+    };
+    await enqueueOutbox(job);
+    return { jobId: job.id };
+  });
+
+export const getFormReviewStatus = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    jobId: z.string().min(1).max(100),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const job = (await readRuntime()).outbox?.find((entry) =>
+      entry.id === data.jobId && entry.guildId === data.guildId && entry.kind === "form_action");
+    return job ? { status: job.status, detail: job.detail ?? null } : { status: "missing" as const, detail: null };
   });
 
 export const requestTicketAction = createServerFn({ method: "POST" })

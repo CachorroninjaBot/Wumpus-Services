@@ -23,7 +23,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = join(root, "src");
 
 if (!existsSync(srcDir)) {
-  console.log("[test] src nao encontrado — pulando.");
+  console.log("[testes] Pasta de código não encontrada; verificação ignorada.");
   process.exit(0);
 }
 
@@ -42,11 +42,11 @@ function findTests(dir) {
 const files = findTests(srcDir).sort();
 
 if (!files.length) {
-  console.log("[test] nenhum arquivo *.test.ts encontrado — pulando.");
+  console.log("[testes] Nenhum teste cadastrado.");
   process.exit(0);
 }
 
-console.log(`[test] rodando ${files.length} arquivo(s) de teste…`);
+console.log(`[testes] Verificando ${files.length} arquivos…`);
 
 // `--experimental-strip-types` porque os testes importam os modulos .ts do bot.
 const result = spawnSync(
@@ -56,10 +56,9 @@ const result = spawnSync(
 );
 
 const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-if (output) console.log(output);
 
 if (result.error) {
-  console.log(`[test] nao foi possivel rodar: ${result.error.message}`);
+  console.error(`[testes] Não foi possível executar: ${result.error.message}`);
   process.exit(0);
 }
 
@@ -69,9 +68,11 @@ const pass = Number(output.match(/(?:#|ℹ)\s*pass\s+(\d+)/)?.[1] ?? 0);
 const fail = Number(output.match(/(?:#|ℹ)\s*fail\s+(\d+)/)?.[1] ?? 0);
 
 if (result.status === 0) {
-  console.log(`[test] ${pass} passaram, 0 falharam.`);
+  console.log(`[testes] ${pass} aprovados.`);
 } else {
-  console.log(`[test] ${pass} passaram, ${fail} FALHARAM — veja acima. O deploy segue.`);
+  console.error(`[testes] ${fail} falharam (${pass} aprovados). Detalhes:`);
+  if (output) console.error(output);
+  console.error("[testes] O deploy segue; revise as falhas antes de publicar novas alterações.");
 }
 
 process.exit(0);

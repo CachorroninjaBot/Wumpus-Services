@@ -1,415 +1,636 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { DiscordModalPreview, DiscordPanel } from "@/components/discord-panel";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronRight,
+  ClipboardCheck,
+  Copy,
+  Eye,
+  FilePlus2,
+  Inbox,
+  LoaderCircle,
+  Plus,
+  Search,
+  Send,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import { DiscordFormPreview, DiscordPanel } from "@/components/discord-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDesc, DialogTitle } from "@/components/ui/dialog";
 import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { analyzeWithGrok } from "@/lib/wumpus/analyze";
 import { asString, planAllows } from "@/lib/wumpus/engine";
-import { uid } from "@/lib/utils";
+import { formatRelative, uid } from "@/lib/utils";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus, type FormFieldConfig } from "@/lib/wumpus/store";
-import { formatRelative } from "@/lib/utils";
+import type { FormSubmission } from "@/lib/wumpus/types";
+import { getFormReviewStatus, getGuildFormSubmissions, requestFormReview } from "@/lib/wumpus/runtime-store";
 import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
-import { Plus, Trash2 } from "lucide-react";
+import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 
 export const Route = createFileRoute("/app/forms")({ component: FormsPage });
 
+type SubmissionFilter = "pending" | "all" | "approved" | "rejected";
+
+const STATUS: Record<FormSubmission["status"], { label: string; tone: "warn" | "ok" | "danger" }> = {
+  pending: { label: "Aguardando", tone: "warn" },
+  approved: { label: "Aprovado", tone: "ok" },
+  rejected: { label: "Recusado", tone: "danger" },
+};
+
+const templates: Array<{
+  id: string;
+  title: string;
+  description: string;
+  name: string;
+  fields: Array<{ label: string; type: FormFieldConfig["type"]; options?: string[]; placeholder: string }>;
+}> = [
+  {
+    id: "support",
+    title: "Pedido de suporte",
+    description: "Conte o que aconteceu para a equipe direcionar sua solicitação.",
+    name: "Atendimento",
+    fields: [
+      { label: "Qual é o assunto?", type: "select", options: ["Dúvida", "Problema", "Sugestão"], placeholder: "Escolha uma opção" },
+      { label: "Qual é o assunto em uma frase?", type: "short", placeholder: "Ex.: não consigo acessar minha conta" },
+      { label: "Conte o que aconteceu", type: "paragraph", placeholder: "Inclua o que você já tentou e qualquer detalhe útil" },
+    ],
+  },
+  {
+    id: "team",
+    title: "Inscrição para a equipe",
+    description: "Conheça a pessoa e a área em que ela gostaria de ajudar.",
+    name: "Inscrição para a equipe",
+    fields: [
+      { label: "Como devemos chamar você?", type: "short", placeholder: "Seu nome ou apelido" },
+      { label: "Em qual área quer ajudar?", type: "select", options: ["Moderação", "Suporte", "Eventos"], placeholder: "Escolha uma área" },
+      { label: "Por que quer participar?", type: "paragraph", placeholder: "Conte o que motiva você" },
+    ],
+  },
+  {
+    id: "report",
+    title: "Denúncia",
+    description: "Reúna as informações necessárias para a equipe analisar o relato.",
+    name: "Denúncia",
+    fields: [
+      { label: "O que você quer denunciar?", type: "select", options: ["Spam", "Assédio", "Golpe", "Outro"], placeholder: "Escolha uma categoria" },
+      { label: "Quem está envolvido?", type: "short", placeholder: "Nome de usuário ou link do perfil" },
+      { label: "Descreva o que aconteceu", type: "paragraph", placeholder: "Inclua datas, contexto e provas disponíveis" },
+    ],
+  },
+];
+
+function labelForStatus(status: FormSubmission["status"]) {
+  return STATUS[status]?.label ?? status;
+}
+
+function makeFields(template: (typeof templates)[number]): FormFieldConfig[] {
+  return template.fields.map((field) => ({
+    id: uid("field"),
+    label: field.label,
+    type: field.type,
+    required: true,
+    options: field.options ?? [],
+    maxLength: field.type === "short" ? 100 : 1000,
+    minLength: 0,
+    placeholder: field.placeholder,
+  }));
+}
+
 function FormsPage() {
-  const gid = useWumpus((s) => s.activeGuildId);
-  const questionsMap = useWumpus((s) => s.formQuestions);
-  const questions = questionsMap[gid] ?? [];
-  const allSubs = useWumpus((s) => s.submissions);
-  const submissions = allSubs.filter((x) => x.guildId === gid);
+  const gid = useWumpus((state) => state.activeGuildId);
+  const questionsMap = useWumpus((state) => state.formQuestions);
+  const legacyQuestions = questionsMap[gid] ?? [];
   const members = useGuildMembers();
-  const fcfg = useModule("forms");
-  const updateConfig = useWumpus((s) => s.updateConfig);
-  const setEnabled = useWumpus((s) => s.setModuleEnabled);
-  const submitForm = useWumpus((s) => s.submitForm);
-  const reviewForm = useWumpus((s) => s.reviewForm);
-  const setAiNote = useWumpus((s) => s.setSubmissionAiNote);
-  const user = useWumpus((s) => s.sessionUser);
+  const user = useWumpus((state) => state.sessionUser);
+  const channels = useWumpus((state) => state.channels[state.activeGuildId] ?? []);
+  const roles = useWumpus((state) => state.roles[state.activeGuildId] ?? []);
   const guild = useActiveGuild();
+  const fcfg = useModule("forms");
+  const updateConfig = useWumpus((state) => state.updateConfig);
+  const setEnabled = useWumpus((state) => state.setModuleEnabled);
+  const setFieldsInStore = useWumpus((state) => state.setFormFields);
   const formsAllowed = planAllows(guild.plan, "forms");
   const aiAllowed = planAllows(guild.plan, "ai") && Boolean(fcfg.config.useAiPreReview);
+
+  const savedFields = Array.isArray(fcfg.config.fields) ? fcfg.config.fields as FormFieldConfig[] : [];
+  const fields: FormFieldConfig[] = savedFields.length
+    ? savedFields
+    : legacyQuestions.map((question) => ({
+        id: question.id,
+        label: question.label,
+        type: "paragraph",
+        required: question.required,
+        options: [],
+        maxLength: 1000,
+        minLength: 0,
+        placeholder: "",
+      }));
+
+  const [tab, setTab] = useState("inbox");
+  const [submissions, setSubmissions] = useState<FormSubmission[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<SubmissionFilter>("pending");
+  const [query, setQuery] = useState("");
+  const [reason, setReason] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNotes, setAiNotes] = useState<Record<string, string>>({});
   const [publishBusy, setPublishBusy] = useState(false);
   const [publishNotice, setPublishNotice] = useState<string | null>(null);
+  const [builderNotice, setBuilderNotice] = useState<string | null>(null);
 
-  // Campos do formulário: a fonte de verdade é `config.fields` — o mesmo que o
-  // bot lê. O fallback converte a lista antiga de perguntas, para não perder
-  // quem já tinha configurado antes desta versão.
-  const storedFields = Array.isArray(fcfg.config.fields) ? (fcfg.config.fields as FormFieldConfig[]) : [];
-  const fields: FormFieldConfig[] = storedFields.length
-    ? storedFields
-    : questions.map((q) => ({
-        id: q.id,
-        label: q.label,
-        type: "paragraph" as const,
-        required: q.required,
-        options: [],
-        maxLength: 500,
-      }));
-  const setFields = useWumpus((s) => s.setFormFields);
+  async function refreshSubmissions(showLoading = false) {
+    const token = getStoredSessionToken();
+    if (!token || !gid) {
+      setSubmissions([]);
+      setLoadError("Entre com Discord para receber as respostas deste servidor.");
+      setLoading(false);
+      return;
+    }
+    if (showLoading) setLoading(true);
+    try {
+      const rows = await getGuildFormSubmissions({ data: { token, guildId: gid } });
+      setSubmissions(rows as FormSubmission[]);
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Não foi possível carregar as respostas do bot.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      const token = getStoredSessionToken();
+      if (!token || !gid) {
+        if (active) { setSubmissions([]); setLoadError("Entre com Discord para receber as respostas deste servidor."); setLoading(false); }
+        return;
+      }
+      try {
+        const rows = await getGuildFormSubmissions({ data: { token, guildId: gid } });
+        if (active) { setSubmissions(rows as FormSubmission[]); setLoadError(null); setLoading(false); }
+      } catch (error) {
+        if (active) { setLoadError(error instanceof Error ? error.message : "Não foi possível carregar as respostas do bot."); setLoading(false); }
+      }
+    };
+    setLoading(true);
+    setSubmissions([]);
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 10_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [gid]);
+
+  const visibleSubmissions = useMemo(() => submissions
+    .filter((submission) => filter === "all" || submission.status === filter)
+    .filter((submission) => {
+      const name = members.find((member) => member.id === submission.userId)?.displayName ?? submission.userId;
+      const haystack = `${name} ${Object.entries(submission.answers).map(([question, answer]) => `${question} ${answer}`).join(" ")}`;
+      return haystack.toLocaleLowerCase("pt-BR").includes(query.trim().toLocaleLowerCase("pt-BR"));
+    }), [filter, members, query, submissions]);
+
+  const selected = submissions.find((submission) => submission.id === selectedId) ?? visibleSubmissions[0] ?? null;
+  const pendingCount = submissions.filter((submission) => submission.status === "pending").length;
+  const textCount = fields.filter((field) => field.type !== "select").length;
+  const selectCount = fields.filter((field) => field.type === "select").length;
+  const canAddText = fields.length < 10 && textCount < 5;
+  const canAddSelect = fields.length < 10 && selectCount < 5;
+
+  useEffect(() => {
+    if (selectedId && visibleSubmissions.some((submission) => submission.id === selectedId)) return;
+    const next = visibleSubmissions[0] ?? null;
+    setSelectedId(next?.id ?? null);
+    setReason(next?.reason ?? "");
+  }, [selectedId, submissions, visibleSubmissions]);
+
+  const setFields = (next: FormFieldConfig[]) => {
+    setBuilderNotice(null);
+    setFieldsInStore(next);
+  };
   const patchField = (id: string, patch: Partial<FormFieldConfig>) =>
-    setFields(fields.map((field) => (field.id === id ? { ...field, ...patch } : field)));
-  const removeField = (id: string) => setFields(fields.filter((field) => field.id !== id));
-  const addField = () =>
-    setFields([
-      ...fields,
-      { id: uid("f"), label: "Nova pergunta", type: "paragraph", required: true, options: [], maxLength: 500 },
-    ]);
+    setFields(fields.map((field) => field.id === id ? { ...field, ...patch } : field));
+  const moveField = (id: string, direction: -1 | 1) => {
+    const index = fields.findIndex((field) => field.id === id);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= fields.length) return;
+    const next = [...fields];
+    [next[index], next[nextIndex]] = [next[nextIndex]!, next[index]!];
+    setFields(next);
+  };
+  const addField = (type: FormFieldConfig["type"]) => {
+    if (fields.length >= 10 || (type === "select" ? selectCount >= 5 : textCount >= 5)) {
+      setBuilderNotice(type === "select" ? "O Discord permite até cinco perguntas de escolha." : "O modal do Discord permite até cinco perguntas de texto.");
+      return;
+    }
+    setFields([...fields, {
+      id: uid("field"),
+      label: "Nova pergunta",
+      type,
+      required: true,
+      options: type === "select" ? ["Opção 1", "Opção 2"] : [],
+      maxLength: type === "short" ? 100 : 1000,
+      minLength: 0,
+      placeholder: "",
+    }]);
+  };
+  const duplicateField = (field: FormFieldConfig) => {
+    if (fields.length >= 10 || (field.type === "select" ? selectCount >= 5 : textCount >= 5)) {
+      setBuilderNotice("O Discord permite até cinco perguntas de texto e cinco escolhas por formulário.");
+      return;
+    }
+    const index = fields.findIndex((item) => item.id === field.id);
+    const next = [...fields];
+    next.splice(index + 1, 0, { ...field, id: uid("field"), label: `${field.label} (cópia)` });
+    setFields(next);
+  };
+  const applyTemplate = (template: (typeof templates)[number]) => {
+    setFields(makeFields(template));
+    updateConfig("forms", { panelTitle: template.name, panelDescription: template.description });
+  };
 
-  const [selected, setSelected] = useState(submissions.find((s) => s.status === "pending")?.id ?? submissions[0]?.id);
-  const [reason, setReason] = useState("");
-  const [sim, setSim] = useState(false);
-  const [aiBusy, setAiBusy] = useState(false);
-  const sub = submissions.find((s) => s.id === selected) ?? null;
-  const pending = submissions.filter((s) => s.status === "pending").length;
+  async function reviewSubmission(decision: "approved" | "rejected") {
+    if (!selected) return;
+    if (decision === "rejected" && Boolean(fcfg.config.requireReasonOnReject) && !reason.trim()) {
+      setReviewNotice("Escreva um motivo para que a pessoa entenda a decisão.");
+      return;
+    }
+    const token = getStoredSessionToken();
+    if (!token) { setReviewNotice("Entre novamente com Discord antes de revisar."); return; }
+    setReviewBusy(true);
+    setReviewNotice(null);
+    try {
+      const { jobId } = await requestFormReview({ data: {
+        token,
+        guildId: gid,
+        formId: Number(selected.id),
+        actorId: user.id,
+        decision,
+        ...(reason.trim() ? { reason: reason.trim() } : {}),
+      } });
+      for (let attempt = 0; attempt < 24; attempt++) {
+        await new Promise((resolve) => window.setTimeout(resolve, 750));
+        const result = await getFormReviewStatus({ data: { token, guildId: gid, jobId } });
+        if (result.status === "done" || result.status === "failed") {
+          setReviewNotice(result.detail ?? (result.status === "done" ? "Decisão registrada." : "O bot não conseguiu registrar a decisão."));
+          if (result.status === "done") {
+            await refreshSubmissions();
+            setReason("");
+          }
+          return;
+        }
+      }
+      setReviewNotice("O bot ainda está processando. A caixa será atualizada automaticamente.");
+    } catch (error) {
+      setReviewNotice(error instanceof Error ? error.message : "Não foi possível enviar a decisão ao bot.");
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
+  async function runAiReview() {
+    if (!selected) return;
+    setAiBusy(true);
+    try {
+      const body = Object.entries(selected.answers).map(([question, answer]) => `${question}: ${answer}`).join("\n");
+      const result = await analyzeWithGrok({ data: { kind: "form", title: asString(fcfg.config.panelTitle, "Formulário"), body } });
+      setAiNotes((current) => ({ ...current, [selected.id]: result.ok ? result.text : result.error }));
+    } catch (error) {
+      setAiNotes((current) => ({ ...current, [selected.id]: error instanceof Error ? error.message : "A análise não ficou disponível." }));
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  async function publishFormPanel() {
+    const channelRef = asString(fcfg.config.panelChannelId).trim();
+    if (!channelRef) { setPublishNotice("Escolha o canal onde o painel deve aparecer."); return; }
+    setPublishBusy(true);
+    setPublishNotice(null);
+    try {
+      const result = await publishPanelAndWait({ guildId: gid, target: "forms", channelRef });
+      setPublishNotice(publishResultMessage(result));
+    } catch (error) {
+      setPublishNotice(error instanceof Error ? error.message : "Não foi possível pedir a publicação ao bot.");
+    } finally {
+      setPublishBusy(false);
+    }
+  }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-auto m-0 text-xl font-semibold tracking-tight">Candidaturas</h1>
-        <Badge tone="warn">{pending} na fila</Badge>
-        <Button size="sm" onClick={() => setSim(true)} disabled={!formsAllowed}>
-          Simular envio
-        </Button>
+    <div key={gid} className="mx-auto flex max-w-[1440px] flex-col gap-6">
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="m-0 text-2xl font-semibold tracking-[-0.03em]">Formulários</h1>
+          <p className="mb-0 mt-1 text-sm text-muted-foreground">Crie perguntas claras para a comunidade e acompanhe cada resposta da equipe.</p>
+        </div>
+        <Button onClick={() => setTab("builder")}><FilePlus2 className="size-4" /> Criar formulário</Button>
       </div>
+
       {!formsAllowed ? (
-        <p className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn">
-          Plano Essencial inclui candidatura. Se o envio falhar, a ShardPay é quem trava a licença.
-        </p>
+        <div role="note" className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+          O plano atual não inclui formulários. Atualize o plano para publicar um formulário neste servidor.
+        </div>
       ) : null}
 
-      <Tabs defaultValue="inbox">
-        <TabsList>
-          <TabsTrigger value="inbox">Caixa</TabsTrigger>
-          <TabsTrigger value="form">Formulário</TabsTrigger>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="h-auto gap-1 rounded-none border-b border-border bg-transparent p-0">
+          <TabsTrigger value="inbox" className="h-11 rounded-none border-b-2 border-transparent px-4 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+            <Inbox className="mr-2 size-4" /> Respostas <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">{pendingCount}</span>
+          </TabsTrigger>
+          <TabsTrigger value="builder" className="h-11 rounded-none border-b-2 border-transparent px-4 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+            <ClipboardCheck className="mr-2 size-4" /> Criador de formulário
+          </TabsTrigger>
         </TabsList>
-        <TabsContent value="inbox" className="mt-4">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
-            <Card className="p-2">
-              {submissions.map((s) => {
-                const who = members.find((m) => m.id === s.userId);
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => {
-                      setSelected(s.id);
-                      setReason(s.reason);
-                    }}
-                    className={`flex w-full flex-col rounded-xl px-3 py-2.5 text-left ${sub?.id === s.id ? "bg-muted" : "hover:bg-muted/50"}`}
-                  >
-                    <span className="text-sm font-medium">{who?.displayName ?? s.userId}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {formatRelative(s.createdAt)} · {s.status}
-                    </span>
-                  </button>
-                );
-              })}
-              {submissions.length === 0 ? (
-                <p className="p-4 text-sm text-muted-foreground">Nenhuma candidatura ainda.</p>
-              ) : null}
-            </Card>
-            {sub ? (
-              <Card>
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="m-0 text-lg font-semibold">
-                    {members.find((m) => m.id === sub.userId)?.displayName}
-                  </h2>
-                  <Badge
-                    tone={sub.status === "approved" ? "ok" : sub.status === "rejected" ? "danger" : "warn"}
-                  >
-                    {sub.status}
-                  </Badge>
-                </div>
-                <dl className="mt-4 space-y-3">
-                  {questions.map((q) => (
-                    <div key={q.id}>
-                      <dt className="text-xs text-muted-foreground">{q.label}</dt>
-                      <dd className="m-0 text-sm">{sub.answers[q.id] || "—"}</dd>
-                    </div>
-                  ))}
-                </dl>
-                {sub.aiNote ? (
-                  <p className="mt-4 rounded-xl bg-primary/10 px-3 py-2 text-sm whitespace-pre-wrap">{sub.aiNote}</p>
-                ) : null}
-                {sub.status === "pending" ? (
-                  <div className="mt-4 space-y-3">
-                    <Label>Motivo (obrigatório na recusa)</Label>
-                    <Textarea value={reason} onChange={(e) => setReason(e.target.value)} />
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        onClick={() => {
-                          const r = reviewForm(sub.id, "approved", reason, user.id);
-                          if (!r.ok) alert(r.error);
-                        }}
-                      >
-                        Aprovar
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        onClick={() => {
-                          const r = reviewForm(sub.id, "rejected", reason, user.id);
-                          if (!r.ok) alert(r.error);
-                        }}
-                      >
-                        Recusar
-                      </Button>
-                      {aiAllowed ? (
-                        <Button
-                          variant="outline"
-                          disabled={aiBusy}
-                          onClick={async () => {
-                            setAiBusy(true);
-                            const body = questions
-                              .map((q) => `${q.label}: ${sub.answers[q.id] ?? ""}`)
-                              .join("\n");
-                            const res = await analyzeWithGrok({
-                              data: { kind: "form", title: "Candidatura", body },
-                            });
-                            setAiBusy(false);
-                            setAiNote(sub.id, res.ok ? res.text : res.error);
-                          }}
-                        >
-                          {aiBusy ? "Revisando…" : "Pré-review com IA"}
-                        </Button>
-                      ) : null}
-                    </div>
+
+        <TabsContent value="inbox" className="mt-5">
+          {loadError ? <p role="alert" className="mb-4 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{loadError}</p> : null}
+          {reviewNotice ? <p role="status" className="mb-4 rounded-lg bg-muted px-4 py-3 text-sm">{reviewNotice}</p> : null}
+          <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
+            <section className="min-w-0" aria-label="Caixa de respostas">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <NativeSelect aria-label="Filtrar respostas" value={filter} onChange={(event) => setFilter(event.target.value as SubmissionFilter)} className="h-10 w-auto min-w-40 bg-card">
+                  <option value="pending">Aguardando ({pendingCount})</option>
+                  <option value="all">Todas as respostas</option>
+                  <option value="approved">Aprovadas</option>
+                  <option value="rejected">Recusadas</option>
+                </NativeSelect>
+                <label className="relative min-w-40 flex-1">
+                  <Search aria-hidden="true" className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar respostas" className="h-10 pl-9" aria-label="Buscar respostas" />
+                </label>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-border bg-card">
+                {loading ? (
+                  <p className="m-0 flex items-center gap-2 px-4 py-8 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /> Carregando respostas do bot…</p>
+                ) : visibleSubmissions.length ? visibleSubmissions.map((submission) => {
+                  const memberName = members.find((member) => member.id === submission.userId)?.displayName ?? `Membro ${submission.userId.slice(-4)}`;
+                  const status = STATUS[submission.status];
+                  return (
+                    <button
+                      key={submission.id}
+                      type="button"
+                      onClick={() => { setSelectedId(submission.id); setReason(submission.reason); setReviewNotice(null); }}
+                      aria-pressed={selected?.id === submission.id}
+                      className={`flex min-h-[74px] w-full items-center gap-3 border-b border-border px-4 py-3 text-left last:border-0 ${selected?.id === submission.id ? "bg-secondary/75" : "hover:bg-muted/60"}`}
+                    >
+                      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-foreground">{memberName.slice(0, 1).toUpperCase()}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold">{memberName}</span>
+                          <Badge tone={status.tone}>{status.label}</Badge>
+                        </span>
+                        <span className="mt-1 block truncate text-xs text-muted-foreground">{Object.values(submission.answers).find(Boolean) || "Sem resposta em texto"}</span>
+                      </span>
+                      <span className="shrink-0 text-right text-[11px] text-muted-foreground">{formatRelative(submission.createdAt)}</span>
+                    </button>
+                  );
+                }) : (
+                  <div className="px-5 py-10">
+                    <Inbox className="mb-3 size-5 text-primary" />
+                    <h2 className="m-0 text-base font-semibold">{submissions.length ? "Nenhuma resposta nesta lista" : "A caixa está pronta"}</h2>
+                    <p className="mb-4 mt-1 max-w-[34ch] text-sm leading-6 text-muted-foreground">
+                      {submissions.length ? "Mude o filtro ou a busca para encontrar outra resposta." : "Publique seu primeiro formulário e as respostas aparecerão aqui para revisão."}
+                    </p>
+                    {!submissions.length ? <Button variant="outline" size="sm" onClick={() => setTab("builder")}>Configurar formulário <ChevronRight className="size-4" /></Button> : null}
                   </div>
-                ) : (
-                  <p className="mt-4 text-sm text-muted-foreground">
-                    {sub.reason || "Sem motivo registrado."}
-                  </p>
                 )}
-              </Card>
+              </div>
+            </section>
+
+            {selected ? (
+              <article className="min-w-0 rounded-xl border border-border bg-card">
+                <header className="flex flex-wrap items-start gap-3 border-b border-border px-5 py-4">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="m-0 truncate text-lg font-semibold">{members.find((member) => member.id === selected.userId)?.displayName ?? `Membro ${selected.userId.slice(-4)}`}</h2>
+                    <p className="mb-0 mt-1 text-xs text-muted-foreground">Enviado {formatRelative(selected.createdAt)} · resposta #{selected.id}</p>
+                  </div>
+                  <Badge tone={STATUS[selected.status].tone}>{labelForStatus(selected.status)}</Badge>
+                </header>
+                <div className="space-y-5 px-5 py-5">
+                  <dl className="m-0 divide-y divide-border">
+                    {Object.entries(selected.answers).map(([question, answer]) => (
+                      <div key={question} className="grid gap-1 py-4 first:pt-0 sm:grid-cols-[minmax(150px,0.38fr)_minmax(0,1fr)] sm:gap-5">
+                        <dt className="text-sm font-medium text-muted-foreground">{question}</dt>
+                        <dd className="m-0 whitespace-pre-wrap text-sm leading-6">{answer || <span className="text-muted-foreground">Sem resposta</span>}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {aiNotes[selected.id] ? <div className="rounded-lg bg-secondary/70 px-4 py-3 text-sm leading-6"><p className="mb-1 mt-0 font-semibold"><Sparkles className="mr-1 inline size-4" /> Nota de apoio da IA</p><p className="m-0 whitespace-pre-wrap">{aiNotes[selected.id]}</p></div> : null}
+                  {selected.status === "pending" ? (
+                    <div className="border-t border-border pt-5">
+                      {Boolean(fcfg.config.requireReasonOnReject) ? (
+                        <div className="mb-4 space-y-1.5">
+                          <Label htmlFor="review-reason">Motivo da decisão <span className="font-normal text-muted-foreground">(exigido ao recusar)</span></Label>
+                          <Textarea id="review-reason" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} placeholder="Escreva uma explicação útil para a pessoa…" />
+                        </div>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        <Button disabled={reviewBusy} onClick={() => void reviewSubmission("approved")}><Check className="size-4" /> Aprovar</Button>
+                        <Button variant="destructive" disabled={reviewBusy || (Boolean(fcfg.config.requireReasonOnReject) && !reason.trim())} onClick={() => void reviewSubmission("rejected")}>Recusar</Button>
+                        {aiAllowed ? <Button variant="outline" disabled={aiBusy} onClick={() => void runAiReview()}>{aiBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Apoio da IA</Button> : null}
+                      </div>
+                      {reviewBusy ? <p role="status" className="mb-0 mt-3 text-xs text-muted-foreground">Enviando a decisão ao bot…</p> : null}
+                    </div>
+                  ) : (
+                    <p className="m-0 border-t border-border pt-4 text-sm text-muted-foreground">
+                      {selected.status === "approved" ? "Esta resposta foi aprovada." : `Recusado${selected.reason ? `: ${selected.reason}` : "."}`}
+                      {selected.reviewerId ? ` · por ${members.find((member) => member.id === selected.reviewerId)?.displayName ?? "um atendente"}` : ""}
+                    </p>
+                  )}
+                </div>
+              </article>
             ) : (
-              <Card className="grid min-h-48 place-items-center text-sm text-muted-foreground">
-                Selecione uma candidatura.
-              </Card>
+              <div className="grid min-h-64 place-items-center rounded-xl border border-dashed border-border bg-card/50 px-6 text-center">
+                <div><Eye className="mx-auto mb-3 size-5 text-muted-foreground" /><p className="m-0 text-sm text-muted-foreground">Selecione uma resposta para ler e revisar.</p></div>
+              </div>
             )}
           </div>
         </TabsContent>
-        <TabsContent value="form" className="mt-4 grid gap-4 lg:grid-cols-2">
-          <Card>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="m-0 text-base font-semibold">Perguntas do formulário</h2>
-              <Switch checked={fcfg.enabled} onCheckedChange={(v) => setEnabled("forms", v)} />
-            </div>
-            <p className="mt-0 mb-3 text-xs text-muted-foreground">
-              O Discord aceita até 5 campos de texto no modal. Campos de escolha são menus e ficam fora desse limite.
-            </p>
-            <div className="space-y-3">
-              {fields.map((field) => (
-                <div key={field.id} className="space-y-2 rounded-xl bg-muted/40 p-3">
-                  <div className="flex gap-2">
-                    <Input
-                      value={field.label}
-                      onChange={(e) => patchField(field.id, { label: e.target.value })}
-                      placeholder="Pergunta"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Remover"
-                      onClick={() => removeField(field.id)}
-                      disabled={fields.length <= 1}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <NativeSelect
-                      value={field.type}
-                      onChange={(e) => patchField(field.id, { type: e.target.value as FormFieldConfig["type"] })}
-                      className="w-44"
-                    >
-                      <option value="short">Resposta curta</option>
-                      <option value="paragraph">Texto longo</option>
-                      <option value="select">Escolha única</option>
-                    </NativeSelect>
-                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Switch checked={field.required} onCheckedChange={(v) => patchField(field.id, { required: v })} />
-                      Obrigatória
-                    </label>
-                  </div>
-                  {field.type === "select" ? (
-                    <div>
-                      <Label className="text-xs">Opções (uma por linha)</Label>
-                      <Textarea
-                        className="mt-1"
-                        value={field.options.join("\n")}
-                        onChange={(e) =>
-                          patchField(field.id, {
-                            options: e.target.value
-                              .split("\n")
-                              .map((line) => line.trim())
-                              .filter(Boolean),
-                          })
-                        }
-                        placeholder={"Dúvida\nDenúncia\nParceria"}
-                      />
-                    </div>
-                  ) : null}
+
+        <TabsContent value="builder" className="mt-5">
+          <div className="grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.85fr)]">
+            <section className="min-w-0 space-y-6">
+              <div className="flex flex-wrap items-start gap-4 border-b border-border pb-5">
+                <div className="min-w-0 flex-1">
+                  <h2 className="m-0 text-lg font-semibold">Monte seu formulário</h2>
+                  <p className="mb-0 mt-1 max-w-[58ch] text-sm leading-6 text-muted-foreground">Comece por um modelo ou escreva suas próprias perguntas. As mudanças aparecem na prévia ao lado.</p>
                 </div>
-              ))}
-              {fields.length < 10 ? (
-                <Button variant="outline" size="sm" onClick={addField}>
-                  <Plus className="size-4" /> Pergunta
-                </Button>
-              ) : null}
-            </div>
-            <div className="mt-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>Exigir motivo na recusa</Label>
-                <Switch
-                  checked={Boolean(fcfg.config.requireReasonOnReject)}
-                  onCheckedChange={(v) => updateConfig("forms", { requireReasonOnReject: v })}
-                />
+                <label className="flex min-h-10 items-center gap-3 rounded-lg border border-border bg-card px-3">
+                  <span className="text-sm font-medium">Formulário ativo</span>
+                  <Switch checked={fcfg.enabled} onCheckedChange={(value) => setEnabled("forms", value)} aria-label="Ativar formulários" />
+                </label>
               </div>
-              <div className="flex items-center justify-between">
-                <Label>Pré-review com IA</Label>
-                <Switch
-                  checked={Boolean(fcfg.config.useAiPreReview)}
-                  onCheckedChange={(v) => updateConfig("forms", { useAiPreReview: v })}
-                />
+
+              <section aria-labelledby="template-title">
+                <div className="mb-3 flex items-end justify-between gap-3">
+                  <div><h3 id="template-title" className="m-0 text-sm font-semibold">Comece com um modelo</h3><p className="mb-0 mt-1 text-xs text-muted-foreground">Você pode editar cada pergunta depois.</p></div>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {templates.map((template) => (
+                    <button key={template.id} type="button" onClick={() => applyTemplate(template)} className="group min-h-[92px] rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/40 hover:bg-secondary/40">
+                      <span className="flex items-center gap-2 text-sm font-semibold"><FilePlus2 className="size-4 text-primary" />{template.title}</span>
+                      <span className="mt-1.5 block text-xs leading-5 text-muted-foreground">{template.fields.length} perguntas · texto e escolhas</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section aria-labelledby="questions-title">
+                <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                  <div><h3 id="questions-title" className="m-0 text-sm font-semibold">Perguntas</h3><p className="mb-0 mt-1 text-xs text-muted-foreground">Escolhas aparecem antes das perguntas de texto no Discord.</p></div>
+                  <span className="text-xs tabular-nums text-muted-foreground">{textCount}/5 texto · {selectCount}/5 escolhas</span>
+                </div>
+                <details className="mb-4 rounded-xl border border-border bg-card px-4 py-3 2xl:hidden">
+                  <summary className="cursor-pointer text-sm font-semibold">Ver prévia atualizada no Discord</summary>
+                  <p className="mb-3 mt-2 text-xs text-muted-foreground">A prévia acompanha as alterações. Publique quando estiver pronto para enviar ao servidor.</p>
+                  <DiscordFormPreview
+                    title={asString(fcfg.config.panelTitle, "Formulário")}
+                    description={asString(fcfg.config.panelDescription)}
+                    buttonLabel={asString(fcfg.config.panelButtonLabel, "Preencher formulário")}
+                    fields={fields}
+                  />
+                </details>
+                <div className="space-y-3">
+                  {fields.map((field, index) => (
+                    <article key={field.id} className="rounded-xl border border-border bg-card p-4 sm:p-5">
+                      <div className="mb-4 flex items-center gap-3">
+                        <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted text-xs font-semibold tabular-nums text-muted-foreground">{index + 1}</span>
+                        <span className="text-xs font-semibold text-muted-foreground">{field.type === "select" ? "ESCOLHA" : field.type === "short" ? "TEXTO CURTO" : "TEXTO LONGO"}</span>
+                        <div className="ml-auto flex items-center">
+                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => moveField(field.id, -1)} disabled={index === 0} aria-label={`Mover pergunta ${index + 1} para cima`}><ArrowUp className="size-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => moveField(field.id, 1)} disabled={index === fields.length - 1} aria-label={`Mover pergunta ${index + 1} para baixo`}><ArrowDown className="size-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => duplicateField(field)} aria-label={`Duplicar pergunta ${index + 1}`}><Copy className="size-4" /></Button>
+                          <Button type="button" variant="ghost" size="icon-sm" onClick={() => setFields(fields.filter((item) => item.id !== field.id))} disabled={fields.length <= 1} aria-label={`Remover pergunta ${index + 1}`}><Trash2 className="size-4" /></Button>
+                        </div>
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_190px]">
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`label-${field.id}`}>Pergunta para a comunidade</Label>
+                          <Input id={`label-${field.id}`} value={field.label} maxLength={45} onChange={(event) => patchField(field.id, { label: event.target.value })} placeholder="Ex.: O que você precisa resolver?" />
+                          <p className="m-0 text-right text-[11px] tabular-nums text-muted-foreground">{field.label.length}/45</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`type-${field.id}`}>Tipo de resposta</Label>
+                          <NativeSelect id={`type-${field.id}`} value={field.type} onChange={(event) => {
+                            const type = event.target.value as FormFieldConfig["type"];
+                            const nextCount = type === "select" ? selectCount : textCount;
+                            if (type !== field.type && nextCount >= 5) {
+                              setBuilderNotice(type === "select" ? "O Discord permite até cinco escolhas por formulário." : "O Discord permite até cinco perguntas de texto por formulário.");
+                              return;
+                            }
+                            patchField(field.id, { type, options: type === "select" ? (field.options.length >= 2 ? field.options : ["Opção 1", "Opção 2"]) : [] });
+                          }}>
+                            <option value="short">Texto curto</option>
+                            <option value="paragraph">Texto longo</option>
+                            <option value="select">Escolher uma opção</option>
+                          </NativeSelect>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap items-center gap-4">
+                        <label className="flex min-h-9 items-center gap-2 text-sm"><Switch checked={field.required} onCheckedChange={(required) => patchField(field.id, { required })} />Obrigatória</label>
+                        {field.type !== "select" ? <span className="text-xs text-muted-foreground">Resposta de {field.minLength || 0} a {field.maxLength} caracteres</span> : <span className="text-xs text-muted-foreground">Até 25 opções</span>}
+                      </div>
+                      {field.type === "select" ? (
+                        <div className="mt-4 space-y-1.5">
+                          <Label htmlFor={`options-${field.id}`}>Opções · uma por linha</Label>
+                          <Textarea
+                            id={`options-${field.id}`}
+                            rows={Math.min(Math.max(field.options.length, 2), 6)}
+                            value={field.options.join("\n")}
+                            onChange={(event) => {
+                              const values = event.target.value.split("\n").map((value) => value.trim().slice(0, 100)).filter(Boolean);
+                              patchField(field.id, { options: values.slice(0, 25) });
+                            }}
+                            placeholder={"Dúvida\nProblema\nSugestão"}
+                          />
+                          <p className="m-0 text-right text-[11px] tabular-nums text-muted-foreground">{field.options.length}/25 opções</p>
+                        </div>
+                      ) : (
+                        <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_120px_120px]">
+                          <div className="space-y-1.5">
+                            <Label htmlFor={`placeholder-${field.id}`}>Exemplo de resposta</Label>
+                            <Input id={`placeholder-${field.id}`} value={field.placeholder} maxLength={100} onChange={(event) => patchField(field.id, { placeholder: event.target.value })} placeholder="Ex.: explique o que aconteceu" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor={`min-${field.id}`}>Mínimo</Label>
+                            <Input id={`min-${field.id}`} type="number" min={0} max={4000} value={field.minLength} onChange={(event) => patchField(field.id, { minLength: Math.min(Number(field.maxLength) || 1000, Math.max(0, Number(event.target.value) || 0)) })} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor={`max-${field.id}`}>Máximo</Label>
+                            <Input id={`max-${field.id}`} type="number" min={1} max={4000} value={field.maxLength} onChange={(event) => {
+                              const maxLength = Math.min(4000, Math.max(1, Number(event.target.value) || 1));
+                              patchField(field.id, { maxLength, minLength: Math.min(field.minLength, maxLength) });
+                            }} />
+                          </div>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => addField("short")} disabled={!canAddText}><Plus className="size-4" /> Pergunta de texto</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => addField("select")} disabled={!canAddSelect}><Plus className="size-4" /> Pergunta de escolha</Button>
+                </div>
+                {builderNotice ? <p role="status" className="mb-0 mt-3 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn">{builderNotice}</p> : null}
+              </section>
+
+              <section aria-labelledby="delivery-title" className="border-t border-border pt-6">
+                <h3 id="delivery-title" className="m-0 text-base font-semibold">Onde o formulário aparece</h3>
+                <p className="mb-4 mt-1 text-sm text-muted-foreground">O painel é a mensagem que a comunidade encontra no Discord.</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5"><Label htmlFor="form-channel">Canal do painel</Label><Input id="form-channel" list="form-text-channels" defaultValue={asString(fcfg.config.panelChannelId)} onBlur={(event) => updateConfig("forms", { panelChannelId: event.target.value.trim() })} placeholder="Digite ou escolha #canal" /></div>
+                  <div className="space-y-1.5"><Label htmlFor="form-review-channel">Canal para revisar respostas</Label><Input id="form-review-channel" list="form-text-channels" defaultValue={asString(fcfg.config.reviewChannelId)} onBlur={(event) => updateConfig("forms", { reviewChannelId: event.target.value.trim() })} placeholder="Digite ou escolha #canal" /></div>
+                  <datalist id="form-text-channels">{channels.filter((channel) => channel.type === "text").flatMap((channel) => [<option key={channel.id} value={channel.name} />, <option key={`${channel.id}-hash`} value={`#${channel.name}`} />, <option key={`${channel.id}-id`} value={channel.id} />])}</datalist>
+                  <div className="space-y-1.5"><Label htmlFor="form-title">Título do painel</Label><Input id="form-title" value={asString(fcfg.config.panelTitle)} maxLength={256} onChange={(event) => updateConfig("forms", { panelTitle: event.target.value })} /></div>
+                  <div className="space-y-1.5"><Label htmlFor="form-button">Texto do botão</Label><Input id="form-button" value={asString(fcfg.config.panelButtonLabel, "Preencher formulário")} maxLength={80} onChange={(event) => updateConfig("forms", { panelButtonLabel: event.target.value })} /></div>
+                  <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="form-description">Explicação para quem vai responder</Label><Textarea id="form-description" value={asString(fcfg.config.panelDescription)} maxLength={3000} onChange={(event) => updateConfig("forms", { panelDescription: event.target.value })} rows={3} placeholder="Explique o que a pessoa precisa preparar antes de começar." /></div>
+                </div>
+              </section>
+
+              <section aria-labelledby="review-settings-title" className="border-t border-border pt-6">
+                <h3 id="review-settings-title" className="m-0 text-base font-semibold">Como a equipe recebe e revisa</h3>
+                <p className="mb-4 mt-1 text-sm text-muted-foreground">Essas regras são aplicadas pelo bot quando uma pessoa envia o formulário.</p>
+                <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
+                  <label className="flex min-h-10 items-center justify-between gap-4 text-sm"><span>Avisar cargos revisores</span><Switch checked={Boolean(fcfg.config.notifyReviewers)} onCheckedChange={(value) => updateConfig("forms", { notifyReviewers: value })} /></label>
+                  <label className="flex min-h-10 items-center justify-between gap-4 text-sm"><span>Exigir motivo ao recusar</span><Switch checked={Boolean(fcfg.config.requireReasonOnReject)} onCheckedChange={(value) => updateConfig("forms", { requireReasonOnReject: value })} /></label>
+                  <div className="space-y-1.5"><Label htmlFor="form-cooldown">Intervalo entre envios (horas)</Label><Input id="form-cooldown" type="number" min={0} max={8760} value={Number(fcfg.config.cooldownHours ?? 24)} onChange={(event) => updateConfig("forms", { cooldownHours: Math.max(0, Number(event.target.value) || 0) })} /></div>
+                  <div className="space-y-1.5"><Label htmlFor="form-limit">Envios por pessoa</Label><Input id="form-limit" type="number" min={1} max={100} value={Number(fcfg.config.maxSubmissionsPerUser ?? 3)} onChange={(event) => updateConfig("forms", { maxSubmissionsPerUser: Math.max(1, Number(event.target.value) || 1) })} /></div>
+                  <div className="space-y-1.5"><Label htmlFor="form-account-age">Idade mínima da conta (dias)</Label><Input id="form-account-age" type="number" min={0} max={3650} value={Number(fcfg.config.minAccountAgeDays ?? 0)} onChange={(event) => updateConfig("forms", { minAccountAgeDays: Math.max(0, Number(event.target.value) || 0) })} /></div>
+                  <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="form-reviewers">Cargos que revisam</Label><Input id="form-reviewers" list="form-reviewer-roles" defaultValue={Array.isArray(fcfg.config.reviewerRoleIds) ? (fcfg.config.reviewerRoleIds as string[]).join(", ") : ""} onBlur={(event) => updateConfig("forms", { reviewerRoleIds: event.target.value.split(",").map((role) => role.trim()).filter(Boolean) })} placeholder="Digite ou escolha os cargos, separados por vírgula" /><datalist id="form-reviewer-roles">{roles.flatMap((role) => [<option key={role.id} value={role.name} />, <option key={`${role.id}-id`} value={role.id} />])}</datalist><p className="m-0 text-xs text-muted-foreground">Você pode usar o nome do cargo. Se a lista ainda não aparecer, digite o nome como está no Discord.</p></div>
+                  <label className="flex min-h-10 items-center justify-between gap-4 text-sm"><span>Pré-análise com IA</span><Switch checked={Boolean(fcfg.config.useAiPreReview)} onCheckedChange={(value) => updateConfig("forms", { useAiPreReview: value })} disabled={!planAllows(guild.plan, "ai")} /></label>
+                </div>
+              </section>
+
+              <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
+                <Button onClick={() => void publishFormPanel()} disabled={publishBusy || !formsAllowed}><Send className="size-4" />{publishBusy ? "Aguardando o bot…" : "Publicar painel no Discord"}</Button>
+                {publishNotice ? <p role="status" className="m-0 text-sm text-muted-foreground">{publishNotice}</p> : null}
               </div>
-              <div>
-                <Label>Cooldown (horas)</Label>
-                <Input
-                  className="mt-1"
-                  type="number"
-                  defaultValue={Number(fcfg.config.cooldownHours ?? 24)}
-                  onBlur={(e) => updateConfig("forms", { cooldownHours: Number(e.target.value) || 0 })}
-                />
+            </section>
+
+            <aside className="hidden min-w-0 2xl:sticky 2xl:top-24 2xl:block 2xl:self-start" aria-label="Prévia do formulário no Discord">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold"><Eye className="size-4 text-primary" /> Prévia no Discord <span className="ml-auto text-xs font-normal text-muted-foreground">rascunho · não publicado</span></div>
+              <DiscordFormPreview
+                title={asString(fcfg.config.panelTitle, "Formulário")}
+                description={asString(fcfg.config.panelDescription)}
+                buttonLabel={asString(fcfg.config.panelButtonLabel, "Preencher formulário")}
+                fields={fields}
+              />
+              <div className="mt-4 rounded-lg border border-border bg-card px-4 py-3">
+                <p className="m-0 flex items-center gap-2 text-sm font-semibold"><Check className="size-4 text-primary" /> Limites do Discord</p>
+                <p className="mb-0 mt-1 text-xs leading-5 text-muted-foreground">Até 5 perguntas de texto no modal e 5 escolhas na etapa anterior. Cada escolha aceita até 25 opções.</p>
               </div>
-              <div>
-                <Label>Canal em que o painel aparece</Label>
-                <Input
-                  className="mt-1"
-                  defaultValue={asString(fcfg.config.panelChannelId)}
-                  placeholder="ex.: ch_candidaturas ou ID do canal"
-                  onBlur={(e) => updateConfig("forms", { panelChannelId: e.target.value.trim() })}
-                />
-              </div>
-              <div>
-                <Label>Canal para revisar candidaturas</Label>
-                <Input
-                  className="mt-1"
-                  defaultValue={asString(fcfg.config.reviewChannelId)}
-                  placeholder="ex.: ch_revisao ou ID do canal"
-                  onBlur={(e) => updateConfig("forms", { reviewChannelId: e.target.value.trim() })}
-                />
-              </div>
-              <div>
-                <Label>Título do painel</Label>
-                <Input
-                  className="mt-1"
-                  defaultValue={asString(fcfg.config.panelTitle)}
-                  onBlur={(e) => updateConfig("forms", { panelTitle: e.target.value })}
-                />
-              </div>
-            </div>
-          </Card>
-          <div className="space-y-4">
-            <DiscordPanel
-              channel="candidaturas"
-              title={asString(fcfg.config.panelTitle)}
-              description={asString(fcfg.config.panelDescription)}
-              buttons={["Candidatar-se"]}
-            />
-            <Button
-              variant="outline"
-              disabled={publishBusy || !asString(fcfg.config.panelChannelId).trim()}
-              onClick={async () => {
-                setPublishBusy(true);
-                setPublishNotice(null);
-                try {
-                  const result = await publishPanelAndWait({
-                    guildId: gid,
-                    target: "forms",
-                    channelRef: asString(fcfg.config.panelChannelId).trim(),
-                  });
-                  setPublishNotice(publishResultMessage(result));
-                } catch (error) {
-                  setPublishNotice(error instanceof Error ? error.message : "Não foi possível pedir a publicação ao bot.");
-                } finally {
-                  setPublishBusy(false);
-                }
-              }}
-            >
-              {publishBusy ? "Aguardando o bot…" : "Publicar painel no Discord"}
-            </Button>
-            {publishNotice ? <p role="status" className="m-0 text-sm text-muted-foreground">{publishNotice}</p> : null}
-            <DiscordModalPreview title={asString(fcfg.config.panelTitle)} questions={questions.map((q) => q.label)} />
+            </aside>
           </div>
         </TabsContent>
       </Tabs>
-
-      <Dialog open={sim} onOpenChange={setSim}>
-        <DialogContent>
-          <DialogTitle>Enviar candidatura</DialogTitle>
-          <DialogDesc>Respeita cooldown, idade da conta e limite por pessoa.</DialogDesc>
-          <SimForm
-            members={members}
-            questions={questions}
-            onSubmit={(userId, answers) => {
-              const r = submitForm(userId, answers);
-              if (!r.ok) alert(r.error);
-              else setSim(false);
-            }}
-          />
-        </DialogContent>
-      </Dialog>
     </div>
-  );
-}
-
-function SimForm({
-  members,
-  questions,
-  onSubmit,
-}: {
-  members: ReturnType<typeof useGuildMembers>;
-  questions: { id: string; label: string }[];
-  onSubmit: (userId: string, answers: Record<string, string>) => void;
-}) {
-  const [userId, setUserId] = useState(members[0]?.id ?? "");
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  return (
-    <form
-      className="mt-4 space-y-3"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSubmit(userId, answers);
-      }}
-    >
-      <Label>Membro</Label>
-      <NativeSelect value={userId} onChange={(e) => setUserId(e.target.value)}>
-        {members.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.displayName}
-          </option>
-        ))}
-      </NativeSelect>
-      {questions.map((q) => (
-        <div key={q.id}>
-          <Label>{q.label}</Label>
-          <Textarea
-            className="mt-1"
-            value={answers[q.id] ?? ""}
-            onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
-            required
-          />
-        </div>
-      ))}
-      <Button type="submit" className="w-full">
-        Enviar
-      </Button>
-    </form>
   );
 }

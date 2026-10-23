@@ -184,7 +184,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     panelFormat: "components_v2",
     panelTitle: "Central de atendimento",
     panelDescription: "Abra um atendimento privado e fale com a equipe.",
-    panelAccentColor: "#7c5cff",
+    panelAccentColor: "#28655b",
     feedbackEnabled: true,
     maxOpenPerUser: 1,
     pingStaffOnOpen: true,
@@ -210,7 +210,8 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     panelFormat: "components_v2",
     panelTitle: "Candidaturas",
     panelDescription: "Envie sua candidatura pelo formulario seguro.",
-    panelAccentColor: "#7c5cff",
+    panelAccentColor: "#28655b",
+    panelButtonLabel: "Preencher formulário",
     cooldownHours: 24,
     minAccountAgeDays: 0,
     notifyReviewers: true,
@@ -233,7 +234,9 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
         type: "select",
         required: true,
         options: ["Duvida", "Denuncia", "Parceria", "Suporte tecnico"],
-        maxLength: 500
+        maxLength: 500,
+        minLength: 0,
+        placeholder: "Escolha uma opção"
       },
       {
         id: "nome",
@@ -241,7 +244,9 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
         type: "short",
         required: true,
         options: [],
-        maxLength: 100
+        maxLength: 100,
+        minLength: 0,
+        placeholder: "Digite sua resposta"
       },
       {
         id: "motivo",
@@ -249,7 +254,9 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
         type: "paragraph",
         required: true,
         options: [],
-        maxLength: 1000
+        maxLength: 1000,
+        minLength: 0,
+        placeholder: "Escreva com detalhes"
       },
       {
         id: "experiencia",
@@ -257,7 +264,9 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
         type: "paragraph",
         required: true,
         options: [],
-        maxLength: 1000
+        maxLength: 1000,
+        minLength: 0,
+        placeholder: "Conte sua experiência"
       }
     ]
   },

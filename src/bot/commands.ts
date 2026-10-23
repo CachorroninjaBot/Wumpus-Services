@@ -148,7 +148,7 @@ export async function registerCommands(clientId: string, token: string, log: Log
     await rest.put(Routes.applicationCommands(clientId), {
       body: COMMANDS.map((command) => command.toJSON())
     });
-    log.info("slash registrados", { commands: COMMANDS.map((command) => `/${command.name}`).join(" ") });
+    log.info("comandos do Discord atualizados", { quantidade: COMMANDS.length });
     return COMMANDS.length;
   } catch (error) {
     log.error("falha ao registrar slash", { error: String(error) });

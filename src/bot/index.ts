@@ -492,7 +492,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   const startedAt = Date.now();
 
   client.once(Events.ClientReady, async () => {
-    log.info("online", { user: client.user?.tag, guilds: client.guilds.cache.size });
+    log.info("bot conectado ao Discord", { servidores: client.guilds.cache.size });
     await reportHealth("online").catch((error) => log.error("falha ao publicar saúde do bot", { error: String(error) }));
     healthTimer = setInterval(() => {
       void reportHealth("online").catch((error) => log.error("falha ao publicar saúde do bot", { error: String(error) }));

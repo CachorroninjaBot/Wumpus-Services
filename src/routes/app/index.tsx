@@ -4,9 +4,8 @@ import { ArrowRight, AlertTriangle, Clock3, Ticket, Shield } from "lucide-react"
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { ticketSla } from "@/lib/wumpus/engine";
-import { useActiveGuild, useModule, useWumpus } from "@/lib/wumpus/store";
+import { useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
 import { getGuildActivity, getGuildTickets, getPublishStatus, type PublishStatus } from "@/lib/wumpus/runtime-store";
 import { getPublicBotHealth, type PublicBotHealth } from "@/lib/wumpus/health";
@@ -16,13 +15,10 @@ import type { Ticket as WumpusTicket } from "@/lib/wumpus/types";
 export const Route = createFileRoute("/app/")({ component: Overview });
 
 function Overview() {
-  const guild = useActiveGuild();
+  const members = useGuildMembers();
   const gid = useWumpus((s) => s.activeGuildId);
   const tcfg = useModule("tickets");
   const lockdown = Boolean(useModule("security").config.lockdown);
-  const automod = useModule("automod");
-  const [cmd, setCmd] = useState("/config status");
-  const [cmdOut, setCmdOut] = useState<string | null>(null);
   const [publishStatuses, setPublishStatuses] = useState<PublishStatus[]>([]);
   const [botHealth, setBotHealth] = useState<PublicBotHealth | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -39,6 +35,10 @@ function Overview() {
     const refreshStatus = async () => {
       try {
         const token = getStoredSessionToken();
+        if (!token) {
+          if (active) setStatusError(null);
+          return;
+        }
         const [health, statuses, liveTickets, liveActivity] = await Promise.all([
           getPublicBotHealth(),
           getPublishStatus({ data: { token, guildId: gid } }),
@@ -70,79 +70,21 @@ function Overview() {
   const avg =
     csat.length === 0 ? "—" : (csat.reduce((s, t) => s + (t.feedback?.rating ?? 0), 0) / csat.length).toFixed(1);
 
-  function runCommand(raw: string) {
-    const parts = raw.trim().replace(/^\//, "").split(/\s+/);
-    const name = parts[0]?.toLowerCase() ?? "";
-    if (name === "config") {
-      setCmdOut(
-        `Plano ${guild.plan} · preset ${guild.preset}\nAtendimento ${tcfg.enabled ? "ligado" : "pausado"} · SLA ${String(tcfg.config.slaWarningMinutes)} min\nAutoMod ${automod.enabled ? String(automod.config.action) : "pausado"} · lockdown ${lockdown ? "sim" : "não"}`,
-      );
-      return;
-    }
-    if (name === "stats") {
-      setCmdOut(`Abertos ${open.length} · SLA atrasado ${breaches.length} · CSAT ${avg} · candidaturas ${submissions}`);
-      return;
-    }
-    if (name === "ticket") {
-      setCmdOut(open.length ? open.map((t) => `#${t.number} ${t.department} — ${t.subject}`).join("\n") : "Fila vazia.");
-      return;
-    }
-    if (name === "mod") {
-      setCmdOut("Use Moderação para advertir, silenciar, expulsar ou banir. O limiar de strikes está nas regras daquele painel.");
-      return;
-    }
-    setCmdOut("Comandos: /config status · /stats · /ticket · /mod");
-  }
-
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <div className="mx-auto flex max-w-7xl flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="m-0 text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-            {guild.name}
-          </p>
-          <h1 className="mt-1 mb-0 text-2xl font-semibold tracking-tight">O que precisa de você agora</h1>
-        </div>
-        {lockdown
-          ? <Badge tone="danger">Lockdown ativo</Badge>
-          : <Badge tone={botHealth?.status === "online" ? "ok" : botHealth?.status === "offline" ? "danger" : "warn"}>
-              {botHealth?.status === "online" ? "Bot online" : botHealth?.status === "offline" ? "Bot offline" : "Status indisponível"}
-            </Badge>}
+        <h1 className="m-0 text-2xl font-semibold tracking-tight">O que precisa de atenção?</h1>
+        {lockdown ? <Badge tone="danger">Lockdown ativo</Badge> : null}
       </header>
 
-      <Card className="p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className={`grid size-10 place-items-center rounded-full ${pendingSync > 0 ? "bg-warn/15 text-warn" : botHealth?.status === "online" ? "bg-ok/15 text-ok" : "bg-destructive/10 text-destructive"}`}>
-              <span className={`size-2.5 rounded-full ${pendingSync > 0 ? "bg-warn" : botHealth?.status === "online" ? "bg-ok" : "bg-destructive"}`} />
-            </div>
-            <div>
-              <p className="m-0 text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">Status do bot</p>
-              <h2 className="m-0 text-lg font-semibold">
-                {pendingSync > 0 ? "Sincronização pendente" : botHealth?.status === "online" ? "Bot online" : botHealth?.status === "offline" ? "Bot offline" : "Estado do bot desconhecido"}
-              </h2>
-            </div>
-          </div>
-          <Badge tone={pendingSync > 0 ? "warn" : botHealth?.status === "online" ? "ok" : "danger"}>
-            {pendingSync > 0 ? `${pendingSync} na fila` : botHealth?.status === "online" ? `${botHealth.pingMs ?? "—"} ms` : "offline"}
-          </Badge>
-        </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-3">
-          <StatusMetric label="Servidores" value={botHealth?.guildCount === null || botHealth?.guildCount === undefined ? "indisponível" : String(botHealth.guildCount)} />
-          <StatusMetric label="Última publicação" value={latestSync ? formatRelative(latestSync.at ?? latestSync.createdAt) : "nenhuma registrada"} />
-          <StatusMetric label="Publicações" value={pendingSync > 0 ? `${pendingSync} pendentes` : `${publishStatuses.filter((job) => job.status === "done").length} concluídas`} />
-        </div>
-        {statusError ? <p className="mt-3 mb-0 text-xs text-destructive">{statusError}</p> : null}
-      </Card>
-
-      <p className="m-0 -mt-3 text-xs text-muted-foreground">Fila e SLA vêm dos tickets persistidos pelo bot.</p>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Fila aberta" value={String(open.length)} hint="tickets sem encerrar" />
-        <Stat label="SLA em atraso" value={String(breaches.length)} hint="sem 1ª resposta a tempo" warn={breaches.length > 0} />
-        <Stat label="Candidaturas" value={String(submissions)} hint="esperando review · dados do bot" />
-        <Stat label="CSAT" value={avg} hint={`${csat.length} avaliações`} />
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5" role="status">
+          <i className={`inline-block size-2 rounded-full ${botHealth?.status === "online" ? "bg-ok" : botHealth?.status === "offline" ? "bg-destructive" : "bg-warn"}`} />
+          {pendingSync ? `${pendingSync} publicações aguardando` : botHealth?.status === "online" ? `Bot conectado · ${botHealth.pingMs ?? "—"} ms` : botHealth?.status === "offline" ? "Bot desconectado" : "Conexão do bot indisponível"}
+        </span>
+        <span className="text-muted-foreground">Última publicação: {latestSync ? formatRelative(latestSync.at ?? latestSync.createdAt) : "nenhuma ainda"}</span>
+        {statusError ? <span className="text-destructive" role="alert">{statusError}</span> : null}
       </div>
-
       {breaches.length > 0 ? (
         <Card className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="grid size-10 place-items-center rounded-xl bg-destructive/15 text-destructive">
@@ -163,37 +105,38 @@ function Overview() {
         </Card>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="m-0 text-base font-semibold">Fila</h2>
-            <Link to="/app/tickets" className="text-sm text-primary">
-              Ver todos
-            </Link>
-          </div>
-          <ul className="m-0 space-y-2 p-0">
-            {open.slice(0, 4).map((t) => {
-              const sla = ticketSla(t, tcfg.config);
-              return (
-                <li key={t.id} className="flex items-start justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2.5">
-                  <div className="min-w-0">
-                    <p className="m-0 truncate text-sm font-medium">
-                      #{t.number} · {t.subject}
-                    </p>
-                    <p className="m-0 text-xs text-muted-foreground">
-                      {t.department} · {formatRelative(t.createdAt)}
-                    </p>
-                  </div>
-                  <Badge tone={sla === "ok" ? "ok" : sla === "warning" ? "warn" : "danger"}>
-                    {sla === "ok" ? "no prazo" : sla === "warning" ? "alerta" : "atraso"}
-                  </Badge>
-                </li>
-              );
-            })}
-            {open.length === 0 ? <p className="m-0 text-sm text-muted-foreground">Nada na fila.</p> : null}
-          </ul>
-        </Card>
+      <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div><h2 className="m-0 text-lg font-semibold">Próximos atendimentos</h2><p className="m-0 mt-1 text-sm text-muted-foreground">Acompanhe responsável, prioridade e prazo numa única leitura.</p></div>
+          <Link to="/app/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-primary">Abrir fila completa <ArrowRight className="size-4" /></Link>
+        </div>
+        <div className="hidden grid-cols-[90px_minmax(180px,1fr)_130px_140px_100px_110px] gap-3 border-b border-border pb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground lg:grid">
+          <span>Registro</span><span>Assunto</span><span>Departamento</span><span>Responsável</span><span>Prioridade</span><span>Prazo</span>
+        </div>
+        <ul className="m-0 divide-y divide-border p-0">
+          {open.slice(0, 6).map((t) => {
+            const sla = ticketSla(t, tcfg.config);
+            const tone = sla === "ok" ? "ok" : sla === "warning" ? "warn" : "danger";
+            return <li key={t.id} className="grid gap-2 py-3 lg:grid-cols-[90px_minmax(180px,1fr)_130px_140px_100px_110px] lg:items-center lg:gap-3">
+              <span className="font-mono-num text-sm font-semibold text-primary">#{t.number}</span>
+              <span className="min-w-0"><strong className="block truncate text-sm font-medium">{t.subject}</strong><small className="text-muted-foreground">Aberto {formatRelative(t.createdAt)}</small></span>
+              <span className="text-sm">{t.department}</span><span className="text-sm text-muted-foreground">{t.claimedBy ? `Em atendimento · ${members.find((member) => member.id === t.claimedBy)?.displayName ?? t.claimedBy}` : "Aguardando equipe"}</span>
+              <Badge tone={t.priority === "urgent" ? "danger" : t.priority === "high" ? "warn" : "default"}>{t.priority === "urgent" ? "Urgente" : t.priority === "high" ? "Alta" : t.priority === "low" ? "Baixa" : "Normal"}</Badge>
+              <Badge tone={tone}>{sla === "ok" ? "No prazo" : sla === "warning" ? "Atenção" : "Atrasado"}</Badge>
+            </li>;
+          })}
+          {open.length === 0 ? <li className="py-8 text-center"><p className="m-0 font-medium">A fila está em dia</p><p className="m-0 mt-1 text-sm text-muted-foreground">Tickets novos aparecem aqui assim que alguém abrir um atendimento.</p></li> : null}
+        </ul>
+      </section>
 
+      <dl className="grid grid-cols-2 gap-y-3 rounded-xl border border-border bg-card px-4 py-3 lg:grid-cols-4 lg:divide-x lg:divide-border">
+        <Summary label="Tickets abertos" value={String(open.length)} hint="sem encerrar" />
+        <Summary label="SLA em atraso" value={String(breaches.length)} hint="sem primeira resposta" warn={breaches.length > 0} />
+        <Summary label="Formulários" value={String(submissions)} hint="aguardando revisão" />
+        <Summary label="Satisfação" value={avg} hint={`${csat.length} avaliações`} />
+      </dl>
+
+      <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="m-0 text-base font-semibold">Auditoria recente do bot</h2>
@@ -216,25 +159,9 @@ function Overview() {
         </Card>
       </div>
 
-      <Card>
-        <h2 className="mt-0 text-base font-semibold">Comandos da equipe</h2>
-        <p className="text-sm text-muted-foreground">Os mesmos slash que a staff usa no Discord, lendo a config deste servidor.</p>
-        <form
-          className="mt-3 flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            runCommand(cmd);
-          }}
-        >
-          <Input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="/config status" />
-          <Button type="submit">Rodar</Button>
-        </form>
-        {cmdOut ? <pre className="mt-3 mb-0 whitespace-pre-wrap font-sans text-sm">{cmdOut}</pre> : null}
-      </Card>
-
       <div className="grid gap-3 sm:grid-cols-3">
         <Quick to="/app/tickets" icon={<Ticket className="size-4" />} title="Assumir um ticket" />
-        <Quick to="/app/forms" icon={<Ticket className="size-4" />} title="Revisar candidaturas" />
+        <Quick to="/app/forms" icon={<Ticket className="size-4" />} title="Revisar formulários" />
         <Quick to="/app/protect" icon={<Shield className="size-4" />} title="Testar o AutoMod" />
       </div>
 
@@ -252,21 +179,11 @@ function Overview() {
   );
 }
 
-function Stat({ label, value, hint, warn }: { label: string; value: string; hint: string; warn?: boolean }) {
+function Summary({ label, value, hint, warn }: { label: string; value: string; hint: string; warn?: boolean }) {
   return (
-    <Card className="p-4">
-      <p className="m-0 text-xs text-muted-foreground">{label}</p>
-      <p className={`mt-1 mb-0 font-mono-num text-3xl font-semibold ${warn ? "text-destructive" : ""}`}>{value}</p>
-      <p className="m-0 text-xs text-muted-foreground">{hint}</p>
-    </Card>
-  );
-}
-
-function StatusMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-muted/30 px-3 py-2">
-      <p className="m-0 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">{label}</p>
-      <p className="mt-1 mb-0 text-sm font-medium">{value}</p>
+    <div className="min-w-0 px-2 first:pl-0 lg:px-4">
+      <dt className="truncate text-xs text-muted-foreground">{label}</dt>
+      <dd className={`m-0 mt-0.5 inline-flex items-baseline gap-2 font-mono-num text-lg font-semibold ${warn ? "text-destructive" : ""}`}>{value}<span className="font-sans text-[11px] font-normal text-muted-foreground">{hint}</span></dd>
     </div>
   );
 }

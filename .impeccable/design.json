@@ -1,0 +1,122 @@
+{
+  "title": "Sistema visual implementado do Wumpus",
+  "direction": "Caderno de passagem",
+  "source_of_truth": [
+    "src/styles.css",
+    "src/components/shell.tsx",
+    "src/components/discord-panel.tsx",
+    "PRODUCT.md",
+    ".impeccable/direction.md",
+    ".impeccable/decision.json"
+  ],
+  "principles": [
+    "Superfície de leitura clara sem textura; estrutura por cartões, linhas finas e grupos rotulados.",
+    "Verde-petróleo para navegação e ação; coral para acentos e revisão.",
+    "Português nos rótulos de produto; estado não depende apenas de cor.",
+    "Prévia do Discord distingue-se visualmente da interface Wumpus."
+  ],
+  "tokens": {
+    "light": {
+      "background": "#F5F2EA",
+      "foreground": "#24332F",
+      "card": "#FFFFFF",
+      "popover": "#FFFFFF",
+      "primary": "#28655B",
+      "primaryHover": "#20564D",
+      "primaryForeground": "#FFFFFF",
+      "secondary": "#E4EBE5",
+      "muted": "#EEEAE0",
+      "mutedForeground": "#59675F",
+      "accent": "#D66B3D",
+      "accentForeground": "#FFFFFF",
+      "destructive": "#B94343",
+      "border": "rgba(36, 51, 47, 0.13)",
+      "input": "rgba(36, 51, 47, 0.2)",
+      "ring": "#28655B",
+      "ok": "#28655B",
+      "warn": "#94560C",
+      "info": "#3F6474"
+    },
+    "dark": {
+      "background": "#151D19",
+      "foreground": "#F1EFE8",
+      "card": "#1D2722",
+      "popover": "#26322C",
+      "primary": "#75B5A5",
+      "primaryHover": "#8BC6B5",
+      "primaryForeground": "#153B33",
+      "secondary": "#2A3931",
+      "muted": "#222E28",
+      "mutedForeground": "#B5BEB7",
+      "accent": "#E58C64",
+      "accentForeground": "#2B1912",
+      "destructive": "#F0817C",
+      "border": "rgba(241, 239, 232, 0.12)",
+      "input": "rgba(241, 239, 232, 0.18)",
+      "ring": "#75B5A5",
+      "ok": "#75B5A5",
+      "warn": "#E8AE69",
+      "info": "#8EB8C5"
+    },
+    "discordPreview": {
+      "surfaceDeep": "#1E1F22",
+      "surface": "#313338",
+      "header": "#2B2D31",
+      "text": "#DBDEE1",
+      "muted": "#949BA4",
+      "label": "#B5BAC1",
+      "primaryButton": "#5865F2"
+    },
+    "typography": {
+      "sans": "DM Sans, ui-sans-serif, system-ui, sans-serif",
+      "mono": "IBM Plex Mono, ui-monospace, SF Mono, Menlo, monospace",
+      "baseBody": "14px / 1.5",
+      "caption": "12px",
+      "body": "14px",
+      "title": "20px",
+      "display": "32px",
+      "numeric": "tabular-nums utility .font-mono-num"
+    },
+    "spacingPx": [4, 8, 12, 16, 24, 32],
+    "radiiPx": {
+      "sm": 8,
+      "md": 12,
+      "lg": 16,
+      "xl": 20,
+      "base": 10,
+      "appSurface": 14
+    },
+    "focus": "2px solid ring, 2px offset",
+    "shadows": {
+      "panelLight": "0 1px 2px rgba(36, 51, 47, 0.06), 0 0 0 1px rgba(36, 51, 47, 0.09)",
+      "panelDark": "0 1px 2px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(241, 239, 232, 0.1)",
+      "primaryLight": "0 2px 5px rgba(40, 101, 91, 0.18)",
+      "primaryDark": "0 2px 8px rgba(0, 0, 0, 0.24)"
+    }
+  },
+  "shell": {
+    "desktopSidebarWidth": "17rem",
+    "sidebarSections": ["Servidor e plano", "Navegação agrupada", "Identidade do usuário"],
+    "header": ["Título da rota", "Estado de sincronização quando ativo", "Tema", "Adicionar a outro servidor"],
+    "mobile": "Abaixo de lg usa menu Sheet; fecha ao navegar ou trocar servidor."
+  },
+  "accessibility": {
+    "keyboardFocus": "Contorno :focus-visible de 2px com offset de 2px",
+    "reducedMotion": "Animações e transições reduzidas com prefers-reduced-motion",
+    "semantics": ["aria-label em ações icon-only", "aria-current na rota atual", "label associado ao seletor de servidor", "status textual acompanhado de cor"],
+    "scopeNote": "Descreve suportes evidentes no CSS e shell; não representa auditoria completa de todas as páginas ou contraste."
+  },
+  "discordPreview": {
+    "components": ["DiscordPanel", "DiscordModalPreview", "DiscordFormPreview"],
+    "modes": ["Components V2", "embed"],
+    "presentationOnly": true,
+    "ariaHidden": true,
+    "limits": {"modalQuestions": 5, "formSelects": 5, "formTextFields": 5, "optionsPerSelect": 4 },
+    "notRuntimeConfirmation": true
+  },
+  "productBoundaries": [
+    "Ações reais dependem do servidor Discord e do bot conectado.",
+    "Prévia local não confirma publicação, permissão ou operação remota.",
+    "Não afirma paridade completa com Ticket Tool/Tickets nem autenticação delegada de equipe."
+  ]
+}

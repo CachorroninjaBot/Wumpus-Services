@@ -51,6 +51,8 @@ export type FormFieldConfig = {
   required: boolean;
   options: string[];
   maxLength: number;
+  minLength: number;
+  placeholder: string;
 };
 
 const KEY = "wumpus-demo-v2";

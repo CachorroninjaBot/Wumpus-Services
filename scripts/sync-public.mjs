@@ -11,6 +11,7 @@ const sources = [
 ];
 
 const cssFiles = [];
+let copiedManifest = false;
 for (const dir of sources) {
   if (!existsSync(dir)) continue;
   for (const name of readdirSync(dir)) {
@@ -19,7 +20,6 @@ for (const dir of sources) {
     const to = join(dest, name);
     if (from !== to) cpSync(from, to);
     cssFiles.push(name);
-    console.log("[sync-public] css", name);
   }
 }
 
@@ -29,8 +29,10 @@ const manifestDest = join(publicDir, "manifest.json");
 if (existsSync(manifestSrc)) {
   mkdirSync(publicDir, { recursive: true });
   cpSync(manifestSrc, manifestDest);
-  console.log("[sync-public] manifest.json");
+  copiedManifest = true;
 }
+
+console.log(`[assets] Arquivos públicos prontos${copiedManifest ? " (manifesto incluído)" : ""}.`);
 
 if (cssFiles.length) {
   const primary = join(dest, cssFiles[0]);

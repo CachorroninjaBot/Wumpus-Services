@@ -113,6 +113,26 @@ function modulesFor(preset: "shop" | "rp"): GuildModules {
   for (const key of list) {
     out[key] = { enabled: true, config: defaultsFor(key) };
   }
+  out.tickets.config = {
+    ...out.tickets.config,
+    panelChannelId: "ch_atendimento",
+    categoryId: "cat_tickets",
+    staffRoleIds: ["role_staff", "role_suporte"],
+    transcriptChannelId: "ch_transcripts",
+    logChannelId: "ch_logs",
+  };
+  out.forms.config = {
+    ...out.forms.config,
+    reviewChannelId: "ch_forms",
+    reviewerRoleIds: ["role_staff"],
+  };
+  out.servers.config = {
+    ...out.servers.config,
+    announceJoinChannelId: "ch_geral",
+    announceLeaveChannelId: "ch_logs",
+  };
+  out.roles.config = { ...out.roles.config, defaultRoleIds: ["role_membro"] };
+  out.logs.config = { ...out.logs.config, channelId: "ch_logs" };
   if (preset === "shop") {
     out.automod.config = {
       ...out.automod.config,

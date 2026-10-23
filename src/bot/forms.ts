@@ -48,8 +48,10 @@ export type FormField = {
   required: boolean;
   /** So para `select`. */
   options: string[];
-  /** So para texto. */
+  /** Limites para campos de texto do modal. */
+  minLength: number;
   maxLength: number;
+  placeholder: string;
 };
 
 export type FormSubmission = {
@@ -122,7 +124,9 @@ export function parseFields(config: Record<string, unknown> | null): FormField[]
         type: effective,
         required: row.required !== false,
         options,
-        maxLength: Math.max(1, Math.min(1000, Math.trunc(Number(row.maxLength ?? 500)) || 500))
+        minLength: Math.max(0, Math.min(4000, Math.trunc(Number(row.minLength ?? 0)) || 0)),
+        maxLength: Math.max(1, Math.min(4000, Math.trunc(Number(row.maxLength ?? 500)) || 500)),
+        placeholder: String(row.placeholder ?? "").trim().slice(0, 100),
       });
     });
 
@@ -139,7 +143,9 @@ export function parseFields(config: Record<string, unknown> | null): FormField[]
     type: index === 0 ? "short" : "paragraph",
     required: true,
     options: [],
-    maxLength: index === 0 ? 100 : 1000
+    maxLength: index === 0 ? 100 : 1000,
+    minLength: 0,
+    placeholder: ""
   }));
 }
 
@@ -225,7 +231,7 @@ export function buildFormModal(fields: FormField[], modalKey: string, chosen: Re
   const text = textFields(fields);
   const effective = text.length
     ? text
-    : [{ id: "obs", label: "Observacoes", type: "paragraph" as FieldType, required: false, options: [], maxLength: 500 }];
+    : [{ id: "obs", label: "Observacoes", type: "paragraph" as FieldType, required: false, options: [], minLength: 0, maxLength: 500, placeholder: "" }];
 
   const title = Object.values(chosen).length ? `Candidatura · ${Object.values(chosen)[0]!.slice(0, 30)}` : "Candidatura";
   const modal = new ModalBuilder().setCustomId(modalKey).setTitle(title.slice(0, 45));
@@ -236,7 +242,10 @@ export function buildFormModal(fields: FormField[], modalKey: string, chosen: Re
       .setLabel(field.label.slice(0, 45))
       .setStyle(field.type === "short" ? TextInputStyle.Short : TextInputStyle.Paragraph)
       .setRequired(field.required)
+      .setMinLength(Math.min(field.minLength, field.maxLength))
       .setMaxLength(field.maxLength);
+
+    if (field.placeholder) input.setPlaceholder(field.placeholder);
 
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
   });
@@ -416,7 +425,7 @@ export async function submitForm(
         description: usedQuestions
           .map((question, index) => `**${question}**\n${answers[index] ?? ""}`)
           .join("\n\n"),
-        accentColor: str(config, "panelAccentColor", "#7c5cff"),
+        accentColor: str(config, "panelAccentColor", "#28655b"),
         buttons: [
           { label: "Aprovar", customId: id("form", "approve", submissionId), style: 3 },
           { label: "Recusar", customId: id("form", "reject", submissionId), style: 4 }
@@ -454,7 +463,7 @@ export async function submitForm(
       description: anonymous
         ? "Nova candidatura anonima."
         : `<@${interaction.user.id}> enviou uma candidatura.`,
-      accentColor: "#7c5cff",
+      accentColor: "#28655b",
       fields: usedQuestions.map((question, index) => ({
         name: question.slice(0, 100),
         value: (answers[index] ?? "").slice(0, 1000)
@@ -548,10 +557,10 @@ export async function buildFormPanel(guild: Guild) {
   const config = await moduleConfig(guild.id, "forms");
 
   return buildPanelPayload({
-    title: str(config, "panelTitle", "Candidaturas"),
-    description: str(config, "panelDescription", "Envie sua candidatura pelo formulario."),
-    accentColor: str(config, "panelAccentColor", "#7c5cff"),
-    buttons: [{ label: "Candidatar-se", customId: id("form", "open"), style: 1, emoji: "📝" }]
+    title: str(config, "panelTitle", "Formulário"),
+    description: str(config, "panelDescription", "Responda às perguntas para enviar seu formulário."),
+    accentColor: str(config, "panelAccentColor", "#28655b"),
+    buttons: [{ label: str(config, "panelButtonLabel", "Preencher formulário"), customId: id("form", "open"), style: 1, emoji: "📝" }]
   });
 }
 

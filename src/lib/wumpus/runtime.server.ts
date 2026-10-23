@@ -53,16 +53,18 @@ export type OutboxJob = {
   id: string;
   guildId: string;
   /** O que publicar. */
-  kind: "panel" | "ticket_action";
+  kind: "panel" | "ticket_action" | "form_action";
   /** "tickets" | "forms" — decide o modulo de config a usar. */
   target: string;
   /** Referencia de canal da config (nome como "ch_atendimento" ou snowflake). */
   channelRef: string;
-  action?: "claim" | "reply" | "close" | "priority" | "security_restore" | "security_lockdown_on" | "security_lockdown_off";
+  action?: "claim" | "reply" | "close" | "priority" | "approve_form" | "reject_form" | "security_restore" | "security_lockdown_on" | "security_lockdown_off";
   verificationRoleId?: string;
   ticketId?: number;
+  formId?: number;
   actorId?: string;
   content?: string;
+  reason?: string;
   priority?: "low" | "normal" | "high" | "urgent";
   createdAt: number;
   status: "queued" | "done" | "failed";
@@ -94,6 +96,21 @@ export type BotTicketMessage = {
   authorName: string;
   content: string;
   at: string;
+};
+
+export type BotFormRecord = {
+  id: number;
+  guildId: string;
+  userId: string;
+  questions: string[];
+  answers: string[];
+  status: "pending" | "approved" | "rejected";
+  reviewedBy: string | null;
+  reviewReason: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  channelId: string | null;
+  messageId: string | null;
 };
 
 export type RuntimeFile = {

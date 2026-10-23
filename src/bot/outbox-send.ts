@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import type { Guild } from "discord.js";
 import { pendingJobs, pruneOutbox, settleActionJob, settleJob } from "./outbox.ts";
 import { buildPanelPayload } from "./panels.ts";
-import { buildFormPanel } from "./forms.ts";
+import { buildFormPanel, reviewForm } from "./forms.ts";
 import { buildTicketPanel, claimTicket, closeTicket, sendTicketReply, setTicketPriority } from "./tickets.ts";
 import { asSendable, resolveChannel } from "./resolve.ts";
 import type { Logger } from "./logger.ts";
@@ -93,7 +93,7 @@ async function publishPanel(guild: Guild, job: OutboxJob): Promise<
         : buildPanelPayload({
             title: String(config?.panelTitle ?? "Wumpus"),
             description: String(config?.panelDescription ?? ""),
-            accentColor: String(config?.panelAccentColor ?? "#7c5cff")
+            accentColor: String(config?.panelAccentColor ?? "#28655b")
           });
 
   try {
@@ -131,6 +131,11 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
       outbox = settleActionJob(outbox, job.id, result);
       continue;
     }
+    if (job.kind === "form_action") {
+      const result = await processFormAction(guild, job, log);
+      outbox = settleActionJob(outbox, job.id, result);
+      continue;
+    }
     const result = await publishPanel(guild, job);
     outbox = settleJob(outbox, job.id, result);
 
@@ -150,10 +155,25 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
   return pending.length;
 }
 
+async function processFormAction(guild: Guild, job: OutboxJob, log: Logger): Promise<{ ok: boolean; detail: string }> {
+  if (!job.formId || !job.actorId || (job.action !== "approve_form" && job.action !== "reject_form")) {
+    return { ok: false, detail: "Pedido de revisão incompleto." };
+  }
+  const decision = job.action === "approve_form" ? "approved" : "rejected";
+  const result = await reviewForm(guild, job.formId, job.actorId, decision, job.reason ?? null, log);
+  return {
+    ok: result.ok,
+    detail: result.ok ? `Formulário #${job.formId} ${decision === "approved" ? "aprovado" : "recusado"}.` : result.error ?? "Não foi possível revisar o formulário.",
+  };
+}
+
 async function processTicketAction(guild: Guild, job: OutboxJob, log: Logger): Promise<{ ok: boolean; detail: string }> {
   if (job.action === "security_restore") return restoreVerification(guild);
   if (job.action === "security_lockdown_on" || job.action === "security_lockdown_off") return { ok: true, detail: `Lockdown aplicado em ${await setLockdown(guild, job.action === "security_lockdown_on", log)} canais.` };
-  if (!job.action || !job.ticketId || !job.actorId) return { ok: false, detail: "Pedido de atendimento incompleto." };
+  if (job.action !== "claim" && job.action !== "reply" && job.action !== "close" && job.action !== "priority") {
+    return { ok: false, detail: "Ação de atendimento inválida." };
+  }
+  if (!job.ticketId || !job.actorId) return { ok: false, detail: "Pedido de atendimento incompleto." };
   if (job.action === "claim") {
     const result = await claimTicket(guild, job.ticketId, job.actorId, log);
     if (result.ok || result.alreadyBy === job.actorId) return { ok: true, detail: "Atendimento assumido." };

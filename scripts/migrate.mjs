@@ -12,7 +12,7 @@ import { pendingMigrations } from "./migration-plan.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
-  console.log("[migrate] DATABASE_URL not set — skipping.");
+  console.log("[banco] Migrações ignoradas: DATABASE_URL não configurada.");
   process.exit(0);
 }
 
@@ -23,11 +23,11 @@ async function main() {
   try {
     entries = await readdir(migrationsDir);
   } catch {
-    console.log("[migrate] no migrations/ directory — nothing to do.");
+    console.log("[banco] Sem pasta de migrações; nada a atualizar.");
     return;
   }
   if (pendingMigrations(entries, []).length === 0) {
-    console.log("[migrate] no migrations — nothing to do.");
+    console.log("[banco] Banco atualizado; nenhuma migração pendente.");
     return;
   }
 
@@ -48,7 +48,7 @@ async function main() {
         await client.query("INSERT INTO _migrations (name) VALUES ($1)", [name]);
         await client.query("COMMIT");
       } catch (err) {
-        console.error(`[migrate] error applying ${name}`);
+        console.error(`[banco] Falha ao aplicar a atualização ${name}.`);
         try {
           await client.query("ROLLBACK");
         } catch {
@@ -56,10 +56,9 @@ async function main() {
         }
         throw err;
       }
-      console.log(`[migrate] applied ${name}`);
       count += 1;
     }
-    console.log(count ? `[migrate] done — ${count} migration(s) applied.` : "[migrate] up to date.");
+    console.log(count ? `[banco] ${count} ${count === 1 ? "atualização aplicada" : "atualizações aplicadas"}.` : "[banco] Banco atualizado.");
   } finally {
     client.release();
     await pool.end();
@@ -67,6 +66,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[migrate] failed:", err?.message || err);
+  console.error("[banco] Não foi possível atualizar o banco:", err?.message || err);
   process.exit(1);
 });

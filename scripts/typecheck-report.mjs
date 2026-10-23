@@ -20,11 +20,11 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const tsc = join(root, "node_modules", "typescript", "bin", "tsc");
 
 if (!existsSync(tsc)) {
-  console.log("[typecheck] typescript nao encontrado — pulando.");
+  console.log("[tipos] Verificação ignorada: TypeScript não encontrado.");
   process.exit(0);
 }
 
-console.log("[typecheck] rodando tsc --noEmit…");
+console.log("[tipos] Conferindo o código…");
 
 const result = spawnSync(process.execPath, [tsc, "--noEmit"], {
   cwd: root,
@@ -35,20 +35,20 @@ const result = spawnSync(process.execPath, [tsc, "--noEmit"], {
 const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 
 if (output) {
-  console.log(output);
+  console.error(output);
 }
 
 if (result.error) {
-  console.log(`[typecheck] nao foi possivel rodar: ${result.error.message}`);
+  console.error(`[tipos] Não foi possível verificar: ${result.error.message}`);
   process.exit(0);
 }
 
 if (result.status === 0) {
-  console.log("[typecheck] sem erros de tipo.");
+  console.log("[tipos] Código sem erros de tipo.");
 } else {
   // Contagem aproximada: cada erro comeca com "arquivo(linha,coluna): error".
   const errors = output.split("\n").filter((line) => line.includes("): error TS")).length;
-  console.log(`[typecheck] ${errors} erro(s) de tipo — veja acima. O deploy segue.`);
+  console.error(`[tipos] ${errors} problema(s) encontrado(s). O deploy segue; revise os detalhes acima.`);
 }
 
 process.exit(0);

@@ -1,8 +1,21 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { AuthProvider } from "@/lib/auth/provider";
 import "../styles.css";
 
 const APP_NAME = "Wumpus";
+
+function FigmaCaptureScript() {
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.location.hash.includes("figmacapture=")) return;
+    const script = document.createElement("script");
+    script.src = "https://mcp.figma.com/mcp/html-to-design/capture.js";
+    script.async = true;
+    document.head.append(script);
+    return () => script.remove();
+  }, []);
+  return null;
+}
 
 export const Route = createRootRoute({
   head: () => ({
@@ -11,7 +24,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: APP_NAME },
       { name: "description", content: "A central de comando da sua comunidade no Discord." },
-      { name: "theme-color", content: "#09090c" },
+      { name: "theme-color", content: "#f5f2ea" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
@@ -19,7 +32,7 @@ export const Route = createRootRoute({
       { rel: "apple-touch-icon", href: "/favicon.svg" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap",
       },
     ],
   }),
@@ -30,6 +43,7 @@ export const Route = createRootRoute({
       </head>
       <body>
         <AuthProvider>
+          <FigmaCaptureScript />
           <Outlet />
         </AuthProvider>
         <Scripts />

@@ -65,12 +65,12 @@ export type TicketMessage = {
   at: string;
 };
 
-/** Atendimento aberto ou assumido de um usuario — usado para barrar o segundo. */
+/** Atendimento ativo de um usuario. Tickets encerrados ou arquivados nao contam no limite. */
 export async function openTicketFor(guildId: string, openerId: string): Promise<Ticket | null> {
   const rows = await read<Ticket>("tickets");
   return (
     rows.find(
-      (row) => row.guildId === guildId && row.openerId === openerId && row.status !== "closed"
+      (row) => row.guildId === guildId && row.openerId === openerId && (row.status === "open" || row.status === "claimed")
     ) ?? null
   );
 }
@@ -169,17 +169,18 @@ export async function openTicket(
   if (!config) return { ok: false, error: "O atendimento ainda nao foi configurado neste servidor." };
   if (!isEnabled(config)) return { ok: false, error: "O atendimento esta pausado neste servidor." };
 
-  const existing = await openTicketFor(guild.id, userId);
-  if (existing) {
-    return { ok: false, error: `Voce ja tem um atendimento aberto: <#${existing.channelId}>` };
-  }
-
   const maxOpen = Math.max(1, Math.trunc(num(config, "maxOpenPerUser", 1)));
   const mine = (await read<Ticket>("tickets")).filter(
-    (row) => row.guildId === guild.id && row.openerId === userId && row.status !== "closed"
+    (row) => row.guildId === guild.id && row.openerId === userId && (row.status === "open" || row.status === "claimed")
   );
   if (mine.length >= maxOpen) {
-    return { ok: false, error: `Voce ja atingiu o limite de ${maxOpen} atendimento(s) aberto(s).` };
+    const existingChannel = mine[0]?.channelId;
+    return {
+      ok: false,
+      error: existingChannel
+        ? `Voce ja atingiu o limite de ${maxOpen} atendimento(s) aberto(s). Continue por <#${existingChannel}>.`
+        : `Voce ja atingiu o limite de ${maxOpen} atendimento(s) aberto(s).`
+    };
   }
 
   const staffRoles = resolveRoles(guild, list(config, "staffRoleIds"));
@@ -304,7 +305,7 @@ export async function openTicket(
         severity: "info",
         title: `ATENDIMENTO #${ticketId} ABERTO`,
         description: `<@${userId}> abriu um atendimento em <#${channel.id}>.`,
-        accentColor: "#7c5cff",
+        accentColor: "#28655b",
         fields: [
           { name: "Departamento", value: department ?? "nao informado" },
           { name: "Canal", value: `<#${channel.id}>` }
@@ -500,7 +501,7 @@ export async function closeTicket(
       severity: "info",
       title: `ATENDIMENTO #${ticketId} ENCERRADO`,
       description: `<@${actorId}> encerrou o atendimento de <@${ticket.openerId}>.`,
-      accentColor: "#7c5cff",
+      accentColor: "#28655b",
       fields: [
         { name: "Mensagens", value: String(messages.length) },
         { name: "Transcricao", value: transcriptChannelId ? `<#${transcriptChannelId}>` : "nao configurada" },
@@ -841,7 +842,7 @@ export async function buildTicketPanel(guild: Guild) {
       str(config, "panelDescription", "Abra um atendimento privado e fale com a equipe."),
       departments.length ? `\nDepartamentos: ${departments.join(" · ")}` : ""
     ].join(""),
-    accentColor: str(config, "panelAccentColor", "#7c5cff"),
+    accentColor: str(config, "panelAccentColor", "#28655b"),
     buttons: [{ label: "Abrir atendimento", customId: id("ticket", "open"), style: 1, emoji: "🎫" }]
   });
 }

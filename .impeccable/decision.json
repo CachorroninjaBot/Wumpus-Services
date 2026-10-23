@@ -1,0 +1,434 @@
+{
+  "title": "Escolha a nova identidade do Wumpus",
+  "question": "Qual direção deve guiar a dashboard, os tickets e o criador de formulários? Você pode escolher uma alternativa ou sortear outra rodada.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "Caderno de passagem",
+      "kicker": "THE ROLL",
+      "lineage": "Cadernos de troca de turno e ordens de atendimento",
+      "thesis": "Cada ticket é um atendimento em andamento, com contexto, responsável e próximo passo visíveis.",
+      "palette": [
+        "#F5F2EA",
+        "#FFFFFF",
+        "#24332F",
+        "#28655B",
+        "#D66B3D"
+      ],
+      "materials": [
+        "papel de registro",
+        "tinta verde-petróleo",
+        "marcas de revisão em coral"
+      ],
+      "viewport": "A fila de tickets ocupa a primeira dobra como um registro vivo, com responsável, departamento, idade e SLA em colunas fixas; a navegação parece o índice do caderno.",
+      "risk": "Pode parecer uma ferramenta administrativa antiga se o papel e as regras dominarem a tela; a tipografia e os controles precisam continuar atuais e confortáveis.",
+      "raised": [
+        {
+          "from": "challenger-botanical-folio",
+          "raise": "Todas as listas mantêm a mesma escala e ordem de informação, para comparar status e rotas sem reaprender cada tela."
+        },
+        {
+          "from": "challenger-star-atlas",
+          "raise": "Cada rota e estado tem um índice legível, com legenda textual que explica cores e marcas."
+        },
+        {
+          "from": "challenger-vertical-feed",
+          "raise": "Ao abrir um ticket, o contexto e a próxima ação ganham foco sem esconder a fila nem perder o caminho de volta."
+        },
+        {
+          "from": "challenger-variable-font",
+          "raise": "Ao editar um formulário, a prévia acompanha cada mudança em tempo real e mostra exatamente o que a pessoa verá no Discord."
+        }
+      ],
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "índice da equipe",
+            "x": 0,
+            "y": 0,
+            "w": 2,
+            "h": 10
+          },
+          {
+            "label": "passagem de turno e título",
+            "x": 2,
+            "y": 0,
+            "w": 10,
+            "h": 2,
+            "accent": true
+          },
+          {
+            "label": "fila viva com colunas estáveis",
+            "x": 2,
+            "y": 2,
+            "w": 8,
+            "h": 7
+          },
+          {
+            "label": "SLA e próximo passo",
+            "x": 10,
+            "y": 2,
+            "w": 2,
+            "h": 7
+          },
+          {
+            "label": "ações de turno",
+            "x": 2,
+            "y": 9,
+            "w": 10,
+            "h": 1
+          }
+        ]
+      },
+      "comp": ".impeccable/mocks/decision/assigned.png"
+    },
+    {
+      "id": "model-pick",
+      "label": "Mapa de rotas do atendimento",
+      "kicker": "IMPECCABLE’S PICK",
+      "lineage": "Mapas de transporte e roteamento de serviços",
+      "thesis": "A equipe enxerga por onde cada pedido entra, quem o recebe e o que acontece depois.",
+      "palette": [
+        "#F6F4ED",
+        "#172A3A",
+        "#D7E1DE",
+        "#27736B",
+        "#E38B45"
+      ],
+      "materials": [
+        "linhas de rota",
+        "estações com nomes claros",
+        "legenda funcional"
+      ],
+      "viewport": "O início mostra entradas de tickets ligadas aos departamentos e às equipes que atendem; cada linha abre a configuração correspondente.",
+      "risk": "Se a rota virar apenas um diagrama, operações simples ficam escondidas; cada conexão precisa abrir controles reais e também existir numa lista acessível.",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "navegação por rotas",
+            "x": 0,
+            "y": 0,
+            "w": 2,
+            "h": 10
+          },
+          {
+            "label": "pontos de entrada",
+            "x": 2,
+            "y": 1,
+            "w": 3,
+            "h": 3,
+            "accent": true
+          },
+          {
+            "label": "linhas até departamentos",
+            "x": 5,
+            "y": 1,
+            "w": 4,
+            "h": 7
+          },
+          {
+            "label": "equipes e SLAs",
+            "x": 9,
+            "y": 1,
+            "w": 3,
+            "h": 7
+          },
+          {
+            "label": "fila e eventos recentes",
+            "x": 2,
+            "y": 8,
+            "w": 10,
+            "h": 2
+          }
+        ]
+      },
+      "comp": ".impeccable/mocks/decision/model-pick.png"
+    },
+    {
+      "id": "challenger-warm-app",
+      "label": "Painel de serviço acolhedor",
+      "verdict": "competitive",
+      "lineage": "Interfaces de consumo com linguagem simples e áreas de toque generosas",
+      "thesis": "Ações disponíveis ficam claras, e cada área explica uma tarefa com palavras comuns.",
+      "palette": [
+        "#F4F0E8",
+        "#FFFFFF",
+        "#292E2B",
+        "#26665C"
+      ],
+      "materials": [
+        "superfícies quentes",
+        "controles amplos",
+        "uma cor reservada às ações"
+      ],
+      "viewport": "A dashboard organiza fila, painéis e formulários por tarefas, com botões que dizem o que vai acontecer.",
+      "risk": "Pode se parecer com qualquer painel SaaS se as rotas e estados próprios do atendimento não aparecerem logo.",
+      "case": "Empata em familiaridade para equipes de suporte e vence em clareza de cada ação; perde em mostrar como tickets passam entre equipes.",
+      "hero": "https://impeccable.style/worlds/cards/digital-design-canon-warm-consumer-app-surface-hero.webp",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "navegação simples",
+            "x": 0,
+            "y": 0,
+            "w": 2,
+            "h": 10
+          },
+          {
+            "label": "boas-vindas e ação principal",
+            "x": 2,
+            "y": 0,
+            "w": 10,
+            "h": 2,
+            "accent": true
+          },
+          {
+            "label": "tarefas da equipe",
+            "x": 2,
+            "y": 2,
+            "w": 10,
+            "h": 3
+          },
+          {
+            "label": "fila de atendimento",
+            "x": 2,
+            "y": 5,
+            "w": 7,
+            "h": 5
+          },
+          {
+            "label": "atalhos",
+            "x": 9,
+            "y": 5,
+            "w": 3,
+            "h": 5
+          }
+        ]
+      },
+      "comp": ".impeccable/mocks/decision/challenger-warm-app.png"
+    },
+    {
+      "id": "challenger-crouwel-grid",
+      "label": "Grade de operações",
+      "verdict": "competitive",
+      "lineage": "Espécimes tipográficos em grade modular de Wim Crouwel",
+      "thesis": "Uma grade precisa revela a estrutura do atendimento e mantém configurações alinhadas.",
+      "palette": [
+        "#F5F4EE",
+        "#172A3A",
+        "#A9B6B2",
+        "#D66B3D"
+      ],
+      "materials": [
+        "grade modular visível",
+        "tipografia grotesca",
+        "um plano de cor de destaque"
+      ],
+      "viewport": "Painéis e departamentos aparecem como células conectadas; o editor destaca relações entre formulário, equipe, categoria e permissões.",
+      "risk": "A grade pode ficar técnica e densa para quem não quer aprender conceitos de bot.",
+      "case": "Vence em clareza de estrutura e perde em familiaridade; a grade mostra relações, mas pode trazer de volta a complexidade que o produto deve remover.",
+      "hero": "https://impeccable.style/worlds/cards/crouwel-grid-specimen-hero.webp",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "grade de navegação",
+            "x": 0,
+            "y": 0,
+            "w": 2,
+            "h": 10
+          },
+          {
+            "label": "mapa modular de configuração",
+            "x": 2,
+            "y": 1,
+            "w": 8,
+            "h": 7,
+            "accent": true
+          },
+          {
+            "label": "estados e legenda",
+            "x": 10,
+            "y": 1,
+            "w": 2,
+            "h": 7
+          },
+          {
+            "label": "prévia e publicar",
+            "x": 2,
+            "y": 8,
+            "w": 10,
+            "h": 2
+          }
+        ]
+      },
+      "comp": ".impeccable/mocks/decision/challenger-crouwel-grid.png"
+    },
+    {
+      "id": "challenger-botanical-folio",
+      "label": "Fólio de etapas",
+      "verdict": "declined",
+      "lineage": "Fólios botânicos que registram cada estágio em escala fixa",
+      "thesis": "Cada formulário e ticket ganha uma sequência de etapas fácil de comparar.",
+      "palette": [
+        "#F4F0E7",
+        "#526A4D",
+        "#B74B3E",
+        "#303936"
+      ],
+      "materials": [
+        "pranchas alinhadas",
+        "regras finas",
+        "etapas rotuladas"
+      ],
+      "viewport": "Uma faixa de estágios percorre abertura, atendimento e fechamento.",
+      "risk": "A audiência não se identifica com catalogação botânica, e as etapas sugerem sequência sem explicar a operação do bot.",
+      "case": "Perde em identificação e em clareza; mantém escala e ordem fixas para facilitar a comparação entre telas.",
+      "kept": "Escala consistente e ordem repetível das informações.",
+      "hero": "https://impeccable.style/worlds/cards/editorial-sequence-montage-botanical-folio-season-hero.webp",
+      "comp": ".impeccable/mocks/decision/challenger-botanical-folio.png"
+    },
+    {
+      "id": "challenger-star-atlas",
+      "label": "Atlas de rotas",
+      "verdict": "declined",
+      "lineage": "Atlas celestes com coordenadas, índice e legenda",
+      "thesis": "A equipe encontra uma rota pelo nome, departamento e estado do ticket.",
+      "palette": [
+        "#10263A",
+        "#F5F2EA",
+        "#E38B45",
+        "#63B9A7"
+      ],
+      "materials": [
+        "coordenadas",
+        "índice de nomes",
+        "símbolos com legenda"
+      ],
+      "viewport": "O índice encontra departamentos enquanto a legenda explica responsáveis, SLA e estado.",
+      "risk": "Metáforas celestes reduzem identificação e tornam tarefas de suporte menos imediatas.",
+      "case": "Perde em identificação e clareza; mantém uma legenda textual para que cor e forma nunca sejam o único sinal.",
+      "kept": "Um índice e uma legenda consistentes para estados e destinos.",
+      "hero": "https://impeccable.style/worlds/cards/notation-diagram-systems-star-atlas-hero.webp",
+      "comp": ".impeccable/mocks/decision/challenger-star-atlas.png"
+    },
+    {
+      "id": "challenger-vertical-feed",
+      "label": "Ticket em foco",
+      "verdict": "declined",
+      "lineage": "Interfaces de mídia vertical que destacam um item por vez",
+      "thesis": "Um ticket aberto recebe espaço para contexto e ação imediata.",
+      "palette": [
+        "#182321",
+        "#FFFFFF",
+        "#65B6A2"
+      ],
+      "materials": [
+        "um item em foco",
+        "ações sempre visíveis",
+        "transição direta"
+      ],
+      "viewport": "A fila permanece acessível enquanto o ticket selecionado apresenta conversa, responsável e encerramento.",
+      "risk": "A audiência não usa uma fila de suporte como feed, e esconder a visão geral atrapalha a triagem.",
+      "case": "Perde em identificação e clareza; preserva foco no ticket selecionado sem apagar a fila.",
+      "kept": "Dar foco ao ticket ativo sem perder a posição na fila.",
+      "hero": "https://impeccable.style/worlds/cards/pop-culture-shelf-vertical-video-feed-surface-hero.webp",
+      "comp": ".impeccable/mocks/decision/challenger-vertical-feed.png"
+    },
+    {
+      "id": "challenger-variable-font",
+      "label": "Oficina de formulários ao vivo",
+      "verdict": "declined",
+      "lineage": "Espécimes tipográficos que mudam enquanto são manipulados",
+      "thesis": "A prévia do formulário muda a cada ajuste e mostra o resultado final na hora.",
+      "palette": [
+        "#F6F4ED",
+        "#171B1A",
+        "#27736B",
+        "#E38B45"
+      ],
+      "materials": [
+        "editor e prévia simultâneos",
+        "estados nomeados",
+        "controles de ajuste direto"
+      ],
+      "viewport": "Campos reordenáveis ficam ao lado de uma prévia que simula a abertura e o envio do formulário.",
+      "risk": "Uma comparação de identificação e clareza perde para a operação de registro: a oficina explica o formulário, não o restante do produto.",
+      "case": "Perde em identificação e clareza como direção do produto; sua interação ao vivo deve elevar o criador de formulários.",
+      "kept": "A prévia do formulário acompanha qualquer alteração sem exigir uma publicação de teste.",
+      "hero": "https://impeccable.style/worlds/cards/variable-font-specimen-hero.webp",
+      "comp": ".impeccable/mocks/decision/challenger-variable-font.png"
+    }
+  ],
+  "reroll": {
+    "registers": [
+      "safer",
+      "bolder"
+    ]
+  },
+  "buildPath": {
+    "value": "code",
+    "toggle": true
+  },
+  "canon": true,
+  "canonCard": {
+    "label": "Padrão da categoria",
+    "thesis": "Uma dashboard convencional de tickets, executada com acabamento alto e controles previsíveis.",
+    "palette": [
+      "#FFFFFF",
+      "#18212B",
+      "#5865F2"
+    ],
+    "materials": [
+      "tabela de tickets",
+      "navegação lateral",
+      "formulário em etapas"
+    ],
+    "viewport": "A fila aberta vem primeiro; painéis, formulário, permissões e integrações têm páginas próprias.",
+    "risk": "É familiar, mas pode repetir a complexidade e a aparência dos concorrentes.",
+    "wireframe": {
+      "cols": 12,
+      "rows": 10,
+      "regions": [
+        {
+          "label": "sidebar",
+          "x": 0,
+          "y": 0,
+          "w": 2,
+          "h": 10
+        },
+        {
+          "label": "título e ações",
+          "x": 2,
+          "y": 0,
+          "w": 10,
+          "h": 2,
+          "accent": true
+        },
+        {
+          "label": "métricas",
+          "x": 2,
+          "y": 2,
+          "w": 10,
+          "h": 2
+        },
+        {
+          "label": "tickets",
+          "x": 2,
+          "y": 4,
+          "w": 10,
+          "h": 6
+        }
+      ]
+    },
+    "comp": ".impeccable/mocks/decision/canon.png"
+  },
+  "steer": true
+}
