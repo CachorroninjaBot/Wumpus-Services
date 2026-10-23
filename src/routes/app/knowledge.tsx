@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { BookOpenCheck, Check, Clock3, FilePlus2, History, RotateCcw, Search, Send, Sparkles, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -42,8 +42,11 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
   const [statusFilter, setStatusFilter] = useState<ArticleStatus>("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditorDraft>(EMPTY_DRAFT);
   const [deleteTarget, setDeleteTarget] = useState<Article | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
 
   const articles = useMemo(() => allArticles.filter((article) => article.guildId === gid), [allArticles, gid]);
   const categoryNames = useMemo(() => [...new Set(articles.map((article) => article.category?.trim() || "Geral"))].sort((a, b) => a.localeCompare(b, "pt-BR")), [articles]);
@@ -68,14 +71,34 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
     draft: articles.filter((article) => !article.approved && !article.reviewRequested).length,
   }), [articles]);
 
+  useEffect(() => {
+    if (!editorOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      editorRef.current?.querySelector<HTMLInputElement>("#article-title")?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editorOpen, editingId]);
+
   function startNew() {
+    if (editorOpen) return;
     setEditingId(null);
     setDraft(EMPTY_DRAFT);
+    setSaveNotice(null);
+    setEditorOpen(true);
   }
 
   function edit(article: Article) {
     setEditingId(article.id);
     setDraft({ title: article.title, body: article.body, category: article.category ?? "Geral", tags: article.tags.join(", "), examples: (article.exampleQuestions ?? []).join("\n") });
+    setSaveNotice(null);
+    setEditorOpen(true);
+  }
+
+  function closeEditor() {
+    setEditorOpen(false);
+    setEditingId(null);
+    setDraft(EMPTY_DRAFT);
   }
 
   function save(mode: "draft" | "review") {
@@ -87,7 +110,8 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
     const content = { title, body, category: draft.category.trim() || "Geral", tags, exampleQuestions };
     if (editingId) update(editingId, { ...content, approved: false, reviewRequested: mode === "review", reviewedBy: undefined, reviewedAt: undefined });
     else add(title, body, tags, { category: content.category, exampleQuestions, approved: false, reviewRequested: mode === "review" });
-    startNew();
+    setSaveNotice(mode === "review" ? "Artigo enviado para revisão." : "Rascunho salvo.");
+    closeEditor();
   }
 
   function approve(article: Article) {
@@ -102,14 +126,38 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
           <h1 className="m-0 text-2xl font-semibold tracking-tight">Base de conhecimento</h1>
           <p className="mb-0 mt-1 max-w-2xl text-sm text-muted-foreground">Respostas confiáveis para apoiar a equipe e a IA nos atendimentos.</p>
         </div>
-        <Button onClick={startNew}><FilePlus2 className="size-4" />Novo artigo</Button>
+        <Button onClick={startNew} disabled={editorOpen}><FilePlus2 className="size-4" />{editorOpen ? "Editor aberto" : "Novo artigo"}</Button>
       </header>
+
+      {saveNotice ? <p className="m-0 rounded-lg bg-ok/10 px-3 py-2 text-sm text-ok" role="status">{saveNotice}</p> : null}
 
       <section aria-label="Resumo dos artigos" className="grid gap-3 sm:grid-cols-3">
         <SummaryCard icon={<Check className="size-4" />} label="Aprovados" value={counts.approved} detail="Disponíveis para a IA" tone="ok" />
         <SummaryCard icon={<Clock3 className="size-4" />} label="Aguardando revisão" value={counts.review} detail="Precisam da aprovação da equipe" tone="warn" />
         <SummaryCard icon={<FilePlus2 className="size-4" />} label="Rascunhos" value={counts.draft} detail="Ainda não entram na revisão" />
       </section>
+
+      {editorOpen ? <div ref={editorRef} className="scroll-mt-6">
+        <Card className="space-y-4 p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><h2 className="m-0 text-lg font-semibold">{editingId ? "Editar artigo" : "Criar artigo"}</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">Novos artigos começam como rascunho. Envie para revisão para que a equipe possa aprová-los.</p></div>
+            <Button variant="ghost" onClick={closeEditor}>{editingId ? "Cancelar edição" : "Fechar"}</Button>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <EditorField id="article-title" label="Título"><Input id="article-title" maxLength={200} value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Ex.: Como recuperar minha conta?" /></EditorField>
+            <EditorField id="article-category" label="Categoria"><Input id="article-category" maxLength={80} value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))} placeholder="Suporte" /></EditorField>
+            <div className="lg:col-span-2">
+              <EditorField id="article-body" label="Resposta"><Textarea id="article-body" rows={5} maxLength={8000} value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} placeholder="Escreva a resposta que a equipe gostaria que o bot usasse. Inclua passos claros e links confiáveis." /><p className="m-0 text-right text-[11px] text-muted-foreground">{draft.body.length}/8000</p></EditorField>
+            </div>
+            <EditorField id="article-tags" label="Tags"><Input id="article-tags" value={draft.tags} onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))} placeholder="conta, acesso, senha" /><p className="m-0 text-xs text-muted-foreground">Separe as tags por vírgula.</p></EditorField>
+            <EditorField id="article-examples" label="Perguntas relacionadas"><Textarea id="article-examples" rows={3} value={draft.examples} onChange={(event) => setDraft((current) => ({ ...current, examples: event.target.value }))} placeholder={"Como recupero meu acesso?\nEsqueci a senha, o que faço?"} /><p className="m-0 text-xs text-muted-foreground">Uma forma de perguntar por linha ajuda a IA a encontrar este artigo.</p></EditorField>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+            <p className="m-0 text-xs text-muted-foreground">{!draft.title.trim() || !draft.body.trim() ? "Preencha o título e a resposta para salvar." : "Você pode salvar agora ou enviar diretamente para revisão."}</p>
+            <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={!draft.title.trim() || !draft.body.trim()} onClick={() => save("draft")}>Salvar rascunho</Button><Button disabled={!draft.title.trim() || !draft.body.trim()} onClick={() => save("review")}><Send className="size-4" />Enviar para revisão</Button></div>
+          </div>
+        </Card>
+      </div> : null}
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(350px,0.75fr)]">
         <Card className="min-w-0 space-y-4 p-4 sm:p-5">
@@ -152,26 +200,11 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
             <BookOpenCheck className="mx-auto size-8 text-muted-foreground" />
             <h3 className="mb-1 mt-3 text-sm font-semibold">{articles.length ? "Nenhum artigo corresponde" : "Sua base começa aqui"}</h3>
             <p className="mx-auto mb-4 mt-0 max-w-md text-sm text-muted-foreground">{articles.length ? "Mude a busca ou os filtros para encontrar outro artigo." : "Adicione respostas aprovadas para perguntas recorrentes, regras e procedimentos do servidor."}</p>
-            {!articles.length ? <Button size="sm" onClick={startNew}><FilePlus2 className="size-4" />Criar primeiro artigo</Button> : null}
+            {!articles.length && !editorOpen ? <Button size="sm" onClick={startNew}><FilePlus2 className="size-4" />Criar primeiro artigo</Button> : null}
           </div>}
         </Card>
 
         <div className="space-y-4">
-          <Card key={gid} className="space-y-4 p-4 sm:p-5">
-            <div><p className="mb-1 mt-0 text-xs font-semibold uppercase tracking-[0.12em] text-primary">{editingId ? "Edição" : "Novo conteúdo"}</p><h2 className="m-0 text-base font-semibold">{editingId ? "Editar artigo" : "Escreva uma resposta"}</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">Artigos ficam como rascunho até serem enviados para revisão e aprovados.</p></div>
-            <EditorField id="article-title" label="Título"><Input id="article-title" maxLength={200} value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Ex.: Como recuperar minha conta?" /></EditorField>
-            <EditorField id="article-body" label="Resposta"><Textarea id="article-body" rows={5} maxLength={8000} value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} placeholder="Escreva a resposta que a equipe gostaria que o bot usasse. Inclua passos claros e links confiáveis." /><p className="m-0 text-right text-[11px] text-muted-foreground">{draft.body.length}/8000</p></EditorField>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-              <EditorField id="article-category" label="Categoria"><Input id="article-category" maxLength={80} value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))} placeholder="Suporte" /></EditorField>
-              <EditorField id="article-tags" label="Tags"><Input id="article-tags" value={draft.tags} onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))} placeholder="conta, acesso, senha" /><p className="m-0 text-xs text-muted-foreground">Separe as tags por vírgula.</p></EditorField>
-            </div>
-            <EditorField id="article-examples" label="Perguntas relacionadas"><Textarea id="article-examples" rows={3} value={draft.examples} onChange={(event) => setDraft((current) => ({ ...current, examples: event.target.value }))} placeholder={"Como recupero meu acesso?\nEsqueci a senha, o que faço?"} /><p className="m-0 text-xs text-muted-foreground">Uma forma de perguntar por linha. Ajuda a IA a encontrar este artigo.</p></EditorField>
-            <div className="flex flex-wrap justify-between gap-2 border-t border-border pt-4">
-              {editingId ? <Button variant="ghost" onClick={startNew}>Cancelar edição</Button> : <span />}
-              <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={!draft.title.trim() || !draft.body.trim()} onClick={() => save("draft")}>Salvar rascunho</Button><Button disabled={!draft.title.trim() || !draft.body.trim()} onClick={() => save("review")}>Enviar para revisão</Button></div>
-            </div>
-          </Card>
-
           <Card className="space-y-4 p-4 sm:p-5">
             <div><p className="mb-1 mt-0 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary"><Sparkles className="size-3.5" />Teste antes de usar</p><h2 className="m-0 text-base font-semibold">Que resposta o bot encontraria?</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">A busca segue o filtro de aprovação e as regras atuais do servidor.</p></div>
             <Input aria-label="Pergunta de teste" value={testQuestion} onChange={(event) => setTestQuestion(event.target.value)} placeholder="Ex.: esqueci a senha, como entro?" />
