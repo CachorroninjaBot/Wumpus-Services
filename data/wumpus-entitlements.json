@@ -1,0 +1,61 @@
+{
+  "updatedAt": 1792777909475,
+  "byGuild": {
+    "1014633471790022667": {
+      "status": "active",
+      "planId": "escala",
+      "accountId": "928871447940710480",
+      "discordUsername": "cachorroninja",
+      "updatedAt": 1792777909475,
+      "priority": 0
+    },
+    "1085196268445380650": {
+      "status": "active",
+      "planId": "escala",
+      "accountId": "928871447940710480",
+      "discordUsername": "cachorroninja",
+      "updatedAt": 1792777909475,
+      "priority": 2
+    },
+    "1159896002988359862": {
+      "status": "active",
+      "planId": "escala",
+      "accountId": "928871447940710480",
+      "discordUsername": "cachorroninja",
+      "updatedAt": 1792777909475,
+      "priority": 3
+    },
+    "1408115160014524456": {
+      "status": "active",
+      "planId": "escala",
+      "accountId": "928871447940710480",
+      "discordUsername": "cachorroninja",
+      "updatedAt": 1792777909475,
+      "priority": 5
+    },
+    "1030568952226664469": {
+      "status": "active",
+      "planId": "escala",
+      "accountId": "928871447940710480",
+      "discordUsername": "cachorroninja",
+      "updatedAt": 1792777909475,
+      "priority": 1
+    },
+    "1266561055832801290": {
+      "status": "active",
+      "planId": "escala",
+      "accountId": "928871447940710480",
+      "discordUsername": "cachorroninja",
+      "updatedAt": 1792777909475,
+      "priority": 4
+    },
+    "1541282282822836324": {
+      "status": "active",
+      "planId": "escala",
+      "accountId": "928871447940710480",
+      "discordUsername": "cachorroninja",
+      "updatedAt": 1792777909475,
+      "priority": 6
+    }
+  }
+}
