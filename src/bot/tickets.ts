@@ -653,11 +653,12 @@ export async function recordFeedback(
   rating: number,
   log: Logger
 ): Promise<boolean> {
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) return false;
   let found = false;
 
   await mutate<Ticket>("tickets", (rows) => {
     const row = rows.find((entry) => entry.guildId === guildId && entry.id === ticketId);
-    if (row) {
+    if (row?.status === "closed" && !row.feedback) {
       row.feedback = { rating, comment: null };
       found = true;
     }

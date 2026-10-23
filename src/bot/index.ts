@@ -398,8 +398,21 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
   if (kind === "ticket" && action === "rate") {
     const ticketId = Number(args[0]);
     const rating = Number(args[1]);
-    await recordFeedback(guild.id, ticketId, rating, log);
-    await interaction.update({ content: `Obrigado! Nota **${rating}/5** registrada.`, components: [] });
+    await interaction.deferUpdate();
+    try {
+      const saved = await recordFeedback(guild.id, ticketId, rating, log);
+      if (!saved) {
+        await interaction.followUp({ content: "Não consegui registrar a nota. O atendimento pode já ter recebido uma avaliação.", ephemeral: true });
+        return;
+      }
+      await interaction.editReply({
+        content: `Obrigado! Nota **${rating}/5** registrada.`,
+        components: interaction.message.components.slice(1).map((row) => row.toJSON()),
+      });
+    } catch (error) {
+      log.error("falha ao registrar avaliacao de atendimento", { guildId: guild.id, ticketId, error: String(error).slice(0, 300) });
+      await interaction.followUp({ content: "O Discord recebeu seu clique, mas não consegui salvar a nota. Tente novamente em instantes.", ephemeral: true }).catch(() => undefined);
+    }
     return;
   }
 
