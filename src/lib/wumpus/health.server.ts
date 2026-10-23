@@ -22,8 +22,19 @@ export type BotHealthRecord = {
   pingMs: number | null;
 };
 
+export type BotHealthInspection = {
+  state: "available" | "missing" | "invalid" | "unreadable";
+  pathSource: "configured" | "default";
+  record: BotHealthRecord | null;
+  errorCode?: string;
+};
+
+function configuredHealthPath(): string | null {
+  return process.env.WUMPUS_HEALTH_PATH?.trim() || null;
+}
+
 function healthPath(): string {
-  return process.env.WUMPUS_HEALTH_PATH || join(process.cwd(), "data", "wumpus-health.json");
+  return configuredHealthPath() ?? join(process.cwd(), "data", "wumpus-health.json");
 }
 
 export async function writeBotHealth(record: BotHealthRecord): Promise<void> {
@@ -34,16 +45,7 @@ export async function writeBotHealth(record: BotHealthRecord): Promise<void> {
   await rename(tmp, path);
 }
 
-export async function readBotHealth(): Promise<BotHealthRecord | null> {
-  let raw: string;
-  try {
-    raw = await readFile(healthPath(), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-
-  const value: unknown = JSON.parse(raw);
+function parseBotHealth(value: unknown): BotHealthRecord | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Partial<BotHealthRecord>;
   if (
@@ -63,4 +65,36 @@ export async function readBotHealth(): Promise<BotHealthRecord | null> {
     guildResources: record.guildResources && typeof record.guildResources === "object" ? record.guildResources : {},
     pingMs: record.pingMs,
   };
+}
+
+export async function inspectBotHealth(): Promise<BotHealthInspection> {
+  const path = healthPath();
+  const pathSource = configuredHealthPath() ? "configured" : "default";
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { state: "missing", pathSource, record: null };
+    return { state: "unreadable", pathSource, record: null, errorCode: code ?? "UNKNOWN" };
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return { state: "invalid", pathSource, record: null, errorCode: "INVALID_JSON" };
+  }
+  const record = parseBotHealth(value);
+  return record
+    ? { state: "available", pathSource, record }
+    : { state: "invalid", pathSource, record: null, errorCode: "INVALID_RECORD" };
+}
+
+export async function readBotHealth(): Promise<BotHealthRecord | null> {
+  const inspection = await inspectBotHealth();
+  if (inspection.state === "unreadable") {
+    throw new Error(`Não foi possível ler o arquivo de saúde do Wumpus (${inspection.errorCode}).`);
+  }
+  return inspection.record;
 }

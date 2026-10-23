@@ -40,6 +40,8 @@ ativado na conta Discord do proprietário. As sessões ficam em cookie `HttpOnly
 e podem ser revogadas na aba Segurança. Ao abrir `/entrar`, uma sessão válida é
 restaurada automaticamente; ela dura até 30 dias, com expiração após 14 dias
 sem atividade. Use `?reconectar=1` para iniciar uma nova autorização Discord.
+Se o dono não encontrar servidores, a tela de preparação mostra o estado do
+heartbeat e registra uma entrada `[owner-guild-diagnostics]` nos logs do servidor.
 
 As contas, sessões, auditoria e concessões manuais são salvas no arquivo definido por
 `WUMPUS_MEMBERS_PATH` (padrão `data/wumpus-dashboard-members.json`). O bot

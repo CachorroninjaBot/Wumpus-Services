@@ -17,14 +17,14 @@ import {
   Ticket,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrandMark, GuildBadge } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { SearchSelect } from "@/components/search-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { brand, groupLabels, navItems, type ModuleGroupId, type NavId } from "@/lib/wumpus/brand";
 import { SESSION_TOKEN_KEY } from "@/lib/wumpus/session-token";
-import { logoutDashboardSession } from "@/lib/wumpus/session";
+import { getOwnerGuildDiagnostics, logoutDashboardSession, type OwnerGuildDiagnostics } from "@/lib/wumpus/session";
 import { useWumpus } from "@/lib/wumpus/store";
 import { cn } from "@/lib/utils";
 import { ModuleAssistant } from "@/components/module-assistant";
@@ -120,6 +120,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const runtimeSyncError = useWumpus((s) => s.runtimeSyncError);
   const user = useWumpus((s) => s.sessionUser);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<OwnerGuildDiagnostics | null>(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
   const active = useActiveNav();
   const nextTheme = theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
   const isOwner = user.isAdmin;
@@ -128,6 +131,23 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   const title = useMemo(() => navItems.find((item) => item.id === active)?.label ?? "Painel", [active]);
   const hint = useMemo(() => navItems.find((item) => item.id === active)?.hint, [active]);
+
+  const inspectGuildConnection = useCallback(async () => {
+    setDiagnosticsLoading(true);
+    setDiagnosticsError(null);
+    try {
+      setDiagnostics(await getOwnerGuildDiagnostics({ data: {} }));
+    } catch (cause) {
+      console.error("Não foi possível carregar o diagnóstico da conexão do Wumpus.", cause);
+      setDiagnosticsError(cause instanceof Error ? cause.message : "Não foi possível consultar o diagnóstico.");
+    } finally {
+      setDiagnosticsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (hydrated && isOwner && guilds.length === 0) void inspectGuildConnection();
+  }, [guilds.length, hydrated, inspectGuildConnection, isOwner]);
 
   if (!hydrated) {
     return <div className="grid min-h-dvh place-items-center bg-background text-muted-foreground">Carregando o Wumpus…</div>;
@@ -154,7 +174,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   if (!guilds.length) {
     return (
       <div className="grid min-h-dvh place-items-center bg-background px-4 text-foreground">
-        <section className="w-full max-w-md rounded-2xl bg-card p-7 shadow-border">
+        <section className="w-full max-w-lg rounded-2xl bg-card p-7 shadow-border">
           <BrandMark size={46} />
           <h1 className="mb-2 mt-6 text-2xl font-semibold">Vamos preparar seu servidor</h1>
           <p className="mb-6 mt-0 text-sm leading-6 text-muted-foreground">
@@ -166,6 +186,47 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             Adicionar o Wumpus ao Discord
           </a>
           {isOwner ? <a href="/entrar?reconectar=1" className="mt-4 block text-center text-sm font-medium text-primary hover:underline">Atualizar conexão com o Discord</a> : null}
+          {isOwner ? (
+            <section aria-labelledby="connection-diagnostics-title" className="mt-6 rounded-xl border border-border bg-muted/35 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 id="connection-diagnostics-title" className="m-0 text-sm font-semibold">Diagnóstico da conexão</h2>
+                <Button variant="outline" size="sm" disabled={diagnosticsLoading} onClick={() => void inspectGuildConnection()}>
+                  {diagnosticsLoading ? "Verificando…" : diagnostics ? "Verificar novamente" : "Verificar conexão"}
+                </Button>
+              </div>
+              {diagnosticsLoading && !diagnostics ? <p role="status" className="mb-0 mt-3 text-sm text-muted-foreground">Consultando sessão Discord e heartbeat do bot…</p> : null}
+              {diagnosticsError ? <p role="alert" className="mb-0 mt-3 text-sm text-destructive">{diagnosticsError}</p> : null}
+              {diagnostics ? (
+                <>
+                  <dl className="mb-0 mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+                    <dt className="text-muted-foreground">Servidores administráveis</dt>
+                    <dd className="m-0 text-right font-medium">{diagnostics.manageableGuildCount}</dd>
+                    <dt className="text-muted-foreground">Arquivo de saúde</dt>
+                    <dd className="m-0 text-right font-medium">
+                      {diagnostics.healthState === "available" ? "Encontrado e válido" : diagnostics.healthState === "missing" ? "Não encontrado" : diagnostics.healthState === "invalid" ? "Inválido" : "Sem permissão de leitura"}
+                    </dd>
+                    <dt className="text-muted-foreground">Origem do caminho</dt>
+                    <dd className="m-0 text-right font-medium">{diagnostics.healthPathSource === "configured" ? "WUMPUS_HEALTH_PATH" : "Padrão"}</dd>
+                    <dt className="text-muted-foreground">Estado do bot</dt>
+                    <dd className="m-0 text-right font-medium">{diagnostics.healthStatus === "online" ? "Online" : diagnostics.healthStatus === "offline" ? "Offline" : "Sem registro"}</dd>
+                    <dt className="text-muted-foreground">Último heartbeat</dt>
+                    <dd className="m-0 text-right font-medium">{diagnostics.healthAgeSeconds === null ? "Indisponível" : `há ${diagnostics.healthAgeSeconds}s`}</dd>
+                    <dt className="text-muted-foreground">Servidores do bot</dt>
+                    <dd className="m-0 text-right font-medium">{diagnostics.healthGuildCount}</dd>
+                    <dt className="text-muted-foreground">Servidores em comum</dt>
+                    <dd className="m-0 text-right font-medium">{diagnostics.matchingGuildCount}</dd>
+                  </dl>
+                  <p className="mb-0 mt-4 break-all rounded-lg bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+                    Arquivo lido pelo painel: {diagnostics.healthPath}
+                  </p>
+                  <p className="mb-0 mt-2 text-xs text-muted-foreground">Identificador: <code>{diagnostics.issue}</code></p>
+                  {diagnostics.errorCode ? <p className="mb-0 mt-2 text-xs text-destructive">Código técnico: {diagnostics.errorCode}</p> : null}
+                  <p className="mb-0 mt-3 text-sm leading-6">{diagnostics.recommendation}</p>
+                  <p className="mb-0 mt-2 text-xs text-muted-foreground">Consulta registrada nos logs do servidor em {new Date(diagnostics.checkedAt).toLocaleTimeString("pt-BR")}.</p>
+                </>
+              ) : null}
+            </section>
+          ) : null}
           {!isOwner ? <Link to="/" className="mt-4 block text-center text-sm text-muted-foreground hover:text-foreground">Ver planos e recursos</Link> : null}
         </section>
       </div>

@@ -20,6 +20,8 @@ import { randomUUID } from "node:crypto";
 import { exchangeDiscordCodeDirect } from "@/lib/discord/oauth";
 import { loadBotGuildIds } from "./bot-guilds";
 import { configuredLifetimeSubscriptions, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
+import { inspectBotHealth } from "./health.server";
+import { isPlatformOwner } from "./owner";
 import { loadBilling } from "./shardpay.server";
 import {
   closeDashboardSession,
@@ -50,6 +52,21 @@ export type SessionUserView = {
 export type AccessResult =
   | { ok: true; session: SessionUserView; guilds: SessionGuild[]; entitlements: Entitlements }
   | { ok: false; error: string };
+
+export type OwnerGuildDiagnostics = {
+  checkedAt: number;
+  healthPath: string;
+  manageableGuildCount: number;
+  healthState: "available" | "missing" | "invalid" | "unreadable";
+  healthPathSource: "configured" | "default";
+  healthStatus: "online" | "offline" | null;
+  healthAgeSeconds: number | null;
+  healthGuildCount: number;
+  matchingGuildCount: number;
+  errorCode?: string;
+  issue: "none" | "discord-guilds" | "health-file" | "health-invalid" | "health-unreadable" | "health-stale" | "bot-offline" | "bot-no-guilds" | "guild-mismatch";
+  recommendation: string;
+};
 
 function subscriptionRows(billing: Awaited<ReturnType<typeof loadBilling>>): SubscriptionLite[] {
   return [...billing.subscriptions.map((sub) => ({
@@ -180,6 +197,80 @@ export const resolveAccess = createServerFn({ method: "POST" })
       guilds: payload.guilds,
       entitlements,
     };
+  });
+
+export const getOwnerGuildDiagnostics = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({}).strict().parse(input))
+  .handler(async (): Promise<OwnerGuildDiagnostics> => {
+    enforceRequestLimit("owner-guild-diagnostics", 20, 60_000);
+    const session = await verifySignedSession("");
+    if (!isPlatformOwner(session.userId)) {
+      throw new Error("Diagnóstico disponível apenas para o dono da plataforma.");
+    }
+
+    const checkedAt = Date.now();
+    const health = await inspectBotHealth();
+    const healthAgeSeconds = health.record ? Math.max(0, Math.floor((checkedAt - health.record.at) / 1000)) : null;
+    const manageableGuildCount = session.guilds.length;
+    const botGuildIds = new Set(health.record?.guildIds ?? []);
+    const matchingGuildCount = session.guilds.filter((guild) => botGuildIds.has(guild.id)).length;
+
+    let issue: OwnerGuildDiagnostics["issue"] = "none";
+    let recommendation = "A conexão do bot está saudável. Se a lista continuar vazia, atualize a página e verifique os logs do painel.";
+    if (health.state === "missing") {
+      issue = "health-file";
+      recommendation = "O painel não encontrou o arquivo de saúde. Verifique se bot e painel compartilham o volume e se WUMPUS_HEALTH_PATH aponta para o mesmo arquivo nos dois serviços.";
+    } else if (health.state === "invalid") {
+      issue = "health-invalid";
+      recommendation = "O arquivo de saúde existe, mas está inválido. Reinicie o bot para ele gerar um novo heartbeat.";
+    } else if (health.state === "unreadable") {
+      issue = "health-unreadable";
+      recommendation = "O painel não consegue ler o arquivo de saúde. Confira o caminho e as permissões de leitura do serviço.";
+    } else if (healthAgeSeconds !== null && healthAgeSeconds > 90) {
+      issue = "health-stale";
+      recommendation = "O heartbeat está antigo. Verifique se o bot continua ligado e se consegue gravar no volume compartilhado.";
+    } else if (health.record?.status !== "online") {
+      issue = "bot-offline";
+      recommendation = "O último heartbeat informa que o bot está offline. Reinicie o processo do bot e confira os logs dele.";
+    } else if (health.record.guildIds.length === 0) {
+      issue = "bot-no-guilds";
+      recommendation = "O bot reportou zero servidores. Confira a conexão do bot com o Discord e reinicie-o.";
+    } else if (manageableGuildCount === 0) {
+      issue = "discord-guilds";
+      recommendation = "A sessão não tem servidores administráveis registrados. Use “Atualizar conexão com o Discord” para autorizar novamente com a conta correta.";
+    } else if (matchingGuildCount === 0) {
+      issue = "guild-mismatch";
+      recommendation = "O bot está ativo, mas não aparece em nenhum servidor administrável por esta conta. Confirme se esta é a conta Discord correta e se o bot foi adicionado a um dos seus servidores.";
+    }
+
+    const diagnostics: OwnerGuildDiagnostics = {
+      checkedAt,
+      healthPath: process.env.WUMPUS_HEALTH_PATH?.trim() || "data/wumpus-health.json (padrão relativo a process.cwd())",
+      manageableGuildCount,
+      healthState: health.state,
+      healthPathSource: health.pathSource,
+      healthStatus: health.record?.status ?? null,
+      healthAgeSeconds,
+      healthGuildCount: health.record?.guildIds.length ?? 0,
+      matchingGuildCount,
+      ...(health.errorCode ? { errorCode: health.errorCode } : {}),
+      issue,
+      recommendation,
+    };
+    console.info("[owner-guild-diagnostics]", JSON.stringify({
+      checkedAt: diagnostics.checkedAt,
+      manageableGuildCount: diagnostics.manageableGuildCount,
+      healthState: diagnostics.healthState,
+      healthPathSource: diagnostics.healthPathSource,
+      healthStatus: diagnostics.healthStatus,
+      healthAgeSeconds: diagnostics.healthAgeSeconds,
+      healthGuildCount: diagnostics.healthGuildCount,
+      matchingGuildCount: diagnostics.matchingGuildCount,
+      errorCode: diagnostics.errorCode,
+      issue: diagnostics.issue,
+      recommendation: diagnostics.recommendation,
+    }));
+    return diagnostics;
   });
 
 export const heartbeatDashboardSession = createServerFn({ method: "POST" })
