@@ -15,6 +15,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
   Client,
+  Options,
   AuditLogEvent,
   ChannelType,
   Events,
@@ -590,7 +591,17 @@ async function canManageTicket(guild: Guild, userId: string): Promise<boolean> {
 }
 
 export function createBot(token: string, log: Logger = consoleLogger): BotHandle {
-  const client = new Client({ intents: INTENTS, partials: [Partials.Channel, Partials.Message] });
+  const client = new Client({
+    intents: INTENTS,
+    partials: [Partials.Channel, Partials.Message],
+    makeCache: Options.cacheWithLimits({
+      ...Options.DefaultMakeCacheSettings,
+      // Preserve a short message history while bounding high-volume guilds.
+      MessageManager: 50,
+      // Members are fetched on demand; do not retain the full member list.
+      GuildMemberManager: 200,
+    }),
+  });
 
   let healthTimer: ReturnType<typeof setInterval> | null = null;
   let licenseSyncTimer: ReturnType<typeof setInterval> | null = null;
