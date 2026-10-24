@@ -18,6 +18,7 @@ import type { OutboxJob, RuntimeFile } from "../lib/wumpus/runtime.server.ts";
 import { setupVerification, restoreVerification, setLockdown } from "./security.ts";
 import { id } from "./ids.ts";
 import { guildPlan } from "./config.ts";
+import { createHumanSupportThread } from "./human-support.ts";
 
 function runtimePath(): string {
   return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
@@ -170,6 +171,11 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
       }
       if (job.kind === "form_action") {
         const result = await processFormAction(guild, job, log);
+        outbox = settleActionJob(outbox, job.id, result);
+        continue;
+      }
+      if (job.kind === "support_handoff") {
+        const result = await createHumanSupportThread(guild, job, log);
         outbox = settleActionJob(outbox, job.id, result);
         continue;
       }

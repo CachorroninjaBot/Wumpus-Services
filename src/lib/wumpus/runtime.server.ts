@@ -72,7 +72,7 @@ export type OutboxJob = {
   id: string;
   guildId: string;
   /** O que publicar. */
-  kind: "panel" | "ticket_action" | "form_action";
+  kind: "panel" | "ticket_action" | "form_action" | "support_handoff";
   /** "tickets" | "forms" — decide o modulo de config a usar. */
   target: string;
   /** Referencia de canal da config (nome como "ch_atendimento" ou snowflake). */
@@ -84,6 +84,8 @@ export type OutboxJob = {
   actorId?: string;
   targetStaffId?: string;
   content?: string;
+  supportPage?: string;
+  supportMessages?: Array<{ role: "user" | "assistant"; content: string }>;
   reason?: string;
   priority?: "low" | "normal" | "high" | "urgent";
   createdAt: number;

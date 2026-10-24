@@ -91,6 +91,17 @@ test("falha de ação de ticket guarda o detalhe e limita o tamanho", () => {
   assert.equal(out[0]!.detail?.length, 300);
 });
 
+test("handoff concluído guarda o ID do tópico para a dashboard", () => {
+  const handoff = job({ id: "support-1", kind: "support_handoff", actorId: "user-1" });
+  const out = settleActionJob([handoff], handoff.id, {
+    ok: true,
+    detail: "Atendimento humano criado no fórum.",
+    channelId: "12345678901234567",
+  });
+  assert.equal(out[0]!.status, "done");
+  assert.equal(out[0]!.channelId, "12345678901234567");
+});
+
 /* --------------------------------------------------------------- limpeza --- */
 
 test("pedido publicado ha muito tempo sai da fila", () => {

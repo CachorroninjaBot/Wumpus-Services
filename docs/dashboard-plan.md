@@ -21,6 +21,8 @@
   tela de atendimento e as estatísticas consultam dados reais persistidos.
 - [x] Erros ao sincronizar configuração e publicar painéis mostram os próximos
   passos para corrigir acesso, campos ou permissões do bot.
+- [x] Ajuda contextual renderiza Markdown e pode encaminhar a conversa para um
+  tópico dedicado no fórum de suporte humano.
 
 **Condições operacionais:** admin e bot precisam compartilhar o volume de
 `data/` (ou os caminhos configurados por `WUMPUS_HEALTH_PATH`,
@@ -30,6 +32,12 @@ versão. Quando a ShardPay estiver indisponível,
 a landing identifica os valores exibidos como referência salva e recomenda
 confirmar no checkout. O OAuth exige `DISCORD_CLIENT_SECRET`; a sessão aceita
 `WUMPUS_SESSION_SECRET` dedicado ou usa o segredo Discord como fallback.
+O encaminhamento da ajuda por IA exige `WUMPUS_SUPPORT_FORUM_ID` apontando para
+um canal fórum acessível pelo bot. Configure a variável no painel de ambiente
+do serviço e reinicie o bot; ele precisa de permissão para ver o fórum, criar
+tópicos e enviar mensagens. O pedido só é criado após a pessoa clicar em
+"Não resolveu? Falar com humano"; o tópico inclui o servidor selecionado e o
+histórico recente da conversa.
 
 ## O problema real
 

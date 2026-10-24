@@ -1,14 +1,21 @@
 import { useRouterState } from "@tanstack/react-router";
-import { LoaderCircle, MessageCircle, Send, Sparkles, X } from "lucide-react";
+import { ExternalLink, Headset, LoaderCircle, MessageCircle, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { askWumpusAssistant } from "@/lib/wumpus/assistant";
+import { AssistantMarkdown } from "@/components/assistant-markdown";
+import { askWumpusAssistant, getHumanSupportStatus, requestHumanSupport } from "@/lib/wumpus/assistant";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { navItems } from "@/lib/wumpus/brand";
 import type { ModuleKey } from "@/lib/wumpus/defaults";
 import { useWumpus } from "@/lib/wumpus/store";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
+type HandoffState = {
+  status: "idle" | "requesting" | "queued" | "stalled" | "done" | "failed";
+  jobId?: string;
+  detail?: string;
+  threadUrl?: string;
+};
 const moduleContext: Record<string, ModuleKey[]> = {
   tickets: ["tickets"], forms: ["forms"], staff: ["staff", "tickets"], moderation: ["moderation"],
   protect: ["security", "automod"], knowledge: ["knowledge"], stats: ["statistics"], logs: ["logs"],
@@ -35,6 +42,7 @@ export function ModuleAssistant() {
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState("");
+  const [handoff, setHandoff] = useState<HandoffState>({ status: "idle" });
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const context = useMemo(() => {
@@ -42,9 +50,55 @@ export function ModuleAssistant() {
     return `Seção: ${page.label}. ${page.hint}\nConfiguração ativa (JSON): ${JSON.stringify(relevant).slice(0, 5600) || "Ainda sem configuração publicada."}`;
   }, [modules, page]);
 
-  useEffect(() => { setMessages([]); setError(""); }, [pathname, guildId]);
+  useEffect(() => { setMessages([]); setError(""); setHandoff({ status: "idle" }); }, [pathname, guildId]);
   useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [messages, busy]);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [messages, busy, handoff]);
+  useEffect(() => {
+    if (handoff.status !== "queued" || !handoff.jobId || !guildId) return;
+    const jobId = handoff.jobId;
+    let cancelled = false;
+    let attempts = 0;
+    let polling = false;
+    const timer = window.setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      attempts += 1;
+      try {
+        const token = getStoredSessionToken();
+        if (!token) throw new Error("Sua sessão expirou. Entre novamente para consultar o atendimento.");
+        const result = await getHumanSupportStatus({ data: { token, guildId, jobId } });
+        if (cancelled) return;
+        if (result.status === "done" && result.channelId) {
+          window.clearInterval(timer);
+          setHandoff({
+            status: "done",
+            detail: result.detail ?? "Atendimento humano criado no fórum.",
+            threadUrl: `https://discord.com/channels/${guildId}/${result.channelId}`,
+          });
+        } else if (result.status === "failed" || result.status === "missing") {
+          window.clearInterval(timer);
+          setHandoff({ status: "failed", detail: result.detail ?? "Não foi possível confirmar a criação do atendimento." });
+        } else if (attempts >= 60) {
+          window.clearInterval(timer);
+          setHandoff((current) => ({
+            ...current,
+            status: "stalled",
+            detail: "O pedido ainda está na fila do bot. Você pode aguardar; não envie outro pedido enquanto ele estiver pendente.",
+          }));
+        }
+      } catch (cause) {
+        if (cancelled) return;
+        window.clearInterval(timer);
+        setHandoff({ status: "failed", detail: cause instanceof Error ? cause.message : "Falha ao consultar o atendimento." });
+      } finally {
+        polling = false;
+      }
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [guildId, handoff.jobId, handoff.status]);
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
@@ -63,6 +117,31 @@ export function ModuleAssistant() {
     } finally { setBusy(false); }
   };
 
+  const requestHandoff = async () => {
+    const token = getStoredSessionToken();
+    if (!token || !guildId || !messages.some((message) => message.role === "assistant")) {
+      setHandoff({ status: "failed", detail: "Converse com a ajuda do Wumpus antes de pedir atendimento humano." });
+      return;
+    }
+    setHandoff({ status: "requesting" });
+    try {
+      const result = await requestHumanSupport({
+        data: {
+          token,
+          guildId,
+          page: page.label,
+          messages: messages.slice(-12).map((message) => ({ role: message.role, content: message.content.slice(0, 1200) })),
+        },
+      });
+      setHandoff({ status: "queued", jobId: result.jobId, detail: "Pedido enviado. O bot está criando um tópico no fórum de atendimento." });
+    } catch (cause) {
+      setHandoff({
+        status: "failed",
+        detail: cause instanceof Error ? cause.message : "Não foi possível encaminhar a conversa.",
+      });
+    }
+  };
+
   return <>
     {open ? <section aria-label="Ajuda do Wumpus" className="fixed bottom-[5.5rem] right-4 z-40 flex h-[min(70vh,36rem)] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_18px_60px_-18px_rgb(0_0_0/0.65)] sm:bottom-24 sm:right-6">
       <header className="flex items-center gap-3 border-b border-border px-4 py-3">
@@ -74,9 +153,52 @@ export function ModuleAssistant() {
         {!messages.length ? <div className="space-y-3">
           <p className="m-0 text-sm leading-6">Posso explicar esta tela e ajudar com as configurações de <strong>{page.label.toLocaleLowerCase("pt-BR")}</strong>. Já tenho o contexto do servidor e desta seção.</p>
           <div className="flex flex-wrap gap-2">{["O que devo configurar primeiro?", "Explique essas opções", "Como resolvo um problema aqui?"].map((suggestion) => <button key={suggestion} type="button" onClick={() => setQuestion(suggestion)} className="rounded-xl border border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">{suggestion}</button>)}</div>
-        </div> : messages.map((message, index) => <div key={`${index}-${message.role}`} className={`max-w-[92%] whitespace-pre-wrap rounded-2xl px-3 py-2.5 text-sm leading-6 ${message.role === "user" ? "ml-auto rounded-br-md bg-primary text-primary-foreground" : "rounded-bl-md bg-muted text-foreground"}`}>{message.content}</div>)}
+        </div> : messages.map((message, index) => <div key={`${index}-${message.role}`} className={`max-w-[92%] rounded-2xl px-3 py-2.5 text-sm leading-6 ${message.role === "user" ? "ml-auto whitespace-pre-wrap rounded-br-md bg-primary text-primary-foreground" : "rounded-bl-md bg-muted text-foreground"}`}>{message.role === "assistant" ? <AssistantMarkdown content={message.content} /> : message.content}</div>)}
         {busy ? <p className="m-0 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Entendendo o contexto…</p> : null}
         {error ? <p role="alert" className="m-0 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+        {messages.some((message) => message.role === "assistant") ? (
+          <div className="space-y-2 border-t border-border pt-3">
+            {handoff.threadUrl ? (
+              <a href={handoff.threadUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary underline underline-offset-2">
+                Abrir tópico do atendimento humano <ExternalLink className="size-3.5" />
+              </a>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (handoff.status === "stalled" && handoff.jobId) {
+                      setHandoff({ ...handoff, status: "queued", detail: "Consultando novamente o pedido existente…" });
+                    } else {
+                      void requestHandoff();
+                    }
+                  }}
+                  disabled={handoff.status === "requesting" || handoff.status === "queued"}
+                  className="w-full"
+                >
+                  {handoff.status === "requesting" || handoff.status === "queued"
+                    ? <LoaderCircle className="size-4 animate-spin" />
+                    : <Headset className="size-4" />}
+                  {handoff.status === "queued"
+                    ? "Criando tópico no fórum…"
+                    : handoff.status === "stalled"
+                      ? "Consultar pedido pendente"
+                      : handoff.status === "failed"
+                        ? "Tentar encaminhar novamente"
+                        : "Não resolveu? Falar com humano"}
+                </Button>
+                <p className="m-0 text-xs text-muted-foreground">A conversa será compartilhada com a equipe no fórum de suporte.</p>
+              </>
+            )}
+            {handoff.detail ? (
+              <p role={handoff.status === "failed" ? "alert" : "status"} className={`m-0 text-xs ${handoff.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
+                {handoff.detail}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <div ref={endRef} />
       </div>
       <form onSubmit={(event) => void send(event)} className="border-t border-border p-3">

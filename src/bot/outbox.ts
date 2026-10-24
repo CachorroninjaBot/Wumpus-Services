@@ -51,12 +51,13 @@ export function settleJob(
   });
 }
 
-export function settleActionJob(jobs: OutboxJob[] | undefined, jobId: string, result: { ok: boolean; detail: string }): OutboxJob[] {
+export function settleActionJob(jobs: OutboxJob[] | undefined, jobId: string, result: { ok: boolean; detail: string; channelId?: string }): OutboxJob[] {
   if (!Array.isArray(jobs)) return [];
   return jobs.map((job) => job.id === jobId ? {
     ...job,
     status: result.ok ? "done" as const : "failed" as const,
     detail: result.detail.slice(0, 300),
+    ...(result.channelId ? { channelId: result.channelId } : {}),
     at: Date.now(),
   } : job);
 }
