@@ -44,7 +44,7 @@ export function GuildSelectionPanel() {
     try {
       await saveMyGuildSelection({ data: { guildIds: selectedGuildIds } });
       dirtyRef.current = false;
-      window.location.reload();
+      window.location.assign("/entrar");
     } catch (cause) {
       console.error("Não foi possível salvar a seleção de servidores.", cause);
       setError(cause instanceof Error ? cause.message : "Não foi possível salvar a seleção.");
