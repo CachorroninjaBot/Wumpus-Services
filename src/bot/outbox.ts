@@ -1,8 +1,8 @@
 /**
  * Processamento da fila de saida.
  *
- * O painel e o bot sao processos diferentes: a unica ponte e o arquivo de
- * runtime. O painel enfileira, o bot publica e grava o resultado de volta.
+ * O painel e o bot sao processos diferentes: a ponte e o estado de runtime
+ * compartilhado. O painel enfileira; o bot publica e grava o resultado.
  *
  * A parte pura (decidir o que esta pendente, marcar resultado) fica aqui e e
  * testavel; o envio em si mora em `outbox-send.ts`, que depende do discord.js.
@@ -19,7 +19,7 @@ export function pendingJobs(jobs: OutboxJob[] | undefined, guildId: string): Out
  * Marca um pedido como concluido ou falho.
  *
  * Devolve uma lista NOVA: o runtime e lido e reescrito inteiro, e mutar o array
- * recebido deixaria o cache em memoria divergindo do arquivo.
+ * recebido deixaria o cache em memoria divergindo do estado persistido.
  */
 export function settleJob(
   jobs: OutboxJob[] | undefined,
@@ -65,7 +65,7 @@ export function settleActionJob(jobs: OutboxJob[] | undefined, jobId: string, re
 /**
  * Descarta o que ja foi processado ha tempo.
  *
- * Sem isto a fila so cresce: cada publicacao bem-sucedida ficaria no arquivo
+ * Sem isto a fila so cresce: cada publicacao bem-sucedida ficaria no armazenamento
  * para sempre. Mantem as falhas mais tempo porque elas sao o que o usuario
  * precisa ver no painel.
  */

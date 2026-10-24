@@ -1,37 +1,30 @@
 /**
  * Configuracao do bot — leitura do runtime que o painel publica.
  *
- * O painel grava `data/wumpus-runtime.json`. Aqui apenas lemos, com cache
- * curto: o bot recebe muitas mensagens e nao pode tocar o disco em cada uma
- * (o bot antigo fazia isso e relia o arquivo inteiro a cada mensagem).
+ * O painel grava o estado compartilhado no PostgreSQL em produção. Aqui
+ * apenas lemos com cache curto: o bot recebe muitas mensagens e não deve
+ * consultar o banco em cada evento.
  *
  * A fonte da verdade e o que o painel grava. Os acessores abaixo devolvem um
  * fallback apenas quando a chave realmente nao veio — assim uma configuracao
  * publicada sempre vence o palpite do codigo.
  */
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { PlanId } from "../lib/wumpus/catalog.ts";
 import { isPlanId, planAllows } from "../lib/wumpus/plan-features.ts";
 import { readGuildLicenses, type GuildLicense } from "../lib/wumpus/license-store.server.ts";
+import { readRuntime as readSharedRuntime } from "../lib/wumpus/runtime.server.ts";
 
 export type ModuleConfig = Record<string, unknown>;
 export type GuildConfig = Record<string, ModuleConfig | string | undefined>;
 export type Runtime = { updatedAt: number; guilds: Record<string, GuildConfig> };
 
-/** Curto o bastante para a mudanca no painel aparecer rapido, longo o bastante para nao ler disco sempre. */
+/** Curto o bastante para a mudança no painel aparecer rápido sem consultar o banco por evento. */
 const TTL_MS = 5_000;
-
-const EMPTY: Runtime = { updatedAt: 0, guilds: {} };
 
 let cache: { runtime: Runtime; at: number } | null = null;
 let runtimePending: Promise<Runtime> | null = null;
 let licenseCache: { byGuild: Record<string, GuildLicense>; at: number } | null = null;
 let licensesPending: Promise<Record<string, GuildLicense>> | null = null;
-
-function runtimePath(): string {
-  return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
-}
 
 /**
  * Le o runtime. `force` ignora o cache — usado quando o painel avisa que
@@ -43,19 +36,10 @@ export async function loadRuntime(force = false): Promise<Runtime> {
   if (!force && runtimePending) return runtimePending;
 
   const pending = (async () => {
-    try {
-      const parsed = JSON.parse(await readFile(runtimePath(), "utf8")) as Partial<Runtime>;
-      const runtime: Runtime = {
-        updatedAt: Number(parsed?.updatedAt) || 0,
-        guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {}
-      };
-      cache = { runtime, at: Date.now() };
-      return runtime;
-    } catch {
-      // Arquivo ausente ou invalido nao pode derrubar o bot: vale como "nada publicado".
-      cache = { runtime: EMPTY, at: Date.now() };
-      return EMPTY;
-    }
+    const parsed = await readSharedRuntime();
+    const runtime: Runtime = { updatedAt: parsed.updatedAt, guilds: parsed.guilds };
+    cache = { runtime, at: Date.now() };
+    return runtime;
   })();
   if (!force) runtimePending = pending;
   try {

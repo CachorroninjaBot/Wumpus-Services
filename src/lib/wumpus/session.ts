@@ -23,6 +23,7 @@ import { loadBotGuildIds } from "./bot-guilds";
 import { planById, serverLimit } from "./catalog";
 import { configuredLifetimeSubscriptions, planForUser, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
 import { inspectBotHealth } from "./health.server";
+import { isDatabaseConfigured } from "./database.server.ts";
 import { isPlatformOwner } from "./owner";
 import { loadBilling } from "./shardpay.server";
 import {
@@ -62,7 +63,7 @@ export type OwnerGuildDiagnostics = {
   healthPath: string;
   manageableGuildCount: number;
   healthState: "available" | "missing" | "invalid" | "unreadable";
-  healthPathSource: "configured" | "default";
+  healthPathSource: "configured" | "default" | "database";
   healthStatus: "online" | "offline" | null;
   healthAgeSeconds: number | null;
   healthGuildCount: number;
@@ -333,16 +334,22 @@ export const getOwnerGuildDiagnostics = createServerFn({ method: "POST" })
     let recommendation = "A conexão do bot está saudável. Se a lista continuar vazia, atualize a página e verifique os logs do painel.";
     if (health.state === "missing") {
       issue = "health-file";
-      recommendation = "O painel não encontrou o arquivo de saúde. Verifique se bot e painel compartilham o volume e se WUMPUS_HEALTH_PATH aponta para o mesmo arquivo nos dois serviços.";
+      recommendation = isDatabaseConfigured()
+        ? "O banco ainda não recebeu um heartbeat do bot. Verifique se o bot está conectado e se dashboard e bot usam a mesma DATABASE_URL."
+        : "O painel não encontrou o arquivo de saúde. Verifique se bot e painel compartilham o volume e se WUMPUS_HEALTH_PATH aponta para o mesmo arquivo nos dois serviços.";
     } else if (health.state === "invalid") {
       issue = "health-invalid";
-      recommendation = "O arquivo de saúde existe, mas está inválido. Reinicie o bot para ele gerar um novo heartbeat.";
+      recommendation = isDatabaseConfigured()
+        ? "O estado de saúde no PostgreSQL está inválido. Reinicie o bot para ele publicar um novo heartbeat."
+        : "O arquivo de saúde existe, mas está inválido. Reinicie o bot para ele gerar um novo heartbeat.";
     } else if (health.state === "unreadable") {
       issue = "health-unreadable";
       recommendation = "O painel não consegue ler o arquivo de saúde. Confira o caminho e as permissões de leitura do serviço.";
     } else if (healthAgeSeconds !== null && healthAgeSeconds > 90) {
       issue = "health-stale";
-      recommendation = "O heartbeat está antigo. Verifique se o bot continua ligado e se consegue gravar no volume compartilhado.";
+      recommendation = isDatabaseConfigured()
+        ? "O heartbeat está antigo. Verifique se o bot continua ligado e conectado ao mesmo PostgreSQL que a dashboard."
+        : "O heartbeat está antigo. Verifique se o bot continua ligado e se consegue gravar no volume compartilhado.";
     } else if (health.record?.status !== "online") {
       issue = "bot-offline";
       recommendation = "O último heartbeat informa que o bot está offline. Reinicie o processo do bot e confira os logs dele.";
@@ -359,7 +366,9 @@ export const getOwnerGuildDiagnostics = createServerFn({ method: "POST" })
 
     const diagnostics: OwnerGuildDiagnostics = {
       checkedAt,
-      healthPath: process.env.WUMPUS_HEALTH_PATH?.trim() || "data/wumpus-health.json (padrão relativo a process.cwd())",
+      healthPath: isDatabaseConfigured()
+        ? "PostgreSQL (DATABASE_URL)"
+        : process.env.WUMPUS_HEALTH_PATH?.trim() || "data/wumpus-health.json (padrão relativo a process.cwd())",
       manageableGuildCount,
       healthState: health.state,
       healthPathSource: health.pathSource,
@@ -427,7 +436,9 @@ export const getMyGuildAccessDiagnostics = createServerFn({ method: "POST" })
     let recommendation = "A conta tem servidores elegíveis. Atualize a conexão com o Discord para recarregar a lista.";
     if (!botAvailable) {
       issue = "bot-unavailable";
-      recommendation = "O painel não recebeu uma lista recente de servidores do bot. Verifique o volume compartilhado e WUMPUS_HEALTH_PATH entre o bot e o painel.";
+      recommendation = isDatabaseConfigured()
+        ? "O painel não recebeu uma lista recente de servidores do bot. Verifique se o bot e o painel usam a mesma DATABASE_URL."
+        : "O painel não recebeu uma lista recente de servidores do bot. Verifique o volume compartilhado e WUMPUS_HEALTH_PATH entre o bot e o painel.";
     } else if (!ownedGuilds.length) {
       issue = "no-owned-guilds";
       recommendation = "O Discord não marcou nenhum servidor desta conta como propriedade dela. Confirme a conta conectada e atualize a conexão com o Discord.";

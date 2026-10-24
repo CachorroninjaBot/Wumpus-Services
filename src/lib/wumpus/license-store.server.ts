@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { PlanId } from "./catalog.ts";
+import { isDatabaseConfigured, mutatePersistentState, readPersistentState } from "./database.server.ts";
 
 export type GuildLicense = {
   status: "active" | "inactive";
@@ -22,6 +23,13 @@ function licensePath(): string {
 }
 
 export async function readGuildLicenses(): Promise<LicenseFile> {
+  if (isDatabaseConfigured()) {
+    const parsed = await readPersistentState<Partial<LicenseFile>>("guild-licenses");
+    return {
+      updatedAt: Number(parsed?.updatedAt) || 0,
+      byGuild: parsed?.byGuild && typeof parsed.byGuild === "object" ? parsed.byGuild : {},
+    };
+  }
   try {
     const parsed = JSON.parse(await readFile(licensePath(), "utf8")) as Partial<LicenseFile>;
     return {
@@ -33,8 +41,16 @@ export async function readGuildLicenses(): Promise<LicenseFile> {
   }
 }
 
-/** Serialize account syncs from dashboard and bot against the shared file. */
+/** Serialize account syncs from dashboard and bot against shared persistent state. */
 export async function mutateGuildLicenses(mutator: (current: LicenseFile) => LicenseFile | void): Promise<LicenseFile> {
+  if (isDatabaseConfigured()) {
+    return mutatePersistentState<LicenseFile>(
+      "guild-licenses",
+      () => ({ updatedAt: 0, byGuild: {} }),
+      mutator,
+    );
+  }
+
   const next = writes.then(async () => {
     const current = await readGuildLicenses();
     const updated = mutator(current) ?? current;

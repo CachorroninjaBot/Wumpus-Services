@@ -1,16 +1,22 @@
 /**
- * Acesso ao arquivo de runtime — SERVER-ONLY.
+ * Acesso ao estado de runtime — SERVER-ONLY.
  *
  * O sufixo `.server.ts` e a convencao do TanStack Start para modulo que so
  * pode rodar no servidor: o import-protection do build recusa que qualquer
- * codigo de cliente chegue aqui. Isso importa porque este arquivo usa
- * `node:fs`, que nao existe no navegador.
+ * codigo de cliente chegue aqui. O PostgreSQL e o armazenamento de producao;
+ * arquivos JSON permanecem apenas como compatibilidade para desenvolvimento.
  *
  * O painel publica aqui; o bot (outro processo) le o mesmo arquivo.
  */
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  isDatabaseConfigured,
+  mutatePersistentState,
+  readPersistentState,
+  writePersistentState,
+} from "./database.server.ts";
 
 export type RuntimeGuild = {
   name?: string;
@@ -227,26 +233,38 @@ export function runtimePath(): string {
   return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
 }
 
+function emptyRuntime(): RuntimeFile {
+  return { updatedAt: 0, guilds: {}, serverGroups: [], articles: {}, outbox: [] };
+}
+
+function normalizeRuntime(parsed: Partial<RuntimeFile> | null): RuntimeFile {
+  return {
+    updatedAt: Number(parsed?.updatedAt) || 0,
+    guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {},
+    serverGroups: Array.isArray(parsed?.serverGroups) ? parsed.serverGroups : [],
+    articles: parsed?.articles && typeof parsed.articles === "object" ? parsed.articles : {},
+    outbox: Array.isArray(parsed?.outbox) ? parsed.outbox : [],
+  };
+}
+
 export async function readRuntime(): Promise<RuntimeFile> {
+  if (isDatabaseConfigured()) {
+    return normalizeRuntime(await readPersistentState<Partial<RuntimeFile>>("runtime"));
+  }
   try {
-    const raw = await readFile(runtimePath(), "utf8");
-    const parsed = JSON.parse(raw) as Partial<RuntimeFile>;
-    return {
-      updatedAt: Number(parsed?.updatedAt) || 0,
-      guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {},
-      serverGroups: Array.isArray(parsed?.serverGroups) ? parsed.serverGroups : [],
-      articles: parsed?.articles && typeof parsed.articles === "object" ? parsed.articles : {},
-      outbox: Array.isArray(parsed?.outbox) ? parsed.outbox : [],
-    };
+    return normalizeRuntime(JSON.parse(await readFile(runtimePath(), "utf8")) as Partial<RuntimeFile>);
   } catch {
-    return { updatedAt: 0, guilds: {}, serverGroups: [], articles: {}, outbox: [] };
+    return emptyRuntime();
   }
 }
 
-/** Bot collections shared on disk; malformed or missing files return empty lists. */
+/** Coleções do bot; o modo local sem banco continua usando arquivos JSON. */
 export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status" | "support-chats" | "assistant-chats" | "staff-rosters";
 
 export async function readBotCollection<T>(name: BotCollectionName): Promise<T[]> {
+  if (isDatabaseConfigured()) {
+    return (await readPersistentState<T[]>(`bot-collection:${name}`)) ?? [];
+  }
   try {
     const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
     const parsed: unknown = JSON.parse(await readFile(join(directory, `${name}.json`), "utf8"));
@@ -257,6 +275,10 @@ export async function readBotCollection<T>(name: BotCollectionName): Promise<T[]
 }
 
 export async function writeBotCollection<T>(name: BotCollectionName, rows: T[]): Promise<void> {
+  if (isDatabaseConfigured()) {
+    await writePersistentState(`bot-collection:${name}`, rows);
+    return;
+  }
   const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
   await mkdir(directory, { recursive: true });
   const path = join(directory, `${name}.json`);
@@ -269,6 +291,9 @@ export async function updateBotCollection<T>(
   name: BotCollectionName,
   update: (rows: T[]) => T[],
 ): Promise<T[]> {
+  if (isDatabaseConfigured()) {
+    return mutatePersistentState(`bot-collection:${name}`, () => [], update);
+  }
   const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
   await mkdir(directory, { recursive: true });
   const path = join(directory, `${name}.json`);
@@ -310,6 +335,20 @@ export async function updateBotCollection<T>(
   }
 }
 
+export async function mutateRuntime(update: (current: RuntimeFile) => RuntimeFile | void): Promise<RuntimeFile> {
+  if (isDatabaseConfigured()) {
+    return mutatePersistentState<RuntimeFile>("runtime", emptyRuntime, (current) => {
+      const normalized = normalizeRuntime(current);
+      const next = update(normalized) ?? normalized;
+      return normalizeRuntime(next);
+    });
+  }
+  const current = await readRuntime();
+  const next = update(current) ?? current;
+  await writeRuntime(next);
+  return next;
+}
+
 /**
  * Enfileira um pedido de publicacao.
  *
@@ -318,14 +357,17 @@ export async function updateBotCollection<T>(
  * pendentes mais velhos.
  */
 export async function enqueueOutbox(job: OutboxJob): Promise<void> {
-  const current = await readRuntime();
-  const fila = [...(current.outbox ?? []), job];
-  current.outbox = fila.slice(-100);
-  current.updatedAt = Date.now();
-  await writeRuntime(current);
+  await mutateRuntime((current) => {
+    current.outbox = [...(current.outbox ?? []), job].slice(-100);
+    current.updatedAt = Date.now();
+  });
 }
 
 export async function writeRuntime(next: RuntimeFile): Promise<void> {
+  if (isDatabaseConfigured()) {
+    await writePersistentState("runtime", normalizeRuntime(next));
+    return;
+  }
   const path = runtimePath();
   await mkdir(dirname(path), { recursive: true });
 

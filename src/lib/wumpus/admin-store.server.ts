@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { PlanId } from "./catalog";
 import type { SessionGuild } from "./session-token";
+import { isDatabaseConfigured, mutatePersistentState, readPersistentState } from "./database.server.ts";
 
 export type DashboardMemberRecord = {
   id: string;
@@ -137,6 +138,11 @@ function parseState(value: unknown): DashboardAdminState {
 
 async function readState(force = false): Promise<DashboardAdminState> {
   if (!force && cache && Date.now() - cache.at < CACHE_MS) return structuredClone(cache.state);
+  if (isDatabaseConfigured()) {
+    const state = parseState((await readPersistentState<unknown>("dashboard-admin")) ?? emptyState());
+    cache = { state, at: Date.now() };
+    return structuredClone(state);
+  }
   try {
     const state = parseState(JSON.parse(await readFile(storePath(), "utf8")) as unknown);
     cache = { state, at: Date.now() };
@@ -166,6 +172,23 @@ async function persist(state: DashboardAdminState): Promise<void> {
 }
 
 async function mutateState<T>(fn: (state: DashboardAdminState) => T): Promise<T> {
+  if (isDatabaseConfigured()) {
+    let result!: T;
+    let committedState!: DashboardAdminState;
+    await mutatePersistentState<DashboardAdminState>(
+      "dashboard-admin",
+      emptyState,
+      (current) => {
+        const state = parseState(current);
+        result = fn(state);
+        committedState = state;
+        return state;
+      },
+    );
+    cache = { state: committedState, at: Date.now() };
+    return result;
+  }
+
   const next = writes.then(async () => {
     const state = await readState(true);
     const result = fn(state);

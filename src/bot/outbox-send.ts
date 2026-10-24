@@ -5,8 +5,6 @@
  * nao conseguem carregar. A decisao (o que esta pendente, o que fazer com o
  * resultado) e pura e vive no outro arquivo.
  */
-import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import type { Guild, GuildMember } from "discord.js";
 import { pendingJobs, pruneOutbox, settleActionJob, settleJob } from "./outbox.ts";
 import { buildPanelPayload } from "./panels.ts";
@@ -24,7 +22,9 @@ import {
 import { asSendable, resolveChannel } from "./resolve.ts";
 import type { Logger } from "./logger.ts";
 import {
+  mutateRuntime,
   readBotCollection,
+  readRuntime,
   updateBotCollection,
   type BotStaffRosterSnapshot,
   type OutboxJob,
@@ -41,56 +41,19 @@ import {
   setSupportMessageDelivery,
 } from "./human-support.ts";
 
-function runtimePath(): string {
-  return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
-}
-
-let runtimeCache: { signature: string; snapshot: RuntimeFile } | null = null;
-let runtimeReadPending: Promise<RuntimeFile> | null = null;
-
-/** Le o runtime do disco. O bot nao compartilha memoria com o painel. */
+/** Lê o estado compartilhado entre dashboard e bot. */
 export async function readRuntimeFile(): Promise<RuntimeFile> {
-  if (runtimeReadPending) return runtimeReadPending;
-
-  const path = runtimePath();
-  try {
-    const details = await stat(path, { bigint: true });
-    const signature = `${details.dev}:${details.ino}:${details.size}:${details.mtimeNs}`;
-    if (runtimeCache?.signature === signature) return runtimeCache.snapshot;
-    const pending = (async () => {
-      const raw = await readFile(path, "utf8");
-      const parsed = JSON.parse(raw) as Partial<RuntimeFile>;
-      const snapshot = {
-        updatedAt: Number(parsed?.updatedAt) || 0,
-        guilds: parsed?.guilds && typeof parsed.guilds === "object" ? parsed.guilds : {},
-        articles: parsed?.articles && typeof parsed.articles === "object" ? parsed.articles : {},
-        outbox: Array.isArray(parsed?.outbox) ? parsed.outbox : [],
-      };
-      const finalStat = await stat(path, { bigint: true });
-      runtimeCache = {
-        signature: `${finalStat.dev}:${finalStat.ino}:${finalStat.size}:${finalStat.mtimeNs}`,
-        snapshot,
-      };
-      return snapshot;
-    })();
-    runtimeReadPending = pending;
-    try {
-      return await pending;
-    } finally {
-      if (runtimeReadPending === pending) runtimeReadPending = null;
-    }
-  } catch {
-    return { updatedAt: 0, guilds: {}, articles: {}, outbox: [] };
-  }
+  return readRuntime();
 }
 
-async function writeRuntimeFile(next: RuntimeFile): Promise<void> {
-  const path = runtimePath();
-  await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
-  await writeFile(tmp, JSON.stringify(next, null, 2));
-  await rename(tmp, path);
-  runtimeCache = null;
+async function persistOutboxChanges(processed: OutboxJob[]): Promise<void> {
+  const processedById = new Map(processed.map((job) => [job.id, job]));
+  await mutateRuntime((runtime) => {
+    runtime.outbox = pruneOutbox(
+      (runtime.outbox ?? []).map((job) => processedById.get(job.id) ?? job),
+    );
+    runtime.updatedAt = Date.now();
+  });
 }
 
 /**
@@ -342,7 +305,7 @@ export async function syncStaffRosterMember(
 /**
  * Processa a fila de um servidor.
  *
- * Devolve quantos pedidos tratou. Cada resultado e gravado de volta no arquivo,
+ * Devolve quantos pedidos tratou. Cada resultado e gravado de volta no estado
  * para o painel poder mostrar "publicado em #canal" ou o erro — em vez do
  * "publicado" falso que existia antes.
  */
@@ -368,18 +331,7 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
         await setSupportMessageDelivery(job.supportChatId, job.supportMessageId, "failed");
       }
     }
-    const latestRuntime = await readRuntimeFile();
-    const latestJobs = latestRuntime.outbox ?? [];
-    const latestJobIds = new Set(latestJobs.map((job) => job.id));
-    const mergedOutbox = [
-      ...latestJobs.map((job) => outbox.find((processed) => processed.id === job.id) ?? job),
-      ...outbox.filter((job) => !latestJobIds.has(job.id)),
-    ];
-    await writeRuntimeFile({
-      ...latestRuntime,
-      outbox: pruneOutbox(mergedOutbox),
-      updatedAt: Date.now(),
-    });
+    await persistOutboxChanges(outbox);
     return pending.length;
   }
 
@@ -468,7 +420,7 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
     }
   }
 
-  await writeRuntimeFile({ ...runtime, outbox: pruneOutbox(outbox), updatedAt: Date.now() });
+  await persistOutboxChanges(outbox);
   return pending.length;
 }
 

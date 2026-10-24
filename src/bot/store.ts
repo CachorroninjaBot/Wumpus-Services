@@ -1,20 +1,19 @@
 /**
- * Persistencia do bot — colecoes em JSON, com escrita serializada.
+ * Persistência das coleções do bot.
  *
  * O bot antigo guardava tickets abertos e contadores de anti-raid em `Map()`,
  * ou seja: tudo sumia a cada restart, e `maxOpenPerUser` virava ficcao depois
  * do primeiro deploy. Aqui o estado sobrevive ao processo.
  *
- * Cada colecao e um arquivo em `data/`. A escrita e serializada por colecao e
- * usa troca atomica (grava `.tmp` e renomeia), entao um crash no meio nao deixa
- * arquivo pela metade, e dois eventos simultaneos nao se sobrescrevem.
+ * Em produção, cada coleção é armazenada no PostgreSQL e as alterações usam
+ * transações com lock por coleção. Sem DATABASE_URL, o modo local usa arquivos.
  *
- * Seam para Postgres: este arquivo e o UNICO ponto que toca disco. Migrar para
- * SQL significa reimplementar so estas funcoes — nenhum handler muda.
+ * JSON permanece apenas como fallback de desenvolvimento sem DATABASE_URL.
  */
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { isDatabaseConfigured, mutatePersistentState, readPersistentState } from "../lib/wumpus/database.server.ts";
 
 const DIR = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
 
@@ -33,6 +32,10 @@ function fileFor(name: string): string {
 
 /** Le uma colecao. Arquivo ausente ou corrompido vale como lista vazia. */
 export async function read<T>(name: string): Promise<T[]> {
+  if (isDatabaseConfigured()) {
+    return (await readPersistentState<T[]>(`bot-collection:${name}`)) ?? [];
+  }
+
   const cached = memory.get(name);
   if (cached) return cached as T[];
 
@@ -74,6 +77,10 @@ async function persist(name: string, rows: unknown[]): Promise<void> {
  * O callback recebe as linhas atuais e devolve as novas (ou muta no lugar).
  */
 export async function mutate<T>(name: string, fn: (rows: T[]) => T[] | void): Promise<T[]> {
+  if (isDatabaseConfigured()) {
+    return mutatePersistentState(`bot-collection:${name}`, () => [], fn);
+  }
+
   const previous = queues.get(name) ?? Promise.resolve();
 
   const next = previous.then(async () => {

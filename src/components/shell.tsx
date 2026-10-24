@@ -303,7 +303,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <h1 className="mb-2 mt-6 text-2xl font-semibold">Vamos preparar seu servidor</h1>
           <p className="mb-6 mt-0 text-sm leading-6 text-muted-foreground">
             {isOwner
-              ? "Seu acesso de dono da plataforma está ativo. O Wumpus precisa estar online em um servidor que sua conta administra e enviar um heartbeat recente (até 90 segundos). Se ele já está online, confira se o bot e o painel compartilham o volume de saúde (WUMPUS_HEALTH_PATH); depois atualize a conexão com o Discord."
+              ? "Seu acesso de dono da plataforma está ativo. O Wumpus precisa estar online em um servidor que sua conta administra e enviar um heartbeat recente (até 90 segundos). Se ele já está online, confira se o bot e o painel usam o mesmo PostgreSQL (DATABASE_URL); depois atualize a conexão com o Discord."
               : "O Wumpus detecta os servidores que você possui e onde o bot está instalado. Escolha abaixo quais quer gerenciar; a quantidade permitida depende do seu plano."}
           </p>
           <a href={brand.invite} target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
@@ -330,12 +330,12 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   <dl className="mb-0 mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
                     <dt className="text-muted-foreground">Servidores administráveis</dt>
                     <dd className="m-0 text-right font-medium">{diagnostics.manageableGuildCount}</dd>
-                    <dt className="text-muted-foreground">Arquivo de saúde</dt>
+                    <dt className="text-muted-foreground">Heartbeat do bot</dt>
                     <dd className="m-0 text-right font-medium">
                       {diagnostics.healthState === "available" ? "Encontrado e válido" : diagnostics.healthState === "missing" ? "Não encontrado" : diagnostics.healthState === "invalid" ? "Inválido" : "Sem permissão de leitura"}
                     </dd>
-                    <dt className="text-muted-foreground">Origem do caminho</dt>
-                    <dd className="m-0 text-right font-medium">{diagnostics.healthPathSource === "configured" ? "WUMPUS_HEALTH_PATH" : "Padrão"}</dd>
+                    <dt className="text-muted-foreground">Fonte do heartbeat</dt>
+                    <dd className="m-0 text-right font-medium">{diagnostics.healthPathSource === "database" ? "PostgreSQL via DATABASE_URL" : diagnostics.healthPathSource === "configured" ? "WUMPUS_HEALTH_PATH" : "Arquivo padrão"}</dd>
                     <dt className="text-muted-foreground">Estado do bot</dt>
                     <dd className="m-0 text-right font-medium">{diagnostics.healthStatus === "online" ? "Online" : diagnostics.healthStatus === "offline" ? "Offline" : "Sem registro"}</dd>
                     <dt className="text-muted-foreground">Último heartbeat</dt>
@@ -346,7 +346,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                     <dd className="m-0 text-right font-medium">{diagnostics.matchingGuildCount}</dd>
                   </dl>
                   <p className="mb-0 mt-4 break-all rounded-lg bg-background/70 px-3 py-2 text-xs text-muted-foreground">
-                    Arquivo lido pelo painel: {diagnostics.healthPath}
+                    Armazenamento consultado: {diagnostics.healthPath}
                   </p>
                   <p className="mb-0 mt-2 text-xs text-muted-foreground">Identificador: <code>{diagnostics.issue}</code></p>
                   {diagnostics.errorCode ? <p className="mb-0 mt-2 text-xs text-destructive">Código técnico: {diagnostics.errorCode}</p> : null}

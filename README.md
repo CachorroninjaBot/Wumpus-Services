@@ -12,9 +12,8 @@ Painel da comunidade e vitrine dos planos WumPlus. A cobrança e o catálogo vê
 | Vitalício | Pagamento único, mesmo acesso do Escala. |
 
 Os limites de servidor e recursos são revalidados pelo bot na ShardPay a cada
-5 minutos. Dashboard e bot precisam compartilhar `data/wumpus-entitlements.json`
-(ou o caminho definido em `WUMPUS_LICENSE_PATH`) para aplicar a licença. Uma
-instalação nova tem 15 minutos para ser ativada pela conta proprietária.
+5 minutos. Dashboard e bot compartilham o estado de licenças pelo PostgreSQL.
+Uma instalação nova tem 15 minutos para ser ativada pela conta proprietária.
 Como a consulta MCP atual da ShardPay lista assinaturas recorrentes, compradores
 Vitalício precisam ser verificados na loja e incluídos em
 `WUMPUS_LIFETIME_DISCORD_IDS` (IDs Discord separados por vírgula). O Vitalício
@@ -28,6 +27,27 @@ SHARDPAY_API_KEY=sua_chave npm run dev
 ```
 
 A chave nunca entra no repositório. Sem ela o painel mostra a vitrine salva dos quatro planos.
+
+## Persistência PostgreSQL
+
+Em produção, dashboard e bot usam o mesmo PostgreSQL configurado em
+`DATABASE_URL`. Cadastre a URL como segredo no provedor de hospedagem; localmente,
+use o `.env` (ignorado pelo Git). Não coloque credenciais em código, logs ou
+arquivos versionados. Se uma senha de banco foi compartilhada em chat, rotacione-a
+antes de configurar a nova credencial.
+
+Antes de iniciar o serviço pela primeira vez, execute `npm run db:migrate`.
+As migrações criam o armazenamento compartilhado e importam automaticamente,
+uma única vez, os arquivos JSON legados presentes em `data/` e nos caminhos
+customizados correspondentes. A importação não sobrescreve registros já
+existentes no banco e não apaga os arquivos de origem; mantenha-os como backup
+até confirmar a implantação. Em produção, o serviço não inicia sem `DATABASE_URL`.
+
+Tickets e mensagens, formulários, auditoria, estatísticas, uso de OCR, estado
+de segurança, configurações por servidor, grupos, artigos, fila de publicação,
+saúde do bot, licenças, sessões, contas e concessões administrativas passam a
+ser compartilhados pelo PostgreSQL. O tema e a ordem visual dos servidores são
+preferências locais do navegador, não dados operacionais da comunidade.
 
 ## Sessões e administração
 
@@ -44,14 +64,10 @@ válida é restaurada automaticamente; ela dura até 30 dias, com expiração ap
 Se o dono não encontrar servidores, a tela de preparação mostra o estado do
 heartbeat e registra uma entrada `[owner-guild-diagnostics]` nos logs do servidor.
 
-As contas, sessões, auditoria e concessões manuais são salvas no arquivo definido por
-`WUMPUS_MEMBERS_PATH` (padrão `data/wumpus-dashboard-members.json`). O bot
-precisa ler o mesmo arquivo para aplicar concessões e revogações; o sync de
-licenças ocorre no ciclo do bot. O snapshot dos servidores autorizados também
-fica nessa sessão no servidor, não no cookie do navegador. Use volume persistente
-acessível pelos dois processos. Se a dashboard rodar em várias instâncias, migre
-esse estado para um banco de dados compartilhado para evitar gravações concorrentes
-no arquivo.
+As contas, sessões, auditoria, concessões manuais, seleções de servidores e
+licenças são guardadas no banco compartilhado; o snapshot de servidores
+autorizados não fica no cookie do navegador. O bot e a dashboard devem usar a
+mesma `DATABASE_URL` para aplicar revogações e alterações de plano.
 
 ## Discord Activity
 

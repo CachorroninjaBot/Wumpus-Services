@@ -1,19 +1,19 @@
 /**
  * Ponte painel -> bot.
  *
- * O bot roda em outro processo e le `data/wumpus-runtime.json`. Estas server
- * functions sao o unico caminho pelo qual o painel escreve esse arquivo.
+ * O bot roda em outro processo e lê o estado compartilhado. Estas server
+ * functions gravam configurações e ações no PostgreSQL em produção.
  *
  * Estavam definidas e sem nenhum chamador: o painel salvava so no localStorage
  * e o bot nunca via configuracao alguma. Era isso que tornava todo campo da
  * dashboard decorativo.
  *
- * O acesso a disco vive em `runtime.server.ts` (server-only); aqui ficam apenas
+ * O acesso ao armazenamento vive em `runtime.server.ts` (server-only); aqui ficam apenas
  * os wrappers chamaveis pelo cliente.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { enqueueOutbox, readBotCollection, readRuntime, writeBotCollection, writeRuntime, type BotFormRecord, type BotStaffRosterSnapshot, type BotTicketMessage, type BotTicketRecord, type KnowledgeFaqSuggestion, type OutboxJob } from "./runtime.server";
+import { enqueueOutbox, mutateRuntime, readBotCollection, readRuntime, updateBotCollection, type BotFormRecord, type BotStaffRosterSnapshot, type BotTicketMessage, type BotTicketRecord, type KnowledgeFaqSuggestion, type OutboxJob } from "./runtime.server";
 import { requireGuildAccess } from "./session-access.server";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
@@ -177,13 +177,13 @@ export const saveServerGroups = createServerFn({ method: "POST" })
       if (!group.guildIds.includes(data.guildId)) throw new Error("Cada grupo precisa incluir o servidor atual.");
       for (const guildId of group.guildIds) await requireGuildAccess(data.token, guildId);
     }
-    const runtime = await readRuntime();
-    runtime.serverGroups = [
-      ...(runtime.serverGroups ?? []).filter((group) => !group.guildIds.includes(data.guildId)),
-      ...data.groups.map((group) => ({ ...group, guildIds: [...new Set(group.guildIds)] })),
-    ];
-    runtime.updatedAt = Date.now();
-    await writeRuntime(runtime);
+    await mutateRuntime((runtime) => {
+      runtime.serverGroups = [
+        ...(runtime.serverGroups ?? []).filter((group) => !group.guildIds.includes(data.guildId)),
+        ...data.groups.map((group) => ({ ...group, guildIds: [...new Set(group.guildIds)] })),
+      ];
+      runtime.updatedAt = Date.now();
+    });
     return { ok: true as const };
   });
 
@@ -196,7 +196,7 @@ export const getGuildKnowledgeFaqSuggestions = createServerFn({ method: "POST" }
     await requireGuildAccess(data.token, data.guildId);
     const [suggestions, statusRows] = await Promise.all([
       readBotCollection<KnowledgeFaqSuggestion>("knowledge-suggestions"),
-      readBotCollection<{ id: string; guildId: string; status: "dismissed" | "converted" }>("knowledge-suggestion-status")
+      readBotCollection<{ id: string; guildId: string; status: "dismissed" | "converted" }>("knowledge-suggestion-status"),
     ]);
     const statuses = new Map(statusRows.map((row) => [`${row.guildId}:${row.id}`, row.status]));
     return suggestions
@@ -214,20 +214,19 @@ export const updateGuildKnowledgeFaqSuggestion = createServerFn({ method: "POST"
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
-    const [suggestions, statusRows] = await Promise.all([
-      readBotCollection<KnowledgeFaqSuggestion>("knowledge-suggestions"),
-      readBotCollection<{ id: string; guildId: string; status: "dismissed" | "converted" }>("knowledge-suggestion-status")
-    ]);
+    const suggestions = await readBotCollection<KnowledgeFaqSuggestion>("knowledge-suggestions");
     const exists = suggestions.some((suggestion) =>
       suggestion.id === data.suggestionId &&
       suggestion.guildId === data.guildId
     );
     if (!exists) throw new Error("A sugestão de FAQ não existe mais.");
-    const index = statusRows.findIndex((row) => row.id === data.suggestionId && row.guildId === data.guildId);
-    if (index >= 0) throw new Error("A sugestão de FAQ já foi resolvida.");
     const statusRow = { id: data.suggestionId, guildId: data.guildId, status: data.status };
-    statusRows.push(statusRow);
-    await writeBotCollection("knowledge-suggestion-status", statusRows);
+    await updateBotCollection<{ id: string; guildId: string; status: "dismissed" | "converted" }>("knowledge-suggestion-status", (rows) => {
+      if (rows.some((row) => row.id === data.suggestionId && row.guildId === data.guildId)) {
+        throw new Error("A sugestão de FAQ já foi resolvida.");
+      }
+      return [...rows, statusRow];
+    });
     return { ok: true as const };
   });
 
@@ -247,7 +246,6 @@ export const publishGuildRuntime = createServerFn({ method: "POST" })
   .validator((input: unknown) => publishInputSchema.parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildAccess(data.token, data.guildId);
-    const current = await readRuntime();
     const plan = session.entitlements.plan;
     const modules = structuredClone(data.modules);
 
@@ -265,22 +263,21 @@ export const publishGuildRuntime = createServerFn({ method: "POST" })
       modules.integrations.allowIncoming = false;
     }
 
-    current.guilds[data.guildId] = {
-      ...current.guilds[data.guildId],
-      ...modules,
-      ...(data.name ? { name: data.name } : {}),
-    };
+    const updatedAt = Date.now();
+    await mutateRuntime((current) => {
+      current.guilds[data.guildId] = {
+        ...current.guilds[data.guildId],
+        ...modules,
+        ...(data.name ? { name: data.name } : {}),
+      };
 
-    // Os artigos viajam junto: sem eles o modulo de conhecimento nao teria o
-    // que buscar, e cairia no mesmo defeito de leitor sem escritor.
-    if (data.articles) {
-      current.articles = { ...current.articles, [data.guildId]: data.articles };
-    }
-
-    current.updatedAt = Date.now();
-
-    await writeRuntime(current);
-    return { ok: true as const, updatedAt: current.updatedAt };
+      // Os artigos viajam junto com a configuração do servidor.
+      if (data.articles) {
+        current.articles = { ...current.articles, [data.guildId]: data.articles };
+      }
+      current.updatedAt = updatedAt;
+    });
+    return { ok: true as const, updatedAt };
   });
 
 /**
@@ -291,7 +288,7 @@ export const publishGuildRuntime = createServerFn({ method: "POST" })
  *     TanStack barra no bundle do cliente (so `createServerFn` atravessa);
  *   - `Record<string, unknown>` nao passa no validador de serializacao dele.
  *
- * E nao faz falta: quem le o runtime e o bot, direto do disco. Se um dia o
+ * E nao faz falta: quem le o runtime e o bot, direto do armazenamento. Se um dia o
  * painel precisar, o caminho e declarar um tipo serializavel de verdade.
  */
 
@@ -301,7 +298,7 @@ export const publishGuildRuntime = createServerFn({ method: "POST" })
  * Isto substitui o `publishPanel` antigo, que so escrevia um registro no estado
  * local da dashboard: a tela dizia "publicado" e nada chegava ao Discord.
  *
- * Aqui o pedido vai para o arquivo que o bot le. Quem publica de fato e o bot,
+ * Aqui o pedido vai para o estado que o bot lê. Quem publica de fato e o bot,
  * porque e ele que tem conexao com o gateway — o painel roda em outro processo.
  */
 export const requestPanelPublish = createServerFn({ method: "POST" })

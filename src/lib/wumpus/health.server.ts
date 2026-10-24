@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { isDatabaseConfigured, readPersistentState, writePersistentState } from "./database.server.ts";
 
 export type BotHealthRecord = {
   status: "online" | "offline";
@@ -24,7 +25,7 @@ export type BotHealthRecord = {
 
 export type BotHealthInspection = {
   state: "available" | "missing" | "invalid" | "unreadable";
-  pathSource: "configured" | "default";
+  pathSource: "configured" | "default" | "database";
   record: BotHealthRecord | null;
   errorCode?: string;
 };
@@ -38,6 +39,10 @@ function healthPath(): string {
 }
 
 export async function writeBotHealth(record: BotHealthRecord): Promise<void> {
+  if (isDatabaseConfigured()) {
+    await writePersistentState("bot-health", record);
+    return;
+  }
   const path = healthPath();
   await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.tmp`;
@@ -70,6 +75,15 @@ function parseBotHealth(value: unknown): BotHealthRecord | null {
 export async function inspectBotHealth(): Promise<BotHealthInspection> {
   const path = healthPath();
   const pathSource = configuredHealthPath() ? "configured" : "default";
+  if (isDatabaseConfigured()) {
+    const value = await readPersistentState<unknown>("bot-health");
+    if (value === null) return { state: "missing", pathSource: "database", record: null };
+    const record = parseBotHealth(value);
+    return record
+      ? { state: "available", pathSource: "database", record }
+      : { state: "invalid", pathSource: "database", record: null, errorCode: "INVALID_RECORD" };
+  }
+
   let raw: string;
   try {
     raw = await readFile(path, "utf8");

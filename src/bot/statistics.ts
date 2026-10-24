@@ -5,7 +5,7 @@
  * mensagens/entradas/tickets, canal e hora do digest). O bot nao gravava um
  * unico contador: a aba mostrava so o que o proprio navegador inventava.
  *
- * Contagem por DIA, nao por evento: guardar cada mensagem seria um arquivo sem
+ * Contagem por DIA, nao por evento: guardar cada mensagem aumentaria o armazenamento sem
  * fim. O que a aba precisa e serie temporal, e ela cabe em um registro por dia.
  */
 import type { Guild } from "discord.js";

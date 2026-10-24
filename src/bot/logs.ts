@@ -5,7 +5,7 @@
  * ficava vazia para sempre, e o `/mod` nao deixava rastro de quem puniu quem.
  *
  * Aqui todo evento vira duas coisas:
- *   1. uma linha em `data/audit.json` (historico consultavel, sobrevive a restart)
+ *   1. uma linha na coleção persistente `audit` (histórico consultável, sobrevive a restart)
  *   2. uma mensagem no canal configurado, se a categoria estiver ligada
  *
  * A mensagem e best-effort: canal sem permissao nao pode impedir a punicao de

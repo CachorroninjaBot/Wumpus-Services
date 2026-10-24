@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { isDatabaseConfigured, mutatePersistentState, readPersistentState } from "./database.server.ts";
 
 type ReviewState = { byGuild: Record<string, number[]> };
 const EMPTY: ReviewState = { byGuild: {} };
@@ -11,6 +12,10 @@ function reviewPath() {
 }
 
 async function readState(): Promise<ReviewState> {
+  if (isDatabaseConfigured()) {
+    const state = await readPersistentState<Partial<ReviewState>>("security-reviews");
+    return state?.byGuild && typeof state.byGuild === "object" ? { byGuild: state.byGuild } : { byGuild: {} };
+  }
   try {
     const parsed = JSON.parse(await readFile(reviewPath(), "utf8")) as Partial<ReviewState>;
     return parsed.byGuild && typeof parsed.byGuild === "object" ? { byGuild: parsed.byGuild } : EMPTY;
@@ -26,6 +31,15 @@ export async function readReviewedSecurityEvents(guildId: string): Promise<numbe
 }
 
 export async function markSecurityEventReviewed(guildId: string, eventId: number): Promise<void> {
+  if (isDatabaseConfigured()) {
+    await mutatePersistentState<ReviewState>("security-reviews", () => ({ byGuild: {} }), (state) => {
+      const current = state.byGuild[guildId] ?? [];
+      state.byGuild[guildId] = [...new Set([...current, eventId])].slice(-1000);
+      return state;
+    });
+    return;
+  }
+
   const task = writeQueue.then(async () => {
     const state = await readState();
     const current = state.byGuild[guildId] ?? [];

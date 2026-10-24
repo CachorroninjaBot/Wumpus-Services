@@ -1991,7 +1991,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     })();
   }, SLA_INTERVAL_MS);
 
-  // Poda: auditoria e estatisticas, para os arquivos nao crescerem para sempre.
+  // Poda: auditoria e estatísticas, para as coleções persistentes não crescerem sem limite.
   const pruneTimer = setInterval(() => {
     void (async () => {
       for (const guild of client.guilds.cache.values()) {

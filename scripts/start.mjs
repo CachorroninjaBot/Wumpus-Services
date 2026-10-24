@@ -12,6 +12,10 @@ process.chdir(root);
  */
 const token = process.env.DISCORD_TOKEN || process.env.WUMPUS_DISCORD_TOKEN;
 
+if (process.env.NODE_ENV === "production" && !process.env.DATABASE_URL?.trim()) {
+  throw new Error("DATABASE_URL é obrigatória em produção; configure o PostgreSQL antes de iniciar o Wumpus.");
+}
+
 if (token) {
   const bot = spawn(process.execPath, [join(root, "src", "bot", "index.ts")], {
     stdio: "inherit",

@@ -5,7 +5,7 @@
  * nao onde o Wumpus foi instalado — por isso servidor sem o bot aparecia no
  * painel e "configurava" coisa que ninguem ia ler.
  *
- * A lista e publicada pelo processo do bot no arquivo compartilhado de saúde.
+ * A lista é publicada pelo processo do bot no estado compartilhado de saúde.
  * O token do bot não oferece uma lista de guildas por essa rota OAuth: ela
  * exige um token de usuário com o escopo `guilds`.
  */
