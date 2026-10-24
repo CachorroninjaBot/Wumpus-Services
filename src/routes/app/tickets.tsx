@@ -2,8 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemberAvatar } from "@/components/brand";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
-import { Check, Search } from "lucide-react";
-import { DiscordPanel } from "@/components/discord-panel";
+import { ArrowDown, ArrowUp, Check, Plus, Search, Trash2, WandSparkles } from "lucide-react";
+import { DiscordModalPreview, DiscordPanel } from "@/components/discord-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,7 +16,7 @@ import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wum
 import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
 import { getGuildTicketMessages, getGuildTickets, getTicketActionStatus, requestTicketAction } from "@/lib/wumpus/runtime-store";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
-import type { Ticket, TicketPriority } from "@/lib/wumpus/types";
+import type { Ticket, TicketDepartmentConfig, TicketPriority } from "@/lib/wumpus/types";
 import { cn, formatRelative, formatTime } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -29,6 +29,69 @@ const slaTone: Record<SlaState, "ok" | "warn" | "danger"> = {
 };
 
 type NoticeTone = "neutral" | "success" | "error";
+
+const ticketTemplates: Record<string, { label: string; description: string; config: Partial<Record<string, unknown>> }> = {
+  support: {
+    label: "Suporte geral",
+    description: "Dúvidas, problemas técnicos e denúncias.",
+    config: {
+      panelTitle: "Central de atendimento",
+      panelDescription: "Escolha o assunto e conte à equipe como podemos ajudar.",
+      panelButtonLabel: "Abrir atendimento",
+      panelButtonEmoji: "🎫",
+      departments: ["Suporte", "Denúncia", "Parcerias"],
+      departmentSettings: [
+        { id: "support", name: "Suporte", description: "Dúvidas e problemas técnicos.", emoji: "🛟", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["Como podemos ajudar?"] },
+        { id: "report", name: "Denúncia", description: "Reporte um problema com segurança.", emoji: "⚠️", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["Descreva o que aconteceu."] },
+        { id: "partnership", name: "Parcerias", description: "Fale sobre uma parceria com o servidor.", emoji: "🤝", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["Conte um pouco sobre sua proposta."] },
+      ],
+      maxOpenPerUser: 1,
+      pingStaffOnOpen: true,
+      feedbackEnabled: true,
+      reopenEnabled: true,
+    },
+  },
+  store: {
+    label: "Loja e pedidos",
+    description: "Organiza compras, pagamentos e reembolsos.",
+    config: {
+      panelTitle: "Atendimento da loja",
+      panelDescription: "Selecione o tema do seu pedido para falar com a equipe certa.",
+      panelButtonLabel: "Falar com a loja",
+      panelButtonEmoji: "🛒",
+      departments: ["Compras", "Pagamento", "Reembolso"],
+      departmentSettings: [
+        { id: "purchase", name: "Compras", description: "Dúvidas antes de fazer um pedido.", emoji: "🛍️", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["O que você deseja comprar?"] },
+        { id: "payment", name: "Pagamento", description: "Ajuda com pagamentos e pedidos.", emoji: "💳", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["Conte o que houve com o pagamento."] },
+        { id: "refund", name: "Reembolso", description: "Solicite ajuda com um reembolso.", emoji: "↩️", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["Qual pedido você quer reembolsar?"] },
+      ],
+      maxOpenPerUser: 1,
+      pingStaffOnOpen: true,
+      feedbackEnabled: true,
+    },
+  },
+  community: {
+    label: "Comunidade",
+    description: "Suporte, denúncias, recursos e contato com a equipe.",
+    config: {
+      panelTitle: "Fale com a equipe",
+      panelDescription: "Escolha uma categoria para direcionar sua solicitação.",
+      panelButtonLabel: "Criar ticket",
+      panelButtonEmoji: "💬",
+      departments: ["Ajuda", "Denúncia", "Recurso", "Equipe"],
+      departmentSettings: [
+        { id: "help", name: "Ajuda", description: "Dúvidas sobre o servidor.", emoji: "❓", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["Qual é a sua dúvida?"] },
+        { id: "report", name: "Denúncia", description: "Reporte uma situação à moderação.", emoji: "🚩", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["Descreva a situação e inclua evidências."] },
+        { id: "appeal", name: "Recurso", description: "Peça a revisão de uma decisão.", emoji: "⚖️", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["Qual decisão você gostaria de revisar?"] },
+        { id: "staff", name: "Equipe", description: "Outros assuntos para a equipe.", emoji: "👥", categoryId: "", staffRoleIds: [], inheritStaff: true, welcomeMessage: "", intakeQuestions: ["Como podemos ajudar?"] },
+      ],
+      maxOpenPerUser: 2,
+      pingStaffOnOpen: true,
+      feedbackEnabled: true,
+      reopenEnabled: true,
+    },
+  },
+};
 
 function TicketsPage() {
   const gid = useWumpus((s) => s.activeGuildId);
@@ -46,7 +109,69 @@ function TicketsPage() {
   const articles = useWumpus((s) => s.articles);
   const kcfg = useModule("knowledge");
   const aiAllowed = planAllows(guild.plan, "ai") && Boolean(tcfg.config.aiSupportEnabled);
-  const departments = (planAllows(guild.plan, "multiDepartment") ? asList(tcfg.config.departments) : asList(tcfg.config.departments).slice(0, 1));
+  const canUseDepartments = planAllows(guild.plan, "multiDepartment");
+  const departmentSettings = useMemo<TicketDepartmentConfig[]>(() => {
+    const saved = Array.isArray(tcfg.config.departmentSettings)
+      ? tcfg.config.departmentSettings.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+      : [];
+    const normalized: TicketDepartmentConfig[] = saved.length
+      ? saved.map((item, index) => ({
+          id: asString(item.id, `legacy-${index}`),
+          name: asString(item.name),
+          description: asString(item.description),
+          emoji: asString(item.emoji, "🎫"),
+          categoryId: asString(item.categoryId),
+          staffRoleIds: asList(item.staffRoleIds),
+          inheritStaff: item.inheritStaff !== false,
+          welcomeMessage: asString(item.welcomeMessage),
+          intakeQuestions: asList(item.intakeQuestions),
+        }))
+      : asList(tcfg.config.departments).map((name) => ({
+          id: `legacy-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+          name,
+          description: "",
+          emoji: "🎫",
+          categoryId: "",
+          staffRoleIds: [],
+          inheritStaff: true,
+          welcomeMessage: "",
+          intakeQuestions: [],
+        }));
+    return canUseDepartments ? normalized.slice(0, 25) : normalized.slice(0, 1);
+  }, [canUseDepartments, tcfg.config.departmentSettings, tcfg.config.departments]);
+  const departments = departmentSettings.map((department) => department.name);
+  const departmentNames = departments.map((name) => name.trim().toLocaleLowerCase("pt-BR"));
+  const validDepartmentSettings = departmentSettings.length > 0
+    && departmentSettings.every((department) =>
+      department.name.trim().length > 0
+      && department.name.length <= 100
+      && department.intakeQuestions.length <= 5
+      && department.intakeQuestions.every((question) => question.trim().length > 0 && question.length <= 45)
+    )
+    && new Set(departmentNames).size === departmentNames.length;
+  const [selectedTemplate, setSelectedTemplate] = useState("support");
+  const [templateNotice, setTemplateNotice] = useState("");
+
+  function saveDepartments(next: TicketDepartmentConfig[]) {
+    const limited = canUseDepartments ? next.slice(0, 25) : next.slice(0, 1);
+    updateConfig("tickets", {
+      departments: limited.map((department) => department.name.trim()).filter(Boolean),
+      departmentSettings: limited,
+    });
+  }
+
+  function applyTicketTemplate(templateId: string) {
+    const template = ticketTemplates[templateId];
+    if (!template) return;
+    const presetDepartments = template.config.departmentSettings as TicketDepartmentConfig[];
+    const limitedDepartments = canUseDepartments ? presetDepartments : presetDepartments.slice(0, 1);
+    updateConfig("tickets", {
+      ...template.config,
+      departments: limitedDepartments.map((department) => department.name),
+      departmentSettings: limitedDepartments,
+    });
+    setTemplateNotice(`Modelo “${template.label}” aplicado. Você pode ajustar cada opção antes de publicar.`);
+  }
 
   const [filter, setFilter] = useState<"active" | "closed">("active");
   const [query, setQuery] = useState("");
@@ -544,7 +669,23 @@ function TicketsPage() {
 
         </TabsContent>
         <TabsContent value="panel" className="mt-4 space-y-5">
-          <div><h2 className="m-0 text-xl font-semibold tracking-tight">Prepare o primeiro painel</h2><p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Escolha onde ele aparece e quem atende. O restante pode ficar como está até você precisar.</p></div>
+          <div><h2 className="m-0 text-xl font-semibold tracking-tight">Monte seu sistema de tickets</h2><p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Comece com um modelo e personalize categorias, equipe, canais e regras. As alterações só chegam ao Discord quando você publica o painel.</p></div>
+          <section className="space-y-3 rounded-2xl border border-border bg-card p-4" aria-labelledby="ticket-template-heading">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-56 flex-1">
+                <Label htmlFor="ticket-template">Modelo para começar</Label>
+                <NativeSelect id="ticket-template" className="mt-1.5" value={selectedTemplate} onChange={(event) => { setSelectedTemplate(event.target.value); setTemplateNotice(""); }}>
+                  {Object.entries(ticketTemplates).map(([id, template]) => <option key={id} value={id}>{template.label} — {template.description}</option>)}
+                </NativeSelect>
+              </div>
+              <Button type="button" variant="secondary" onClick={() => applyTicketTemplate(selectedTemplate)}>
+                <WandSparkles aria-hidden="true" className="size-4" />
+                Usar modelo
+              </Button>
+            </div>
+            {templateNotice ? <p role="status" className="m-0 text-sm text-ok">{templateNotice}</p> : null}
+            {!canUseDepartments ? <p className="m-0 text-xs text-muted-foreground">Seu plano permite um tipo de atendimento. Os modelos serão aplicados com uma categoria; os demais recursos continuam editáveis.</p> : null}
+          </section>
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(300px,.82fr)]">
           <div className="min-w-0 space-y-4">
           <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
@@ -564,6 +705,10 @@ function TicketsPage() {
             <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">2</span><div><h3 className="m-0 text-base font-semibold">Dê contexto ao painel</h3><p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p></div></div>
             <Field label="Título do painel"><Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => updateConfig("tickets", { panelTitle: e.target.value })} /></Field>
             <Field label="Descrição do painel"><Textarea maxLength={4000} value={asString(tcfg.config.panelDescription)} onChange={(e) => updateConfig("tickets", { panelDescription: e.target.value })} /></Field>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+              <Field label="Texto do botão"><Input maxLength={80} value={asString(tcfg.config.panelButtonLabel, "Abrir atendimento")} onChange={(e) => updateConfig("tickets", { panelButtonLabel: e.target.value })} placeholder="Abrir atendimento" /></Field>
+              <Field label="Emoji"><Input maxLength={32} value={asString(tcfg.config.panelButtonEmoji, "🎫")} onChange={(e) => updateConfig("tickets", { panelButtonEmoji: e.target.value })} placeholder="🎫" /></Field>
+            </div>
           </div>
           <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
             <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">3</span><div><h3 className="m-0 text-base font-semibold">Escolha quem responde</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Cargos selecionados poderão acessar os canais privados.</p></div></div>
@@ -579,10 +724,10 @@ function TicketsPage() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Máximo de tickets abertos por pessoa">
-                <Input type="number" min={1} max={25} defaultValue={Number(tcfg.config.maxOpenPerUser ?? 1)} onBlur={(e) => updateConfig("tickets", { maxOpenPerUser: Math.max(1, Math.min(25, Number(e.target.value) || 1)) })} />
+                <Input key={String(tcfg.config.maxOpenPerUser ?? 1)} type="number" min={1} max={25} defaultValue={Number(tcfg.config.maxOpenPerUser ?? 1)} onBlur={(e) => updateConfig("tickets", { maxOpenPerUser: Math.max(1, Math.min(25, Number(e.target.value) || 1)) })} />
               </Field>
-              <Field label="Nome do canal · use {user} e {number}">
-                <Input defaultValue={asString(tcfg.config.namingPattern, "atendimento-{user}")} onBlur={(e) => updateConfig("tickets", { namingPattern: e.target.value.trim() || "atendimento-{user}" })} />
+              <Field label="Nome do canal · use {user}, {department} e {number}">
+                <Input key={asString(tcfg.config.namingPattern, "atendimento-{user}")} defaultValue={asString(tcfg.config.namingPattern, "atendimento-{user}")} onBlur={(e) => updateConfig("tickets", { namingPattern: e.target.value.trim() || "atendimento-{user}" })} />
               </Field>
             </div>
             <Field label="Avisar a equipe depois de (minutos; 0 desliga)">
@@ -590,6 +735,7 @@ function TicketsPage() {
                 type="number"
                 min={0}
                 max={10080}
+                key={String(tcfg.config.slaWarningMinutes ?? 60)}
                 defaultValue={Number(tcfg.config.slaWarningMinutes ?? 60)}
                 onBlur={(e) => updateConfig("tickets", { slaWarningMinutes: Math.max(0, Number(e.target.value) || 0) })}
               />
@@ -604,17 +750,161 @@ function TicketsPage() {
                 onCheckedChange={(v) => updateConfig("tickets", { feedbackEnabled: v })}
               />
             </div>
-              <div className="space-y-4">
-                <Field label="Categorias de atendimento (uma por linha)">
-                  <Textarea
-                    rows={3}
-                    defaultValue={departments.join("\n")}
-                    onBlur={(e) => updateConfig("tickets", {
-                      departments: e.target.value.split("\n").map((value) => value.trim()).filter(Boolean),
-                    })}
-                  />
-                  <p className="m-0 text-xs text-muted-foreground">A pessoa escolhe uma categoria ao abrir um ticket. Você pode organizar suporte, denúncias e parcerias em opções claras.</p>
-                </Field>
+              <section className="space-y-3" aria-labelledby="ticket-departments-heading">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 id="ticket-departments-heading" className="m-0 text-sm font-semibold">Tipos de atendimento</h3>
+                    <p className="m-0 mt-1 text-xs text-muted-foreground">Cada tipo pode encaminhar para outra categoria do Discord e outra equipe.</p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={departmentSettings.length >= (canUseDepartments ? 25 : 1)}
+                    onClick={() => saveDepartments([...departmentSettings, {
+                      name: `Novo tipo ${departmentSettings.length + 1}`,
+                      id: `custom-${crypto.randomUUID()}`,
+                      description: "",
+                      emoji: "🎫",
+                      categoryId: "",
+                      staffRoleIds: [],
+                      inheritStaff: true,
+                      welcomeMessage: "",
+                      intakeQuestions: [],
+                    }])}
+                  >
+                    <Plus aria-hidden="true" className="size-4" />
+                    Adicionar tipo
+                  </Button>
+                </div>
+                <div className="divide-y divide-border rounded-xl border border-border px-3">
+                  {departmentSettings.map((department, index) => (
+                    <details key={department.id} className="group py-3" open={index === 0}>
+                      <summary className="flex cursor-pointer list-none items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <span aria-hidden="true">{department.emoji || "🎫"}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{department.name || `Tipo ${index + 1}`}</span>
+                        <span className="text-xs text-muted-foreground">{department.inheritStaff ? "Equipe padrão" : "Equipe própria"}</span>
+                      </summary>
+                      <div className="space-y-3 pb-1 pt-3">
+                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_6rem]">
+                          <Field label="Nome da opção">
+                            <Input maxLength={100} value={department.name} onChange={(event) => {
+                              const next = [...departmentSettings];
+                              next[index] = { ...department, name: event.target.value };
+                              saveDepartments(next);
+                            }} />
+                          </Field>
+                          <Field label="Emoji">
+                            <Input maxLength={32} value={department.emoji} onChange={(event) => {
+                              const next = [...departmentSettings];
+                              next[index] = { ...department, emoji: event.target.value };
+                              saveDepartments(next);
+                            }} />
+                          </Field>
+                        </div>
+                        <Field label="Descrição no menu do Discord">
+                          <Input maxLength={100} value={department.description} onChange={(event) => {
+                            const next = [...departmentSettings];
+                            next[index] = { ...department, description: event.target.value };
+                            saveDepartments(next);
+                          }} placeholder="Explique brevemente quando escolher esta opção" />
+                        </Field>
+                        <Field label="Categoria para criar os tickets">
+                          <DiscordSelect kind="category" value={department.categoryId} onChange={(categoryId) => {
+                            const next = [...departmentSettings];
+                            next[index] = { ...department, categoryId };
+                            saveDepartments(next);
+                          }} placeholder="Usar categoria padrão" />
+                        </Field>
+                        <div className="flex items-start justify-between gap-3 rounded-lg bg-muted/40 p-3">
+                          <div className="min-w-0">
+                            <Label htmlFor={`inherit-staff-${index}`}>Usar cargos da equipe padrão</Label>
+                            <p className="m-0 mt-0.5 text-xs text-muted-foreground">Desative para definir uma equipe exclusiva para esta categoria.</p>
+                          </div>
+                          <Switch id={`inherit-staff-${index}`} checked={department.inheritStaff} onCheckedChange={(inheritStaff) => {
+                            const next = [...departmentSettings];
+                            next[index] = { ...department, inheritStaff };
+                            saveDepartments(next);
+                          }} />
+                        </div>
+                        {!department.inheritStaff ? (
+                          <Field label="Cargos desta equipe">
+                            <DiscordMultiSelect value={department.staffRoleIds} onChange={(staffRoleIds) => {
+                              const next = [...departmentSettings];
+                              next[index] = { ...department, staffRoleIds };
+                              saveDepartments(next);
+                            }} />
+                          </Field>
+                        ) : null}
+                        <Field label="Mensagem de boas-vindas específica">
+                          <Textarea rows={2} maxLength={2000} value={department.welcomeMessage} onChange={(event) => {
+                            const next = [...departmentSettings];
+                            next[index] = { ...department, welcomeMessage: event.target.value };
+                            saveDepartments(next);
+                          }} placeholder="Vazio usa a mensagem padrão do painel" />
+                        </Field>
+                        <Field label="Perguntas antes de abrir (até 5)">
+                          <div className="space-y-2">
+                            {department.intakeQuestions.map((question, questionIndex) => (
+                              <div key={`${department.id}-question-${questionIndex}`} className="flex gap-2">
+                                <Input
+                                  maxLength={45}
+                                  value={question}
+                                  aria-label={`Pergunta ${questionIndex + 1} de ${department.name}`}
+                                  onChange={(event) => {
+                                    const next = [...departmentSettings];
+                                    const intakeQuestions = [...department.intakeQuestions];
+                                    intakeQuestions[questionIndex] = event.target.value;
+                                    next[index] = { ...department, intakeQuestions };
+                                    saveDepartments(next);
+                                  }}
+                                />
+                                <Button type="button" size="icon" variant="ghost" aria-label={`Remover pergunta ${questionIndex + 1}`} onClick={() => {
+                                  const next = [...departmentSettings];
+                                  next[index] = { ...department, intakeQuestions: department.intakeQuestions.filter((_, itemIndex) => itemIndex !== questionIndex) };
+                                  saveDepartments(next);
+                                }}>
+                                  <Trash2 aria-hidden="true" className="size-4" />
+                                </Button>
+                              </div>
+                            ))}
+                            {department.intakeQuestions.length < 5 ? (
+                              <Button type="button" size="sm" variant="outline" onClick={() => {
+                                const next = [...departmentSettings];
+                                next[index] = { ...department, intakeQuestions: [...department.intakeQuestions, "Nova pergunta"] };
+                                saveDepartments(next);
+                              }}>
+                                <Plus aria-hidden="true" className="size-4" />
+                                Adicionar pergunta
+                              </Button>
+                            ) : null}
+                          </div>
+                          <p className="m-0 text-xs text-muted-foreground">A pessoa responde em um formulário do Discord antes da criação do canal. O limite da plataforma é de 5 perguntas por formulário.</p>
+                        </Field>
+                        {departmentSettings.length > 1 ? (
+                          <div className="flex justify-between gap-2">
+                            <div className="flex gap-1">
+                              <Button type="button" size="icon" variant="ghost" aria-label={`Mover ${department.name} para cima`} disabled={index === 0} onClick={() => {
+                                const next = [...departmentSettings];
+                                [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
+                                saveDepartments(next);
+                              }}><ArrowUp aria-hidden="true" className="size-4" /></Button>
+                              <Button type="button" size="icon" variant="ghost" aria-label={`Mover ${department.name} para baixo`} disabled={index === departmentSettings.length - 1} onClick={() => {
+                                const next = [...departmentSettings];
+                                [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
+                                saveDepartments(next);
+                              }}><ArrowDown aria-hidden="true" className="size-4" /></Button>
+                            </div>
+                            <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={() => saveDepartments(departmentSettings.filter((_, itemIndex) => itemIndex !== index))}>
+                              <Trash2 aria-hidden="true" className="size-4" />
+                              Remover tipo
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </details>
+                  ))}
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Canal de transcrições">
                     <DiscordSelect kind="text" value={asString(tcfg.config.transcriptChannelId)} onChange={(transcriptChannelId) => updateConfig("tickets", { transcriptChannelId })} placeholder="Selecione um canal" />
@@ -624,39 +914,40 @@ function TicketsPage() {
                   </Field>
                 </div>
                 <Field label="Apagar mensagens após (dias; 0 mantém sem prazo)">
-                  <Input type="number" min={0} max={3650} defaultValue={Number(tcfg.config.ticketMessageRetentionDays ?? 0)} onBlur={(e) => updateConfig("tickets", { ticketMessageRetentionDays: Math.max(0, Math.min(3650, Number(e.target.value) || 0)) })} />
+                  <Input key={String(tcfg.config.ticketMessageRetentionDays ?? 0)} type="number" min={0} max={3650} defaultValue={Number(tcfg.config.ticketMessageRetentionDays ?? 0)} onBlur={(e) => updateConfig("tickets", { ticketMessageRetentionDays: Math.max(0, Math.min(3650, Number(e.target.value) || 0)) })} />
                   <p className="m-0 text-xs text-muted-foreground">Remove mensagens e transcripts rastreados de tickets encerrados. O resumo permanece para estatísticas; arquivos antigos sem referência não podem ser apagados automaticamente.</p>
                 </Field>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Notificar a equipe</Label><p className="m-0 text-xs text-muted-foreground">Menciona os cargos ao abrir.</p></div><Switch checked={Boolean(tcfg.config.pingStaffOnOpen)} onCheckedChange={(value) => updateConfig("tickets", { pingStaffOnOpen: value })} /></div>
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Permitir reabertura</Label><p className="m-0 text-xs text-muted-foreground">A pessoa pode voltar ao canal.</p></div><Switch checked={Boolean(tcfg.config.reopenEnabled)} onCheckedChange={(value) => updateConfig("tickets", { reopenEnabled: value })} /></div>
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Prioridade</Label><p className="m-0 text-xs text-muted-foreground">A equipe classifica urgência.</p></div><Switch checked={Boolean(tcfg.config.priorityEnabled)} onCheckedChange={(value) => updateConfig("tickets", { priorityEnabled: value })} /></div>
-                  <Field label="Prazo para fechar automaticamente (horas; 0 desliga)"><Input type="number" min={0} max={8760} defaultValue={Number(tcfg.config.closeAfterHours ?? 48)} onBlur={(e) => updateConfig("tickets", { closeAfterHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
-                  <Field label="Prazo de inatividade (horas; 0 desliga)"><Input type="number" min={0} max={8760} defaultValue={Number(tcfg.config.autoCloseInactiveHours ?? 24)} onBlur={(e) => updateConfig("tickets", { autoCloseInactiveHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
+                  <Field label="Prazo para fechar automaticamente (horas; 0 desliga)"><Input key={String(tcfg.config.closeAfterHours ?? 48)} type="number" min={0} max={8760} defaultValue={Number(tcfg.config.closeAfterHours ?? 48)} onBlur={(e) => updateConfig("tickets", { closeAfterHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
+                  <Field label="Prazo de inatividade (horas; 0 desliga)"><Input key={String(tcfg.config.autoCloseInactiveHours ?? 24)} type="number" min={0} max={8760} defaultValue={Number(tcfg.config.autoCloseInactiveHours ?? 24)} onBlur={(e) => updateConfig("tickets", { autoCloseInactiveHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Meta para primeira resposta (minutos)">
-                    <Input type="number" min={5} max={10080} defaultValue={Number(staffConfig.config.responseTimeGoalMinutes ?? 30)} onBlur={(e) => updateConfig("staff", { responseTimeGoalMinutes: Math.max(5, Math.min(10080, Number(e.target.value) || 30)) })} />
+                    <Input key={String(staffConfig.config.responseTimeGoalMinutes ?? 30)} type="number" min={5} max={10080} defaultValue={Number(staffConfig.config.responseTimeGoalMinutes ?? 30)} onBlur={(e) => updateConfig("staff", { responseTimeGoalMinutes: Math.max(5, Math.min(10080, Number(e.target.value) || 30)) })} />
                   </Field>
                   <Field label="Tickets simultâneos por atendente">
-                    <Input type="number" min={1} max={100} defaultValue={Number(staffConfig.config.maxConcurrentTickets ?? 5)} onBlur={(e) => updateConfig("staff", { maxConcurrentTickets: Math.max(1, Math.min(100, Number(e.target.value) || 5)) })} />
+                    <Input key={String(staffConfig.config.maxConcurrentTickets ?? 5)} type="number" min={1} max={100} defaultValue={Number(staffConfig.config.maxConcurrentTickets ?? 5)} onBlur={(e) => updateConfig("staff", { maxConcurrentTickets: Math.max(1, Math.min(100, Number(e.target.value) || 5)) })} />
                   </Field>
                 </div>
                 <Field label="Mensagem de boas-vindas no canal privado">
-                  <Textarea rows={3} defaultValue={asString(tcfg.config.welcomeMessage)} onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })} />
+                  <Textarea key={asString(tcfg.config.welcomeMessage)} rows={3} defaultValue={asString(tcfg.config.welcomeMessage)} onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })} />
                   <p className="m-0 text-xs text-muted-foreground">Enviada automaticamente quando o atendimento é aberto.</p>
                 </Field>
                 <ToggleRow label="IA de apoio à equipe" description="Gera sugestões privadas para os atendentes." checked={Boolean(tcfg.config.aiSupportEnabled)} onChange={(value) => updateConfig("tickets", { aiSupportEnabled: value })} />
                 <ToggleRow label="Incluir conversa nas análises por IA" description="Quando desligado, o conteúdo das mensagens não é enviado à IA." checked={Boolean(tcfg.config.aiIncludeConversation)} onChange={(value) => updateConfig("tickets", { aiIncludeConversation: value })} />
-            </div>
+              </section>
             </div>
           </details>
           <div className="space-y-2 rounded-2xl border border-border p-4">
             <h3 className="m-0 text-base font-semibold">Publicar no Discord</h3>
             <p className="m-0 text-sm text-muted-foreground">A publicação só aparece como concluída depois que o bot confirmar no Discord.</p>
             {!asString(tcfg.config.panelChannelId).trim() ? <p className="m-0 text-sm text-warn">Escolha o canal do painel acima para continuar.</p> : null}
+            {!validDepartmentSettings ? <p role="alert" className="m-0 text-sm text-destructive">Revise os tipos: os nomes devem ser únicos, e cada pergunta precisa ter até 45 caracteres (máximo de 5 por tipo).</p> : null}
                 <Button
-                  disabled={pubBusy || !asString(tcfg.config.panelChannelId).trim()}
+                  disabled={pubBusy || !asString(tcfg.config.panelChannelId).trim() || !validDepartmentSettings}
                   onClick={async () => {
                     setPubBusy(true);
                     setNotice(null);
@@ -681,7 +972,17 @@ function TicketsPage() {
           </div>
           <aside className="min-w-0 space-y-2 xl:sticky xl:top-24 xl:self-start">
             <div><p className="m-0 text-sm font-semibold">Prévia do painel</p><p className="m-0 mt-1 text-xs text-muted-foreground">Amostra das configurações atuais. A confirmação real depende do bot.</p></div>
-            <DiscordPanel channel={asString(tcfg.config.panelChannelId, "abrir-ticket").replace(/^#/, "") || "abrir-ticket"} title={asString(tcfg.config.panelTitle, "Precisa de ajuda?")} description={asString(tcfg.config.panelDescription, "Escolha uma opção para falar com nossa equipe.")} accent={asString(tcfg.config.panelAccentColor, "#28655b")} buttons={departments} />
+            <DiscordPanel
+              channel={asString(tcfg.config.panelChannelId, "abrir-ticket").replace(/^#/, "") || "abrir-ticket"}
+              title={asString(tcfg.config.panelTitle, "Precisa de ajuda?")}
+              description={asString(tcfg.config.panelDescription, "Escolha uma opção para falar com nossa equipe.")}
+              accent={asString(tcfg.config.panelAccentColor, "#28655b")}
+              buttons={[`${asString(tcfg.config.panelButtonEmoji, "🎫")} ${asString(tcfg.config.panelButtonLabel, "Abrir atendimento")}`]}
+              choiceOptions={departmentSettings}
+            />
+            {departmentSettings[0]?.intakeQuestions.length ? (
+              <DiscordModalPreview title={departmentSettings[0].name} questions={departmentSettings[0].intakeQuestions} />
+            ) : null}
           </aside>
           </div>
         </TabsContent>

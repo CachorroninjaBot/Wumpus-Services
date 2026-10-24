@@ -255,12 +255,11 @@ async function promptDepartment(interaction: ButtonInteraction, log: Logger): Pr
   const departments = list(config, "departments").filter(Boolean).slice(0, 25);
 
   if (departments.length <= 1) {
-    await interaction.deferReply({ ephemeral: true });
-    const result = await openTicket(guild, interaction.user.id, departments[0] ?? null, log);
-    await interaction.editReply(result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error);
+    await beginTicketOpen(interaction, departments[0] ?? null, log);
     return;
   }
 
+  const departmentSettings = getTicketDepartmentSettings(config);
   const menu = new StringSelectMenuBuilder()
     .setCustomId(id("ticket", "dept"))
     .setPlaceholder("Escolha o departamento")
@@ -268,9 +267,19 @@ async function promptDepartment(interaction: ButtonInteraction, log: Logger): Pr
     .setMaxValues(1)
     .addOptions(
       departments.map((department) =>
-        new StringSelectMenuOptionBuilder()
+        (() => {
+          const settings = departmentSettings.find((entry) => entry.name === department);
+          const option = new StringSelectMenuOptionBuilder()
           .setLabel(department.slice(0, 100))
-          .setValue(department.slice(0, 100))
+          .setValue(department.slice(0, 100));
+          if (typeof settings?.description === "string" && settings.description.trim()) {
+            option.setDescription(settings.description.trim().slice(0, 100));
+          }
+          if (typeof settings?.emoji === "string" && settings.emoji.trim()) {
+            option.setEmoji(settings.emoji.trim());
+          }
+          return option;
+        })()
       )
     );
 
@@ -279,6 +288,48 @@ async function promptDepartment(interaction: ButtonInteraction, log: Logger): Pr
     ephemeral: true,
     components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)]
   });
+}
+
+function getTicketDepartmentSettings(config: Awaited<ReturnType<typeof moduleConfig>>): Record<string, unknown>[] {
+  return Array.isArray(config?.departmentSettings)
+    ? config.departmentSettings.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    : [];
+}
+
+async function beginTicketOpen(
+  interaction: ButtonInteraction | StringSelectMenuInteraction,
+  department: string | null,
+  log: Logger,
+): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) return;
+  const config = await moduleConfig(guild.id, "tickets");
+  const settings = getTicketDepartmentSettings(config).find((entry) => entry.name === department);
+  const questions = Array.isArray(settings?.intakeQuestions)
+    ? settings.intakeQuestions.filter((question): question is string => typeof question === "string" && Boolean(question.trim())).slice(0, 5)
+    : [];
+
+  if (questions.length && settings && typeof settings.id === "string") {
+    const modal = new ModalBuilder()
+      .setCustomId(id("ticket", "intake_submit", settings.id))
+      .setTitle(`Abrir ticket · ${String(settings.name).slice(0, 25)}`.slice(0, 45));
+    for (const [index, question] of questions.entries()) {
+      const field = new TextInputBuilder()
+        .setCustomId(`q${index}`)
+        .setLabel(question.slice(0, 45))
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setMaxLength(1000)
+        .setPlaceholder("Escreva sua resposta");
+      modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(field));
+    }
+    await interaction.showModal(modal);
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  const result = await openTicket(guild, interaction.user.id, department, log);
+  await interaction.editReply(result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error);
 }
 
 /** Abre o atendimento no departamento escolhido no select. */
@@ -296,12 +347,7 @@ async function handleDepartmentSelect(
   }
 
   const department = interaction.values[0] ?? null;
-
-  await interaction.deferReply({ ephemeral: true });
-  const result = await openTicket(guild, interaction.user.id, department, log);
-  await interaction.editReply(
-    result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error
-  );
+  await beginTicketOpen(interaction, department, log);
 }
 
 async function handleButton(interaction: ButtonInteraction, log: Logger): Promise<void> {
@@ -530,6 +576,35 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
   if (!guild) return;
 
   const { kind, action, args } = parsed;
+
+  if (kind === "ticket" && action === "intake_submit") {
+    const config = await moduleConfig(guild.id, "tickets");
+    const settings = getTicketDepartmentSettings(config).find((entry) => entry.id === args[0]);
+    const questions = Array.isArray(settings?.intakeQuestions)
+      ? settings.intakeQuestions.filter((question): question is string => typeof question === "string" && Boolean(question.trim())).slice(0, 5)
+      : [];
+    if (!settings || typeof settings.name !== "string" || !questions.length) {
+      await interaction.reply({ content: "Este formulário mudou. Volte ao painel e tente abrir o atendimento novamente.", ephemeral: true });
+      return;
+    }
+    const answers = questions.map((question, index) => ({
+      question,
+      answer: interaction.fields.getTextInputValue(`q${index}`).trim(),
+    }));
+    if (answers.some(({ answer }) => !answer)) {
+      await interaction.reply({ content: "Preencha todas as respostas para abrir o atendimento.", ephemeral: true });
+      return;
+    }
+    const maintenance = await maintenanceNotice(guild.id);
+    if (maintenance) {
+      await interaction.reply({ content: maintenance, ephemeral: true });
+      return;
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const result = await openTicket(guild, interaction.user.id, settings.name, log, answers);
+    await interaction.editReply(result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error);
+    return;
+  }
 
   if (kind === "ticket" && action === "close_reason_submit") {
     const ticketId = Number(args[0]);

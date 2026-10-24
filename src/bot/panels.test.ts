@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildLogPayload, buildPanelPayload, hexToInt, IS_COMPONENTS_V2 } from "./panels.ts";
+import { buildLogPayload, buildPanelPayload, defaultButtons, hexToInt, IS_COMPONENTS_V2 } from "./panels.ts";
 
 test("hexToInt converte cor do painel", () => {
   assert.equal(hexToInt("#7c5cff"), 0x7c5cff);
@@ -67,6 +67,18 @@ test("painel com botoes inclui uma action row", () => {
   });
   const children = payload.components[0].components as Array<{ type: number }>;
   assert.ok(children.some((child) => child.type === 1), "esperava uma action row");
+});
+
+test("botao do painel de tickets usa o rótulo e emoji configurados", () => {
+  assert.deepEqual(defaultButtons("tickets", {
+    panelButtonLabel: "Falar com a equipe",
+    panelButtonEmoji: "💬",
+  }), [{
+    label: "Falar com a equipe",
+    customId: "wumpus:v1:ticket:open",
+    style: 1,
+    emoji: "💬",
+  }]);
 });
 
 test("painel limita a 5 botoes por action row", () => {

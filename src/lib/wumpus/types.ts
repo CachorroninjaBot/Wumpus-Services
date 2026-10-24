@@ -49,6 +49,18 @@ export type Member = {
 export type TicketStatus = "open" | "claimed" | "closed" | "archived";
 export type TicketPriority = "low" | "normal" | "high" | "urgent";
 
+export type TicketDepartmentConfig = {
+  id: string;
+  name: string;
+  description: string;
+  emoji: string;
+  categoryId: string;
+  staffRoleIds: string[];
+  inheritStaff: boolean;
+  welcomeMessage: string;
+  intakeQuestions: string[];
+};
+
 export type TicketMessage = {
   id: string;
   authorId: string;

@@ -25,7 +25,7 @@ import { planAllows } from "../lib/wumpus/plan-features.ts";
 import { id } from "./ids.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
-import { buildPanelPayload } from "./panels.ts";
+import { buildPanelPayload, defaultButtons } from "./panels.ts";
 import { resolveChannel, resolveRole, resolveRoles } from "./resolve.ts";
 import { bump } from "./statistics.ts";
 import { mutate, nextId, read } from "./store.ts";
@@ -171,7 +171,8 @@ export async function openTicket(
   guild: Guild,
   userId: string,
   department: string | null,
-  log: Logger
+  log: Logger,
+  intakeAnswers: Array<{ question: string; answer: string }> = [],
 ): Promise<{ ok: true; ticket: Ticket; channelId: string } | { ok: false; error: string }> {
   const config = await moduleConfig(guild.id, "tickets");
   if (!config) return { ok: false, error: "O atendimento ainda nao foi configurado neste servidor." };
@@ -191,19 +192,45 @@ export async function openTicket(
     };
   }
 
-  const staffRoles = resolveRoles(guild, list(config, "staffRoleIds"));
-  const category = resolveChannel(guild, str(config, "categoryId"));
+  const departmentSettings = Array.isArray(config.departmentSettings)
+    ? config.departmentSettings.find((entry) =>
+        entry && typeof entry === "object" && "name" in entry
+        && String((entry as { name?: unknown }).name).trim() === department
+      ) as Record<string, unknown> | undefined
+    : undefined;
+  const departmentStaffIds = Array.isArray(departmentSettings?.staffRoleIds)
+    ? departmentSettings.staffRoleIds.filter((roleId): roleId is string => typeof roleId === "string")
+    : [];
+  const staffRoles = resolveRoles(
+    guild,
+    departmentSettings?.inheritStaff === false ? departmentStaffIds : [...list(config, "staffRoleIds"), ...departmentStaffIds],
+  );
+  const category = resolveChannel(
+    guild,
+    typeof departmentSettings?.categoryId === "string" && departmentSettings.categoryId.trim()
+      ? departmentSettings.categoryId
+      : str(config, "categoryId"),
+  );
 
   const pattern = str(config, "namingPattern", "atendimento-{user}");
   const username = (await guild.client.users.fetch(userId).catch(() => null))?.username ?? "membro";
-  const name = pattern
-    .replace(/\{user\}/g, username)
+  const departmentSlug = (department ?? "atendimento")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
-    .slice(0, 90) || `atendimento-${username}`;
-
+    .replace(/^-|-$/g, "");
   try {
+    const ticketId = await nextId("tickets");
+    const name = pattern
+      .replace(/\{user\}/g, username)
+      .replace(/\{department\}/g, departmentSlug)
+      .replace(/\{number\}/g, String(ticketId))
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .replace(/-+/g, "-")
+      .slice(0, 90) || `atendimento-${username}`;
     const channel = await guild.channels.create({
       name,
       type: ChannelType.GuildText,
@@ -242,13 +269,13 @@ export async function openTicket(
       ]
     });
 
-    const ticketId = await nextId("tickets");
     const now = new Date().toISOString();
     const ticket: Ticket = {
       id: ticketId,
       guildId: guild.id,
       channelId: channel.id,
       openerId: userId,
+      subject: intakeAnswers[0]?.answer.trim().slice(0, 80),
       department,
       status: "open",
       claimedBy: null,
@@ -300,7 +327,32 @@ export async function openTicket(
       ]
     });
 
-    const welcome = str(config, "welcomeMessage");
+    for (const { question, answer } of intakeAnswers.slice(0, 5)) {
+      const content = `**${question.slice(0, 45)}**\n${answer.slice(0, 1000)}`;
+      try {
+        await channel.send({ content, allowedMentions: { parse: [] } });
+        await mutate<TicketMessage>("ticket_messages", (messages) => {
+          messages.push({
+            ticketId,
+            authorId: userId,
+            authorName: "Resposta inicial",
+            content,
+            at: new Date().toISOString(),
+          });
+          return messages;
+        });
+      } catch (error) {
+        log.warn("falha ao registrar resposta inicial do ticket", {
+          guildId: guild.id,
+          ticketId,
+          error: String(error).slice(0, 300),
+        });
+      }
+    }
+
+    const welcome = typeof departmentSettings?.welcomeMessage === "string" && departmentSettings.welcomeMessage.trim()
+      ? departmentSettings.welcomeMessage.trim()
+      : str(config, "welcomeMessage");
     if (welcome) await channel.send({ content: welcome.slice(0, 2000) }).catch(() => undefined);
 
     await auditAndLog(
@@ -965,6 +1017,6 @@ export async function buildTicketPanel(guild: Guild) {
       departments.length ? `\nDepartamentos: ${departments.join(" · ")}` : ""
     ].join(""),
     accentColor: str(config, "panelAccentColor", "#28655b"),
-    buttons: [{ label: "Abrir atendimento", customId: id("ticket", "open"), style: 1, emoji: "🎫" }]
+    buttons: defaultButtons("tickets", config ?? undefined)
   });
 }

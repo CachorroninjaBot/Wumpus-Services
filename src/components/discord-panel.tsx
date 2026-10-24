@@ -8,6 +8,7 @@ export function DiscordPanel({
   description,
   accent = "#28655b",
   buttons,
+  choiceOptions,
   format = "v2",
 }: {
   channel?: string;
@@ -15,6 +16,7 @@ export function DiscordPanel({
   description: string;
   accent?: string;
   buttons: string[];
+  choiceOptions?: Array<{ name: string; description?: string; emoji?: string }>;
   format?: "v2" | "embed";
 }) {
   return (
@@ -53,6 +55,23 @@ export function DiscordPanel({
                       </span>
                     ))}
                   </div>
+                  {choiceOptions?.length ? (
+                    <div className="mt-3 rounded-lg bg-discord-surface p-2.5">
+                      <p className="m-0 mb-2 text-[10px] font-semibold uppercase tracking-wide text-discord-muted">Depois do clique · escolha uma categoria</p>
+                      <div className="space-y-1.5">
+                        {choiceOptions.slice(0, 4).map((option) => (
+                          <div key={option.name} className="flex min-w-0 items-start gap-2 rounded-md bg-discord-surface-deep px-2.5 py-2">
+                            <span aria-hidden="true">{option.emoji || "🎫"}</span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-[11px] font-medium text-discord-text">{option.name}</span>
+                              {option.description ? <span className="block truncate text-[10px] text-discord-muted">{option.description}</span> : null}
+                            </span>
+                          </div>
+                        ))}
+                        {choiceOptions.length > 4 ? <p className="m-0 text-[10px] text-discord-muted">e mais {choiceOptions.length - 4} opções</p> : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div className="discord-embed" style={{ borderLeftColor: accent }}>
@@ -65,6 +84,17 @@ export function DiscordPanel({
                       </span>
                     ))}
                   </div>
+                  {choiceOptions?.length ? (
+                    <div className="mt-3 space-y-1.5 rounded-lg bg-discord-surface px-2.5 py-2">
+                      <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-discord-muted">Seleção de categoria</p>
+                      {choiceOptions.slice(0, 4).map((option) => (
+                        <div key={option.name} className="flex min-w-0 items-start gap-2 rounded-md bg-discord-surface-deep px-2.5 py-2 text-[11px] text-discord-text">
+                          <span aria-hidden="true">{option.emoji || "🎫"}</span>
+                          <span className="min-w-0"><span className="block truncate font-medium">{option.name}</span>{option.description ? <span className="block truncate text-[10px] text-discord-muted">{option.description}</span> : null}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>

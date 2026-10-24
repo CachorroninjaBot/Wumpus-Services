@@ -84,32 +84,87 @@ export const publishInputSchema = z.object({
     ctx.addIssue({ code: "custom", message: "A configuração excede o limite de tamanho." });
   }
   const fields = input.modules.forms?.fields;
-  if (!Array.isArray(fields)) return;
-  const textFields = fields.filter((field) => field && typeof field === "object" && (field as Record<string, unknown>).type !== "select");
-  const selectFields = fields.filter((field) => field && typeof field === "object" && (field as Record<string, unknown>).type === "select");
-  if (fields.length > 10 || textFields.length > 5 || selectFields.length > 5) {
-    ctx.addIssue({ code: "custom", message: "O Discord aceita até 5 perguntas de texto e 5 escolhas por formulário." });
+  if (Array.isArray(fields)) {
+    const textFields = fields.filter((field) => field && typeof field === "object" && (field as Record<string, unknown>).type !== "select");
+    const selectFields = fields.filter((field) => field && typeof field === "object" && (field as Record<string, unknown>).type === "select");
+    if (fields.length > 10 || textFields.length > 5 || selectFields.length > 5) {
+      ctx.addIssue({ code: "custom", message: "O Discord aceita até 5 perguntas de texto e 5 escolhas por formulário." });
+    }
+    fields.forEach((field, index) => {
+      if (!field || typeof field !== "object") return;
+      const row = field as Record<string, unknown>;
+      if (typeof row.label !== "string" || !row.label.trim() || row.label.length > 45) {
+        ctx.addIssue({ code: "custom", message: `A pergunta ${index + 1} precisa ter um rótulo de até 45 caracteres.` });
+      }
+      if (typeof row.placeholder === "string" && row.placeholder.length > 100) {
+        ctx.addIssue({ code: "custom", message: `O exemplo da pergunta ${index + 1} deve ter até 100 caracteres.` });
+      }
+      if (row.type === "select") {
+        const options = Array.isArray(row.options) ? row.options : [];
+        if (options.length < 2 || options.length > 25 || options.some((option) => typeof option !== "string" || option.length > 100)) {
+          ctx.addIssue({ code: "custom", message: `A pergunta ${index + 1} precisa ter de 2 a 25 opções de até 100 caracteres.` });
+        }
+      } else {
+        const minLength = typeof row.minLength === "number" ? row.minLength : 0;
+        const maxLength = typeof row.maxLength === "number" ? row.maxLength : 1000;
+        if (minLength < 0 || minLength > maxLength || maxLength > 4000) {
+          ctx.addIssue({ code: "custom", message: `Confira o tamanho mínimo e máximo da pergunta ${index + 1}.` });
+        }
+      }
+    });
   }
-  fields.forEach((field, index) => {
-    if (!field || typeof field !== "object") return;
-    const row = field as Record<string, unknown>;
-    if (typeof row.label !== "string" || !row.label.trim() || row.label.length > 45) {
-      ctx.addIssue({ code: "custom", message: `A pergunta ${index + 1} precisa ter um rótulo de até 45 caracteres.` });
+
+  const ticketConfig = input.modules.tickets;
+  const departments = ticketConfig?.departmentSettings;
+  if (Array.isArray(departments)) {
+    if (departments.length > 25) {
+      ctx.addIssue({ code: "custom", message: "O Discord aceita até 25 tipos de atendimento por painel." });
     }
-    if (typeof row.placeholder === "string" && row.placeholder.length > 100) {
-      ctx.addIssue({ code: "custom", message: `O exemplo da pergunta ${index + 1} deve ter até 100 caracteres.` });
-    }
-    if (row.type === "select") {
-      const options = Array.isArray(row.options) ? row.options : [];
-      if (options.length < 2 || options.length > 25 || options.some((option) => typeof option !== "string" || option.length > 100)) {
-        ctx.addIssue({ code: "custom", message: `A pergunta ${index + 1} precisa ter de 2 a 25 opções de até 100 caracteres.` });
+    const names = new Set<string>();
+    const ids = new Set<string>();
+    departments.forEach((department, index) => {
+      if (!department || typeof department !== "object" || Array.isArray(department)) return;
+      const item = department as Record<string, unknown>;
+      const id = typeof item.id === "string" ? item.id.trim() : "";
+      if (!id || id.length > 64) {
+        ctx.addIssue({ code: "custom", message: `O tipo de atendimento ${index + 1} precisa de um identificador válido.` });
       }
-    } else {
-      const minLength = typeof row.minLength === "number" ? row.minLength : 0;
-      const maxLength = typeof row.maxLength === "number" ? row.maxLength : 1000;
-      if (minLength < 0 || minLength > maxLength || maxLength > 4000) {
-        ctx.addIssue({ code: "custom", message: `Confira o tamanho mínimo e máximo da pergunta ${index + 1}.` });
+      if (id && ids.has(id)) {
+        ctx.addIssue({ code: "custom", message: `O identificador do tipo de atendimento “${id}” está duplicado.` });
       }
-    }
-  });
+      ids.add(id);
+      const name = typeof item.name === "string" ? item.name.trim() : "";
+      if (!name || name.length > 100) {
+        ctx.addIssue({ code: "custom", message: `O tipo de atendimento ${index + 1} precisa de um nome de até 100 caracteres.` });
+      }
+      const normalizedName = name.toLocaleLowerCase("pt-BR");
+      if (normalizedName && names.has(normalizedName)) {
+        ctx.addIssue({ code: "custom", message: `O tipo de atendimento “${name}” está duplicado.` });
+      }
+      names.add(normalizedName);
+      if (typeof item.description === "string" && item.description.length > 100) {
+        ctx.addIssue({ code: "custom", message: `A descrição de “${name}” deve ter até 100 caracteres.` });
+      }
+      if (typeof item.emoji === "string" && item.emoji.length > 32) {
+        ctx.addIssue({ code: "custom", message: `O emoji de “${name}” deve ter até 32 caracteres.` });
+      }
+      if (typeof item.welcomeMessage === "string" && item.welcomeMessage.length > 2000) {
+        ctx.addIssue({ code: "custom", message: `A mensagem de boas-vindas de “${name}” deve ter até 2.000 caracteres.` });
+      }
+      if (Array.isArray(item.staffRoleIds) && item.staffRoleIds.length > 25) {
+        ctx.addIssue({ code: "custom", message: `“${name}” pode ter no máximo 25 cargos de atendimento.` });
+      }
+      if (Array.isArray(item.intakeQuestions)) {
+        if (item.intakeQuestions.length > 5 || item.intakeQuestions.some((question) => typeof question !== "string" || !question.trim() || question.length > 45)) {
+          ctx.addIssue({ code: "custom", message: `“${name}” pode ter até 5 perguntas, cada uma com rótulo de até 45 caracteres.` });
+        }
+      }
+    });
+  }
+  if (typeof ticketConfig?.panelButtonLabel === "string" && ticketConfig.panelButtonLabel.length > 80) {
+    ctx.addIssue({ code: "custom", message: "O texto do botão de tickets deve ter até 80 caracteres." });
+  }
+  if (typeof ticketConfig?.panelButtonEmoji === "string" && ticketConfig.panelButtonEmoji.length > 32) {
+    ctx.addIssue({ code: "custom", message: "O emoji do botão de tickets deve ter até 32 caracteres." });
+  }
 });

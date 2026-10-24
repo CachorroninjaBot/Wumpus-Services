@@ -154,9 +154,16 @@ export function buildPanelPayload(input: {
  * departamento ou um modal e o handler, nao o botao. Assim um painel ja
  * publicado continua funcionando se a config mudar depois.
  */
-export function defaultButtons(module: string): ButtonSpec[] {
+export function defaultButtons(module: string, config?: Record<string, unknown>): ButtonSpec[] {
   if (module === "tickets") {
-    return [{ label: "Abrir atendimento", customId: id("ticket", "open"), style: 1, emoji: "🎫" }];
+    const label = typeof config?.panelButtonLabel === "string" ? config.panelButtonLabel.trim() : "";
+    const emoji = typeof config?.panelButtonEmoji === "string" ? config.panelButtonEmoji.trim() : "";
+    return [{
+      label: (label || "Abrir atendimento").slice(0, 80),
+      customId: id("ticket", "open"),
+      style: 1,
+      ...(emoji ? { emoji } : { emoji: "🎫" }),
+    }];
   }
   if (module === "forms") {
     return [{ label: "Candidatar-se", customId: id("form", "open"), style: 1, emoji: "📝" }];

@@ -63,3 +63,78 @@ test("recusa estrutura aninhada incompatível com o contrato", () => {
     modules: { forms: { fields: [{ id: "nome", label: "Nome", type: "short" }] } },
   }).success, false);
 });
+
+test("aceita configurações de departamento para canais, cargos e mensagens", () => {
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: {
+      tickets: {
+        panelButtonLabel: "Falar com a equipe",
+        panelButtonEmoji: "🎫",
+        departments: ["Suporte"],
+        departmentSettings: [{
+          id: "support",
+          name: "Suporte",
+          description: "Ajuda com o servidor",
+          emoji: "🛟",
+          categoryId: "suporte",
+          staffRoleIds: ["12345678901234567"],
+          inheritStaff: false,
+          welcomeMessage: "Conte como podemos ajudar.",
+          intakeQuestions: ["Qual é a sua dúvida?"],
+        }],
+      },
+    },
+  }).success, true);
+});
+
+test("recusa mais departamentos configurados do que o Discord suporta", () => {
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: {
+      tickets: {
+        departmentSettings: Array.from({ length: 26 }, (_, index) => ({
+          id: `type-${index}`,
+          name: `Tipo ${index}`,
+          description: "",
+          emoji: "",
+          categoryId: "",
+          staffRoleIds: [],
+          inheritStaff: true,
+          welcomeMessage: "",
+          intakeQuestions: [],
+        })),
+      },
+    },
+  }).success, false);
+});
+
+test("recusa nomes repetidos e perguntas incompatíveis com o modal do Discord", () => {
+  const department = {
+    id: "support",
+    name: "Suporte",
+    description: "",
+    emoji: "🎫",
+    categoryId: "",
+    staffRoleIds: [],
+    inheritStaff: true,
+    welcomeMessage: "",
+    intakeQuestions: ["Pergunta válida"],
+  };
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: { tickets: { departmentSettings: [department, { ...department, id: "support-copy" }] } },
+  }).success, false);
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: { tickets: { departmentSettings: [department, { ...department, name: "Compras" }] } },
+  }).success, false);
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: { tickets: { departmentSettings: [{ ...department, intakeQuestions: [""] }] } },
+  }).success, false);
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: { tickets: { departmentSettings: [{ ...department, intakeQuestions: ["x".repeat(46)] }] } },
+  }).success, false);
+});

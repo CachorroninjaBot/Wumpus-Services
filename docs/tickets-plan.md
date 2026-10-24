@@ -28,6 +28,10 @@ SLA, transcript e feedback.
 | Métricas por staff | ✅ `tickets-metrics.ts`: 1ª resposta (`firstResponseAt` = 1ª mensagem do atendente), resolução, CSAT, carga — no `/performance`, no plantão do `/stats` e no digest semanal |
 | Tickets na dashboard | ✅ lê tickets persistidos pelo bot; claim, resposta, prioridade e encerramento atravessam a outbox; a tela consulta o estado atualizado |
 | Canal de saída (painel → bot) | ✅ construído e processado a cada 20s |
+| Tipos de atendimento configuráveis | ✅ até 25 opções por painel, com emoji, descrição, categoria Discord, cargos próprios/herdados e boas-vindas |
+| Formulário de abertura | ✅ até 5 perguntas obrigatórias por tipo; respostas aparecem no canal e no histórico da dashboard |
+| Modelos de configuração | ✅ suporte geral, loja e comunidade; aplicam configurações editáveis antes da publicação |
+| Personalização do painel | ✅ título, descrição, botão, emoji e cor; a prévia mostra o seletor e o formulário |
 
 Build: `npm run typecheck && npm test`. Os testes de tudo novo estão em
 `src/bot/tickets-sla.test.ts` (28 testes) — matemática pura, sem Discord.
