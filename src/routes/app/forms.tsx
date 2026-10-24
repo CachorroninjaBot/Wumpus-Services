@@ -332,7 +332,7 @@ function FormsPage() {
   }
 
   return (
-    <div key={gid} className="mx-auto flex max-w-[1440px] flex-col gap-6">
+    <div key={gid} className="mx-auto flex max-w-[1440px] flex-col gap-7">
       <div className="flex flex-wrap items-end gap-4">
         <div className="min-w-0 flex-1">
           <h1 className="m-0 text-2xl font-semibold tracking-[-0.03em]">Formulários</h1>

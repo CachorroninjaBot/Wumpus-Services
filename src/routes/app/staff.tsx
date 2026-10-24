@@ -66,7 +66,7 @@ function StaffPage() {
   const unassigned = tickets.filter((ticket) => (ticket.status === "open" || ticket.status === "claimed") && !ticket.claimedBy).length;
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
       <h1 className="m-0 text-xl font-semibold tracking-tight">Equipe</h1>
       <div className="grid gap-3 sm:grid-cols-3">
         <Card className="p-4">

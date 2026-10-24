@@ -395,7 +395,7 @@ function TicketsPage() {
   }
 
   return (
-      <div key={gid} className="mx-auto flex max-w-7xl flex-col gap-4">
+      <div key={gid} className="mx-auto flex max-w-7xl flex-col gap-6">
       <div className="flex flex-wrap items-center gap-2">
         <div className="mr-auto">
           <h1 className="m-0 text-2xl font-semibold tracking-tight">Atendimento</h1>
@@ -725,7 +725,7 @@ function TicketsPage() {
             <Field label="Descrição do painel"><Textarea maxLength={4000} value={asString(tcfg.config.panelDescription)} onChange={(e) => updateConfig("tickets", { panelDescription: e.target.value })} /></Field>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
               <Field label="Texto do botão"><Input maxLength={80} value={asString(tcfg.config.panelButtonLabel, "Abrir atendimento")} onChange={(e) => updateConfig("tickets", { panelButtonLabel: e.target.value })} placeholder="Abrir atendimento" /></Field>
-              <Field label="Emoji"><Input maxLength={32} value={asString(tcfg.config.panelButtonEmoji, "🎫")} onChange={(e) => updateConfig("tickets", { panelButtonEmoji: e.target.value })} placeholder="🎫" /></Field>
+              <Field label="Emoji"><Input maxLength={32} value={asString(tcfg.config.panelButtonEmoji, "����")} onChange={(e) => updateConfig("tickets", { panelButtonEmoji: e.target.value })} placeholder="🎫" /></Field>
             </div>
           </div>
           <div className="space-y-4 rounded-2xl border border-border bg-card p-4">

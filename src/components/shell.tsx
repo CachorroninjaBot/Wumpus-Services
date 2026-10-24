@@ -211,10 +211,10 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
                     onClick={onNavigate}
                     aria-current={active === item.id ? "page" : undefined}
                     className={cn(
-                      "flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors",
+                      "flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-[background,color,transform] duration-150",
                       active === item.id
-                        ? "bg-secondary text-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        ? "bg-secondary text-foreground shadow-sm"
+                        : "text-muted-foreground hover:translate-x-0.5 hover:bg-muted hover:text-foreground",
                     )}
                   >
                     <Icon aria-hidden="true" className="size-[17px] shrink-0" strokeWidth={1.8} />
