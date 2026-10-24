@@ -66,6 +66,7 @@ import { clearPersistedSecurityWindow, gateNewChannel, handleAuditLogEntry, hand
 import { processOutbox } from "./outbox-send.ts";
 import { writeBotHealth } from "../lib/wumpus/health.server.ts";
 import { handleMemberLeave, handleMemberWelcome, maintenanceNotice } from "./guild-events.ts";
+import { addSupportStaffMessage, claimSupportChat, closeSupportChat, findSupportChatByThread } from "./human-support.ts";
 
 export type BotHandle = {
   client: Client;
@@ -358,6 +359,50 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
   if (!guild) return;
 
   const { kind, action, args } = parsed;
+
+  if (kind === "support" && (action === "claim" || action === "close")) {
+    if (!(await canManageTicket(guild, interaction.user.id))) {
+      await interaction.reply({ content: "Somente a equipe de atendimento pode gerenciar este pedido.", ephemeral: true });
+      return;
+    }
+    const thread = interaction.channel;
+    const chat = thread?.isThread() ? await findSupportChatByThread(thread.id) : null;
+    if (!thread?.isThread() || thread.guildId !== guild.id || chat?.id !== args[0]) {
+      await interaction.reply({ content: "Este atendimento não está disponível.", ephemeral: true });
+      return;
+    }
+    if (action === "claim") {
+      const result = await claimSupportChat(chat.id, interaction.user.id);
+      if (result !== "claimed") {
+        await interaction.reply({
+          content: result === "already_claimed" ? "Este atendimento já foi reivindicado por outra pessoa da equipe." : "Este atendimento já está encerrado.",
+          ephemeral: true,
+        });
+        return;
+      }
+      await interaction.update({
+        content: `${interaction.message.content ?? ""}\n\nAtendimento reivindicado por <@${interaction.user.id}>.`,
+        components: [{
+          type: 1,
+          components: [
+            { type: 2, style: 3, label: "Atendimento reivindicado", custom_id: id("support", "claim", chat.id), disabled: true },
+            { type: 2, style: 4, label: "Fechar atendimento", custom_id: id("support", "close", chat.id) },
+          ],
+        }] as never,
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
+
+    await thread.setArchived(true, `Atendimento encerrado por ${interaction.user.tag}`);
+    await closeSupportChat(chat.id, interaction.user.id);
+    await interaction.update({
+      content: `${interaction.message.content ?? ""}\n\nAtendimento encerrado por <@${interaction.user.id}>. A avaliação de 1 a 5 estrelas está disponível no chat do site.`,
+      components: [],
+      allowedMentions: { parse: [] },
+    });
+    return;
+  }
 
   if (kind === "security") {
     if (action === "verify") {
@@ -777,6 +822,26 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   client.on(Events.MessageCreate, (message: Message) => {
     if (message.author.bot || !message.guild) return;
     const guildId = message.guild.id;
+    const supportContent = [
+      message.content,
+      ...message.attachments.map((attachment) => attachment.url),
+    ].filter(Boolean).join("\n");
+    if (message.channel.isThread() && message.channel.parentId === process.env.WUMPUS_SUPPORT_FORUM_ID) {
+      void canManageTicket(message.guild, message.author.id).then((authorized) => {
+        if (!authorized) {
+          log.warn("mensagem não encaminhada do tópico de suporte: autor sem permissão de equipe", {
+            guildId,
+            channelId: message.channelId,
+            authorId: message.author.id,
+          });
+          return;
+        }
+        return addSupportStaffMessage(message.channelId, message.author.id, supportContent);
+      }).catch((error) =>
+        log.error("falha ao encaminhar resposta do staff para o chat do site", { guildId, channelId: message.channelId, error: String(error).slice(0, 200) }),
+      );
+      return;
+    }
     void recordMessageLog(message, "message_created", "Mensagem enviada", message.content, log);
 
     void handleMessage(message, log).catch((error) =>

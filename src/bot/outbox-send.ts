@@ -18,7 +18,7 @@ import type { OutboxJob, RuntimeFile } from "../lib/wumpus/runtime.server.ts";
 import { setupVerification, restoreVerification, setLockdown } from "./security.ts";
 import { id } from "./ids.ts";
 import { guildPlan } from "./config.ts";
-import { createHumanSupportThread } from "./human-support.ts";
+import { createHumanSupportThread, failSupportChat, postSupportRating, sendSupportChatMessage, setSupportMessageDelivery } from "./human-support.ts";
 
 function runtimePath(): string {
   return process.env.WUMPUS_RUNTIME_PATH || join(process.cwd(), "data", "wumpus-runtime.json");
@@ -155,6 +155,12 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
         ? { ...job, status: "failed" as const, detail: "Este servidor não tem uma licença ativa no plano atual." , at: Date.now() }
         : job,
     );
+    for (const job of pending) {
+      if (job.kind === "support_handoff") await failSupportChat(job.id);
+      if (job.kind === "support_message" && job.supportChatId && job.supportMessageId) {
+        await setSupportMessageDelivery(job.supportChatId, job.supportMessageId, "failed");
+      }
+    }
     await writeRuntimeFile({ ...runtime, outbox: pruneOutbox(outbox), updatedAt: Date.now() });
     return pending.length;
   }
@@ -176,6 +182,24 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
       }
       if (job.kind === "support_handoff") {
         const result = await createHumanSupportThread(guild, job, log);
+        if (!result.ok) await failSupportChat(job.id);
+        outbox = settleActionJob(outbox, job.id, result);
+        continue;
+      }
+      if (job.kind === "support_message") {
+        const result = job.supportChatId && job.supportMessageId && job.content
+          ? await sendSupportChatMessage(guild, job.supportChatId, job.supportMessageId, job.content)
+          : { ok: false, detail: "Mensagem de atendimento incompleta." };
+        if (!result.ok && job.supportChatId && job.supportMessageId) {
+          await setSupportMessageDelivery(job.supportChatId, job.supportMessageId, "failed");
+        }
+        outbox = settleActionJob(outbox, job.id, result);
+        continue;
+      }
+      if (job.kind === "support_rating") {
+        const result = job.supportChatId && job.rating
+          ? await postSupportRating(guild, job.supportChatId, job.rating)
+          : { ok: false, detail: "Avaliação de atendimento incompleta." };
         outbox = settleActionJob(outbox, job.id, result);
         continue;
       }

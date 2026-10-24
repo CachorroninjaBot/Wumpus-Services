@@ -8,7 +8,7 @@
  *
  * O painel publica aqui; o bot (outro processo) le o mesmo arquivo.
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -28,6 +28,47 @@ export type RuntimeGuild = {
   integrations?: Record<string, unknown>;
   ocr?: Record<string, unknown>;
   automations?: Record<string, unknown>;
+};
+
+export type SupportChatMessage = {
+  id: string;
+  role: "user" | "assistant" | "staff";
+  content: string;
+  at: number;
+  authorId?: string;
+  delivery?: "queued" | "sent" | "failed";
+};
+
+export type SupportChatRecord = {
+  id: string;
+  guildId: string;
+  requesterId: string;
+  page: string;
+  status: "queued" | "open" | "closed" | "failed";
+  messages: SupportChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+  threadId?: string;
+  forumGuildId?: string;
+  claimedBy?: string;
+  rating?: number;
+  ratedAt?: number;
+};
+
+export type AssistantChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type AssistantChatRecord = {
+  id: string;
+  guildId: string;
+  userId: string;
+  page: string;
+  context: string;
+  messages: AssistantChatMessage[];
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type RuntimeArticle = {
@@ -72,7 +113,7 @@ export type OutboxJob = {
   id: string;
   guildId: string;
   /** O que publicar. */
-  kind: "panel" | "ticket_action" | "form_action" | "support_handoff";
+  kind: "panel" | "ticket_action" | "form_action" | "support_handoff" | "support_message" | "support_rating";
   /** "tickets" | "forms" — decide o modulo de config a usar. */
   target: string;
   /** Referencia de canal da config (nome como "ch_atendimento" ou snowflake). */
@@ -86,6 +127,9 @@ export type OutboxJob = {
   content?: string;
   supportPage?: string;
   supportMessages?: Array<{ role: "user" | "assistant"; content: string }>;
+  supportChatId?: string;
+  supportMessageId?: string;
+  rating?: number;
   reason?: string;
   priority?: "low" | "normal" | "high" | "urgent";
   createdAt: number;
@@ -176,7 +220,7 @@ export async function readRuntime(): Promise<RuntimeFile> {
 }
 
 /** Bot collections shared on disk; malformed or missing files return empty lists. */
-export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status";
+export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status" | "support-chats" | "assistant-chats";
 
 export async function readBotCollection<T>(name: BotCollectionName): Promise<T[]> {
   try {
@@ -195,6 +239,51 @@ export async function writeBotCollection<T>(name: BotCollectionName, rows: T[]):
   const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporaryPath, JSON.stringify(rows, null, 2));
   await rename(temporaryPath, path);
+}
+
+export async function updateBotCollection<T>(
+  name: BotCollectionName,
+  update: (rows: T[]) => T[],
+): Promise<T[]> {
+  const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, `${name}.json`);
+  const lockPath = `${path}.lock`;
+  let locked = false;
+  const deadline = Date.now() + 10_000;
+  while (!locked) {
+    try {
+      await mkdir(lockPath);
+      locked = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const details = await stat(lockPath).catch(() => null);
+      if (details && Date.now() - details.mtimeMs > 60_000) {
+        await rm(lockPath, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() >= deadline) throw new Error(`Timeout aguardando atualização da coleção ${name}.`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  try {
+    let rows: T[] = [];
+    try {
+      const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+      if (!Array.isArray(parsed)) throw new Error(`A coleção ${name} não contém uma lista válida.`);
+      rows = parsed as T[];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const next = update(rows);
+    const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporaryPath, JSON.stringify(next, null, 2));
+    await rename(temporaryPath, path);
+    return next;
+  } finally {
+    await rm(lockPath, { recursive: true, force: true });
+  }
 }
 
 /**

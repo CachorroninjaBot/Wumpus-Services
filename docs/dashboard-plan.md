@@ -37,7 +37,13 @@ um canal fórum acessível pelo bot. Configure a variável no painel de ambiente
 do serviço e reinicie o bot; ele precisa de permissão para ver o fórum, criar
 tópicos e enviar mensagens. O pedido só é criado após a pessoa clicar em
 "Não resolveu? Falar com humano"; o tópico inclui o servidor selecionado e o
-histórico recente da conversa.
+histórico recente da conversa. O atendimento continua pelo chat da dashboard:
+mensagens do solicitante são copiadas para o tópico e respostas de staff no
+tópico aparecem no site. Os botões do tópico permitem reivindicar e fechar o
+atendimento. Após fechar, a pessoa pode avaliar de 1 a 5 estrelas; configure
+`WUMPUS_SUPPORT_RATINGS_CHANNEL_ID` com o ID de um canal de texto acessível
+para o bot publicar as avaliações. Dashboard e bot precisam compartilhar
+`data/` para ler o histórico e o estado do atendimento.
 
 ## O problema real
 

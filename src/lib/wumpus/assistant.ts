@@ -1,9 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { requireGuildFeature } from "./session-access.server";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 import { enforceRequestLimit } from "./request-limits.server";
-import { enqueueOutbox, readRuntime, type OutboxJob } from "./runtime.server";
+import { enqueueOutbox, readBotCollection, readRuntime, updateBotCollection, type AssistantChatRecord, type OutboxJob, type SupportChatRecord } from "./runtime.server";
 
 const ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const ASSISTANT_SYSTEM_PROMPT = [
@@ -91,6 +92,84 @@ export const askWumpusAssistant = createServerFn({ method: "POST" })
     }
   });
 
+export const listAssistantChats = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    const chats = await readBotCollection<AssistantChatRecord>("assistant-chats");
+    return chats
+      .filter((chat) => chat.userId === session.userId && chat.guildId === data.guildId)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 25)
+      .map(({ id, page, messages, createdAt, updatedAt }) => ({
+        id, page, createdAt, updatedAt,
+        title: messages.find((message) => message.role === "user")?.content.slice(0, 90) ?? "Conversa sem título",
+      }));
+  });
+
+export const loadAssistantChat = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    chatId: z.string().min(1).max(100),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    const chat = (await readBotCollection<AssistantChatRecord>("assistant-chats")).find((entry) =>
+      entry.id === data.chatId && entry.guildId === data.guildId && entry.userId === session.userId);
+    if (!chat) throw new Error("Essa conversa não foi encontrada.");
+    return chat;
+  });
+
+export const saveAssistantChat = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    chatId: z.string().min(1).max(100).optional(),
+    page: z.string().trim().min(1).max(100),
+    context: z.string().max(7000),
+    messages: z.array(z.object({
+      role: z.enum(["user", "assistant"]),
+      content: z.string().trim().min(1).max(2000),
+    }).strict()).min(1).max(40),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    let savedId = "";
+    let missing = false;
+    await updateBotCollection<AssistantChatRecord>("assistant-chats", (chats) => {
+      const existing = data.chatId
+        ? chats.find((chat) => chat.id === data.chatId && chat.guildId === data.guildId && chat.userId === session.userId)
+        : undefined;
+      if (data.chatId && !existing) {
+        missing = true;
+        return chats;
+      }
+      const now = Date.now();
+      const chat: AssistantChatRecord = {
+        id: existing?.id ?? `chat_${randomUUID()}`,
+        guildId: data.guildId,
+        userId: session.userId,
+        page: data.page,
+        context: data.context,
+        messages: data.messages,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
+      savedId = chat.id;
+      const retained = chats.filter((entry) => entry.id !== chat.id);
+      const userChats = retained.filter((entry) => entry.guildId === data.guildId && entry.userId === session.userId);
+      const keepIds = new Set(userChats.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 24).map((entry) => entry.id));
+      return [...retained.filter((entry) =>
+        entry.guildId !== data.guildId || entry.userId !== session.userId || keepIds.has(entry.id)), chat];
+    });
+    if (missing) throw new Error("Essa conversa não foi encontrada.");
+    return { chatId: savedId };
+  });
+
 const supportMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().trim().min(1).max(1200),
@@ -114,8 +193,34 @@ export const requestHumanSupport = createServerFn({ method: "POST" })
       entry.actorId === session.userId &&
       entry.status === "queued");
     if (existing) return { jobId: existing.id };
+    let activeChat: SupportChatRecord | undefined;
+    let supportChat: SupportChatRecord | undefined;
+    await updateBotCollection<SupportChatRecord>("support-chats", (chats) => {
+      activeChat = chats.find((chat) =>
+        chat.guildId === data.guildId && chat.requesterId === session.userId && (chat.status === "queued" || chat.status === "open"));
+      if (activeChat) return chats;
+      const now = Date.now();
+      supportChat = {
+        id: `support_${randomUUID()}`,
+        guildId: data.guildId,
+        requesterId: session.userId,
+        page: data.page,
+        status: "queued",
+        messages: data.messages.map((message) => ({
+          id: randomUUID(),
+          role: message.role,
+          content: message.content,
+          at: now,
+        })),
+        createdAt: now,
+        updatedAt: now,
+      };
+      return [...chats, supportChat];
+    });
+    if (activeChat) return { jobId: activeChat.id };
+    if (!supportChat) throw new Error("Não foi possível preparar o atendimento humano.");
     const job: OutboxJob = {
-      id: `support_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      id: supportChat.id,
       guildId: data.guildId,
       kind: "support_handoff",
       target: "human_support",
@@ -138,12 +243,128 @@ export const getHumanSupportStatus = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    const chat = (await readBotCollection<SupportChatRecord>("support-chats")).find((entry) =>
+      entry.id === data.jobId && entry.guildId === data.guildId && entry.requesterId === session.userId);
     const job = (await readRuntime()).outbox?.find((entry: OutboxJob) =>
       entry.id === data.jobId &&
       entry.guildId === data.guildId &&
       entry.kind === "support_handoff" &&
       entry.actorId === session.userId);
-    return job
-      ? { status: job.status, detail: job.detail ?? null, channelId: job.channelId ?? null }
-      : { status: "missing" as const, detail: null, channelId: null };
+    return chat
+      ? {
+          status: chat.status,
+          detail: job?.detail ?? null,
+          channelId: chat.threadId ?? job?.channelId ?? null,
+          channelGuildId: chat.forumGuildId ?? data.guildId,
+          messages: chat.messages,
+          claimedBy: chat.claimedBy ?? null,
+          rating: chat.rating ?? null,
+        }
+      : job
+          ? { status: job.status, detail: job.detail ?? null, channelId: job.channelId ?? null, channelGuildId: data.guildId, messages: [], claimedBy: null, rating: null }
+          : { status: "missing" as const, detail: null, channelId: null, channelGuildId: data.guildId, messages: [], claimedBy: null, rating: null };
+  });
+
+export const listHumanSupportChats = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    return (await readBotCollection<SupportChatRecord>("support-chats"))
+        .filter((chat) => chat.guildId === data.guildId && chat.requesterId === session.userId)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 25)
+        .map((chat) => ({
+          id: chat.id,
+          page: chat.page,
+          status: chat.status,
+          updatedAt: chat.updatedAt,
+          title: chat.messages.find((message) => message.role === "user")?.content.slice(0, 90) ?? "Atendimento humano",
+        }));
+  });
+
+export const sendHumanSupportMessage = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    chatId: z.string().min(1).max(100),
+    content: z.string().trim().min(1).max(2000),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    enforceRequestLimit("ai-human-support-message", 20, 60_000, session.userId);
+    const messageId = randomUUID();
+    let chat: SupportChatRecord | undefined;
+    await updateBotCollection<SupportChatRecord>("support-chats", (chats) => chats.map((entry) => {
+      if (entry.id !== data.chatId || entry.guildId !== data.guildId || entry.requesterId !== session.userId) return entry;
+      if (entry.status !== "open") return entry;
+      chat = entry;
+      return {
+        ...entry,
+        messages: [...entry.messages, { id: messageId, role: "user" as const, content: data.content, at: Date.now(), delivery: "queued" as const }].slice(-100),
+        updatedAt: Date.now(),
+      };
+    }));
+    if (!chat) throw new Error("Este atendimento não está aberto para novas mensagens.");
+    const job: OutboxJob = {
+      id: `support_msg_${randomUUID()}`,
+      guildId: data.guildId,
+      kind: "support_message",
+      target: "human_support",
+      channelRef: "",
+      actorId: session.userId,
+      supportChatId: chat.id,
+      supportMessageId: messageId,
+      content: data.content,
+      createdAt: Date.now(),
+      status: "queued",
+    };
+    await enqueueOutbox(job);
+    return { jobId: job.id, messageId };
+  });
+
+export const rateHumanSupport = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    chatId: z.string().min(1).max(100),
+    rating: z.number().int().min(1).max(5),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    const ratingsChannelId = process.env.WUMPUS_SUPPORT_RATINGS_CHANNEL_ID?.trim();
+    if (!ratingsChannelId || !/^\d{17,20}$/.test(ratingsChannelId)) {
+      throw new Error("O canal de avaliações do atendimento ainda não está configurado.");
+    }
+    let chat: SupportChatRecord | undefined;
+    let alreadyRated = false;
+    await updateBotCollection<SupportChatRecord>("support-chats", (chats) => chats.map((entry) => {
+      if (entry.id !== data.chatId || entry.guildId !== data.guildId || entry.requesterId !== session.userId) return entry;
+      if (entry.status !== "closed") return entry;
+      if (entry.rating) {
+        alreadyRated = true;
+        return entry;
+      }
+      chat = entry;
+      return { ...entry, rating: data.rating, ratedAt: Date.now(), updatedAt: Date.now() };
+    }));
+    if (!chat) {
+      if (alreadyRated) throw new Error("Este atendimento já recebeu uma avaliação.");
+      throw new Error("A avaliação fica disponível depois que o staff encerrar o atendimento.");
+    }
+    await enqueueOutbox({
+      id: `support_rating_${randomUUID()}`,
+      guildId: data.guildId,
+      kind: "support_rating",
+      target: "human_support",
+      channelRef: "",
+      actorId: session.userId,
+      supportChatId: chat.id,
+      rating: data.rating,
+      createdAt: Date.now(),
+      status: "queued",
+    });
+    return { ok: true as const };
   });
