@@ -774,7 +774,7 @@ export async function closeTicket(
             type: 2,
             style: rating >= 4 ? 3 : 2,
             label: String(rating),
-            custom_id: id("ticket", "rate", ticketId, rating)
+            custom_id: id("ticket", "rate", ticketId, rating, guild.id)
           }))
         }
       ];
@@ -902,17 +902,24 @@ async function displayName(guild: Guild, userId: string): Promise<string> {
 
 /** Registra a nota de satisfacao vinda da DM. */
 export async function recordFeedback(
-  guildId: string,
   ticketId: number,
   rating: number,
-  log: Logger
+  userId: string,
+  log: Logger,
+  guildId?: string,
 ): Promise<boolean> {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) return false;
   let found = false;
 
   await mutate<Ticket>("tickets", (rows) => {
-    const row = rows.find((entry) => entry.guildId === guildId && entry.id === ticketId);
-    if (row?.status === "closed" && !row.feedback) {
+    const row = rows.find((entry) =>
+      entry.id === ticketId
+      && (!guildId || entry.guildId === guildId)
+      && entry.openerId === userId
+      && entry.status === "closed"
+      && !entry.feedback,
+    );
+    if (row) {
       row.feedback = { rating, comment: null };
       row.feedbackAt = new Date().toISOString();
       row.feedbackStaffId = row.claimedBy;
@@ -921,7 +928,7 @@ export async function recordFeedback(
     return rows;
   });
 
-  if (found) log.info("feedback registrado", { guildId, ticketId, rating });
+  if (found) log.info("feedback registrado", { guildId: guildId ?? "resolved-by-ticket", ticketId, userId, rating });
   return found;
 }
 
