@@ -1,4 +1,4 @@
-import { dashboardSessionIsUsable, getDashboardSessionGuilds, listDashboardGrants, recordDashboardActivity } from "./admin-store.server";
+import { dashboardSessionIsUsable, getDashboardGuildSelection, getDashboardSessionGuilds, listDashboardGrants, recordDashboardActivity } from "./admin-store.server";
 import { loadBotGuildIds } from "./bot-guilds";
 import { planAllows, type PlanFeature } from "./engine";
 import { configuredLifetimeSubscriptions, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
@@ -10,6 +10,10 @@ import { getDashboardSessionCookie, markPrivateResponse } from "./session-cookie
 import { sessionSecret, verifySession, type SessionPayload } from "./session-token";
 
 let guildAccessCache: { userId: string; guildIds: Set<string>; entitlements: Entitlements; expiresAt: number } | null = null;
+
+export function invalidateGuildAccessCache(userId: string): void {
+  if (guildAccessCache?.userId === userId) guildAccessCache = null;
+}
 
 /** Lê identidade apenas do cookie assinado e confere a sessão revogável no servidor. */
 export async function verifySignedSession(_legacyToken: string): Promise<SessionPayload> {
@@ -64,11 +68,12 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
   if (!canManageGuild && !platformOwnerCanManageGuild) throw new Error("Você não administra este servidor no Discord.");
 
   if (!guildAccessCache || guildAccessCache.userId !== payload.userId || guildAccessCache.expiresAt < Date.now()) {
-    const [botGuildIds, billing, manualSubscriptions, licenseFile] = await Promise.all([
+    const [botGuildIds, billing, manualSubscriptions, licenseFile, selectedGuildIds] = await Promise.all([
       loadBotGuildIds(),
       loadBilling(),
       loadManualSubscriptionRows(),
       readGuildLicenses(),
+      getDashboardGuildSelection(payload.userId),
     ]);
     const entitlements = resolveEntitlements({
       discordUserId: payload.userId,
@@ -81,6 +86,7 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
           .filter(([, license]) => license.status === "active")
           .map(([guildId, license]) => [guildId, license.accountId]),
       ),
+      selectedGuildIds,
       subscriptions: [...subscriptionsFor(billing), ...manualSubscriptions],
     });
     guildAccessCache = { userId: payload.userId, guildIds: new Set(entitlements.guildIds), entitlements, expiresAt: Date.now() + 30_000 };

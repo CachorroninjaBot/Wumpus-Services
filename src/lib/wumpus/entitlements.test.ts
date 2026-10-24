@@ -130,6 +130,24 @@ test("servidor sem vínculo anterior ou vinculado à mesma conta continua elegí
   assert.deepEqual(result.guildIds, ["a", "b"]);
 });
 
+test("a seleção explícita libera somente os servidores escolhidos", () => {
+  const result = resolveEntitlements(input({
+    ownedGuildIds: ["a", "b", "c"],
+    botGuildIds: ["a", "b", "c"],
+    selectedGuildIds: ["b"],
+  }));
+  assert.deepEqual(result.guildIds, ["b"]);
+});
+
+test("uma seleção vazia não libera servidores", () => {
+  const result = resolveEntitlements(input({
+    ownedGuildIds: ["a"],
+    botGuildIds: ["a"],
+    selectedGuildIds: [],
+  }));
+  assert.deepEqual(result.guildIds, []);
+});
+
 test("administrador sem ser dono fica de fora", () => {
   // `ownedGuildIds` vem do OAuth so com `owner: true`. Quem e so admin nunca
   // aparece nessa lista — o painel e de quem contratou, nao de quem tem cargo.

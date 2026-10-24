@@ -121,6 +121,8 @@ export type EntitlementInput = {
   botGuildIds: string[];
   /** Servidores já vinculados a outra conta na dashboard não consomem esta cota. */
   guildAccountIds?: Record<string, string>;
+  /** Seleção explícita do assinante; lista vazia significa que ainda não escolheu. */
+  selectedGuildIds?: string[];
   subscriptions: SubscriptionLite[];
 };
 
@@ -185,9 +187,11 @@ export function resolveEntitlements(input: EntitlementInput): Entitlements {
     };
   }
 
+  const selectedIds = input.selectedGuildIds === undefined ? null : new Set(input.selectedGuildIds);
+  const selected = selectedIds === null ? eligible : eligible.filter((id) => selectedIds.has(id));
   const limit = serverLimit(sub.plan);
-  const allowed = limit === null ? eligible : eligible.slice(0, limit);
-  const overLimit = limit === null ? [] : eligible.slice(limit);
+  const allowed = limit === null ? selected : selected.slice(0, limit);
+  const overLimit = limit === null ? [] : selected.slice(limit);
 
   return {
     isOwner: false,

@@ -53,6 +53,7 @@ export type DashboardAdminState = {
   sessions: DashboardSessionRecord[];
   events: DashboardAdminEvent[];
   grants: DashboardManualGrant[];
+  guildSelectionsByUser: Record<string, string[]>;
 };
 
 const memberSchema = z.object({
@@ -113,7 +114,7 @@ function storePath(): string {
 }
 
 function emptyState(): DashboardAdminState {
-  return { members: [], sessions: [], events: [], grants: [] };
+  return { members: [], sessions: [], events: [], grants: [], guildSelectionsByUser: {} };
 }
 
 function parseState(value: unknown): DashboardAdminState {
@@ -128,6 +129,7 @@ function parseState(value: unknown): DashboardAdminState {
     sessions: z.array(sessionSchema),
     events: z.array(eventSchema),
     grants: z.array(grantSchema).default([]),
+    guildSelectionsByUser: z.record(z.string().regex(/^\d{17,20}$/), z.array(z.string().regex(/^\d{17,20}$/))).default({}),
   }).strict().safeParse(value);
   if (!parsed.success) throw new Error("O cadastro administrativo da dashboard está inválido.");
   return parsed.data;
@@ -489,6 +491,26 @@ export async function revokeDashboardGrant(input: { actorId: string; grantId: st
 
 export async function listDashboardGrants(): Promise<DashboardManualGrant[]> {
   return (await readState()).grants;
+}
+
+export async function getDashboardGuildSelection(userId: string): Promise<string[]> {
+  const safeId = z.string().regex(/^\d{17,20}$/).parse(userId);
+  return (await readState()).guildSelectionsByUser[safeId] ?? [];
+}
+
+export async function saveDashboardGuildSelection(input: {
+  actorId: string;
+  guildIds: string[];
+}): Promise<void> {
+  const data = z.object({
+    actorId: z.string().regex(/^\d{17,20}$/),
+    guildIds: z.array(z.string().regex(/^\d{17,20}$/)).max(200),
+  }).strict().parse(input);
+  const guildIds = [...new Set(data.guildIds)];
+  await mutateState((state) => {
+    state.guildSelectionsByUser[data.actorId] = guildIds;
+    addEvent(state, data.actorId, "guild-selection", data.actorId, `${guildIds.length} servidor(es) selecionado(s) para a dashboard.`);
+  });
 }
 
 /** Mantém o contrato antigo para telas que só precisam da lista de membros. */

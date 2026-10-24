@@ -19,22 +19,23 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { exchangeDiscordCodeDirect } from "@/lib/discord/oauth";
 import { loadBotGuildIds } from "./bot-guilds";
-import { planById } from "./catalog";
+import { planById, serverLimit } from "./catalog";
 import { configuredLifetimeSubscriptions, planForUser, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
 import { inspectBotHealth } from "./health.server";
 import { isPlatformOwner } from "./owner";
 import { loadBilling } from "./shardpay.server";
 import {
   closeDashboardSession,
+  getDashboardGuildSelection,
   isDashboardAccountSuspended,
   recordDashboardActivity,
   recordDashboardLogin,
+  saveDashboardGuildSelection,
 } from "./admin-store.server";
-import { syncGuildEntitlements } from "./license-store.server";
-import { readGuildLicenses } from "./license-store.server";
+import { readGuildLicenses, syncGuildEntitlements } from "./license-store.server";
 import { consumeOAuthStateCookie, clearDashboardSessionCookie, getDashboardSessionCookie, markPrivateResponse, setDashboardSessionCookie } from "./session-cookie.server";
 import { enforceRequestLimit } from "./request-limits.server";
-import { loadManualSubscriptionRows, verifySignedSession } from "./session-access.server";
+import { invalidateGuildAccessCache, loadManualSubscriptionRows, verifySignedSession } from "./session-access.server";
 import {
   sessionSecret,
   signSession,
@@ -78,8 +79,13 @@ export type GuildAccessDiagnostics = {
   linkedToAnotherAccountCount: number;
   eligibleGuildCount: number;
   planName: string | null;
+  planLimit: number | null;
+  selectedGuildIds: string[];
+  botAvailable: boolean;
+  ownedGuilds: Array<{ id: string; name: string; botPresent: boolean }>;
+  availableGuilds: Array<{ id: string; name: string; selected: boolean; linkedElsewhere: boolean }>;
   billingAvailable: boolean;
-  issue: "none" | "bot-unavailable" | "no-owned-guilds" | "no-bot-match" | "linked-elsewhere" | "billing-unavailable" | "no-plan" | "refresh-session";
+  issue: "none" | "bot-unavailable" | "no-owned-guilds" | "no-bot-match" | "linked-elsewhere" | "billing-unavailable" | "no-plan" | "select-guilds" | "refresh-session";
   recommendation: string;
 };
 
@@ -169,11 +175,12 @@ export const resolveAccess = createServerFn({ method: "POST" })
 
     // Relido do servidor a cada chamada: bot que saiu e assinatura que venceu
     // deixam de valer sem depender de nada guardado no navegador.
-    const [botGuildIds, billing, manualSubscriptions, licenseFile] = await Promise.all([
+    const [botGuildIds, billing, manualSubscriptions, licenseFile, selectedGuildIds] = await Promise.all([
       loadBotGuildIds(),
       loadBilling(),
       loadManualSubscriptionRows(),
       readGuildLicenses(),
+      getDashboardGuildSelection(payload.userId),
     ]);
 
     const subscriptions = [...subscriptionRows(billing), ...manualSubscriptions];
@@ -190,6 +197,7 @@ export const resolveAccess = createServerFn({ method: "POST" })
           .filter(([, license]) => license.status === "active")
           .map(([guildId, license]) => [guildId, license.accountId]),
       ),
+      selectedGuildIds,
       subscriptions,
     });
 
@@ -299,11 +307,12 @@ export const getMyGuildAccessDiagnostics = createServerFn({ method: "POST" })
   .handler(async (): Promise<GuildAccessDiagnostics> => {
     enforceRequestLimit("guild-access-diagnostics", 20, 60_000);
     const session = await verifySignedSession("");
-    const [health, billing, manualSubscriptions, licenses] = await Promise.all([
+    const [health, billing, manualSubscriptions, licenses, selectedGuildIds] = await Promise.all([
       inspectBotHealth(),
       loadBilling(),
       loadManualSubscriptionRows(),
       readGuildLicenses(),
+      getDashboardGuildSelection(session.userId),
     ]);
     const botRecord = health.state === "available" ? health.record : null;
     const healthAgeMs = botRecord ? Date.now() - botRecord.at : Number.POSITIVE_INFINITY;
@@ -317,6 +326,12 @@ export const getMyGuildAccessDiagnostics = createServerFn({ method: "POST" })
       return license?.status === "active" && license.accountId !== session.userId;
     }).length;
     const eligibleGuildCount = matchingGuilds.length - linkedToAnotherAccountCount;
+    const eligibleGuildIds = new Set(matchingGuilds
+      .filter((guild) => licenses.byGuild[guild.id]?.status !== "active" ||
+        licenses.byGuild[guild.id]?.accountId === session.userId)
+      .map((guild) => guild.id));
+    const validSelectedGuildIds = selectedGuildIds.filter((id) => eligibleGuildIds.has(id));
+    const selectedEligibleCount = validSelectedGuildIds.length;
     const plan = planForUser(
       [...subscriptionRows(billing), ...manualSubscriptions],
       session.userId,
@@ -344,6 +359,9 @@ export const getMyGuildAccessDiagnostics = createServerFn({ method: "POST" })
     } else if (!plan) {
       issue = "no-plan";
       recommendation = "O bot e a propriedade dos servidores foram confirmados, mas esta conta não tem um plano ativo. Assine um plano ou solicite uma concessão manual ao administrador.";
+    } else if (!selectedEligibleCount) {
+      issue = "select-guilds";
+      recommendation = "Escolha abaixo quais servidores você quer gerenciar. A quantidade máxima segue o seu plano.";
     }
 
     return {
@@ -354,10 +372,71 @@ export const getMyGuildAccessDiagnostics = createServerFn({ method: "POST" })
       linkedToAnotherAccountCount,
       eligibleGuildCount,
       planName: plan ? planById(plan.plan).name : null,
+      planLimit: plan ? serverLimit(plan.plan) : null,
+      selectedGuildIds: validSelectedGuildIds,
+      botAvailable,
+      ownedGuilds: ownedGuilds.map((guild) => ({ id: guild.id, name: guild.name, botPresent: botGuildIds.has(guild.id) })),
+      availableGuilds: matchingGuilds.map((guild) => ({
+        id: guild.id,
+        name: guild.name,
+        selected: validSelectedGuildIds.includes(guild.id),
+        linkedElsewhere: licenses.byGuild[guild.id]?.status === "active" &&
+          licenses.byGuild[guild.id]?.accountId !== session.userId,
+      })),
       billingAvailable: billing.ok,
       issue,
       recommendation,
     };
+  });
+
+export const saveMyGuildSelection = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    guildIds: z.array(z.string().regex(/^\d{17,20}$/)).max(200),
+  }).strict().parse(input))
+  .handler(async ({ data }): Promise<{ ok: true; selectedCount: number }> => {
+    enforceRequestLimit("save-guild-selection", 20, 60_000);
+    markPrivateResponse();
+    const session = await verifySignedSession("");
+    if (isPlatformOwner(session.userId)) {
+      throw new Error("O dono da plataforma não precisa selecionar servidores para acessar a dashboard.");
+    }
+
+    const [health, billing, manualSubscriptions, licenses] = await Promise.all([
+      inspectBotHealth(),
+      loadBilling(),
+      loadManualSubscriptionRows(),
+      readGuildLicenses(),
+    ]);
+    const botRecord = health.state === "available" ? health.record : null;
+    if (!botRecord || botRecord.status !== "online" || Date.now() - botRecord.at > 90_000) {
+      throw new Error("A lista atual do bot está indisponível. Tente novamente quando o bot estiver online.");
+    }
+    const ownedIds = new Set(session.guilds.filter((guild) => guild.owner).map((guild) => guild.id));
+    const botIds = new Set(botRecord.guildIds);
+    const eligibleIds = new Set([...ownedIds].filter((id) => {
+      if (!botIds.has(id)) return false;
+      const license = licenses.byGuild[id];
+      return license?.status !== "active" || license.accountId === session.userId;
+    }));
+    const uniqueGuildIds = [...new Set(data.guildIds)];
+    if (uniqueGuildIds.some((id) => !eligibleIds.has(id))) {
+      throw new Error("Um ou mais servidores não pertencem a esta conta, não estão no bot ou estão vinculados a outra conta.");
+    }
+
+    const plan = planForUser(
+      [...subscriptionRows(billing), ...manualSubscriptions],
+      session.userId,
+      session.username,
+    );
+    if (!plan) throw new Error("É necessário ter um plano ativo para selecionar servidores.");
+    const limit = serverLimit(plan.plan);
+    if (limit !== null && uniqueGuildIds.length > limit) {
+      throw new Error(`Seu plano permite selecionar até ${limit} servidor(es).`);
+    }
+
+    await saveDashboardGuildSelection({ actorId: session.userId, guildIds: uniqueGuildIds });
+    invalidateGuildAccessCache(session.userId);
+    return { ok: true, selectedCount: uniqueGuildIds.length };
   });
 
 export const heartbeatDashboardSession = createServerFn({ method: "POST" })

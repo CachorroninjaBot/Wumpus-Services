@@ -12,6 +12,7 @@ import { useBilling } from "@/lib/wumpus/use-billing";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { ServerGroups } from "@/components/server-groups";
+import { GuildSelectionPanel } from "@/components/guild-selection-panel";
 import { getGuildPlanUsage } from "@/lib/wumpus/runtime-store";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 
@@ -59,6 +60,7 @@ function SettingsPage() {
             {guild.name} · {guild.memberCount.toLocaleString("pt-BR")} membros · {guild.region}
         </p>
       </div>
+      {!isOwner ? <GuildSelectionPanel /> : null}
       <Card id="assinatura" className="space-y-3 scroll-mt-24">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="m-0 text-base font-semibold">Assinatura WumPlus</h2>
