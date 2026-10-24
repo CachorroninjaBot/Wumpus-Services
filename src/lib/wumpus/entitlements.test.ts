@@ -109,6 +109,27 @@ test("servidor com o bot onde a pessoa NAO e dona nao entra", () => {
   assert.deepEqual(result.guildIds, []);
 });
 
+test("servidor vinculado na dashboard a outra conta não consome a cota do usuário", () => {
+  const result = resolveEntitlements(input({
+    ownedGuildIds: ["a", "b"],
+    botGuildIds: ["a", "b"],
+    guildAccountIds: { b: OTHER.id },
+    subscriptions: [sub({ planId: "essencial" })],
+  }));
+  assert.deepEqual(result.guildIds, ["a"]);
+  assert.deepEqual(result.overLimitGuildIds, []);
+});
+
+test("servidor sem vínculo anterior ou vinculado à mesma conta continua elegível", () => {
+  const result = resolveEntitlements(input({
+    ownedGuildIds: ["a", "b"],
+    botGuildIds: ["a", "b"],
+    guildAccountIds: { a: ME.id },
+    subscriptions: [sub({ planId: "pro" })],
+  }));
+  assert.deepEqual(result.guildIds, ["a", "b"]);
+});
+
 test("administrador sem ser dono fica de fora", () => {
   // `ownedGuildIds` vem do OAuth so com `owner: true`. Quem e so admin nunca
   // aparece nessa lista — o painel e de quem contratou, nao de quem tem cargo.

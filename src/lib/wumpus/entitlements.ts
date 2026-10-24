@@ -119,6 +119,8 @@ export type EntitlementInput = {
   manageableGuildIds?: string[];
   /** Servidores onde o BOT esta de fato presente. */
   botGuildIds: string[];
+  /** Servidores já vinculados a outra conta na dashboard não consomem esta cota. */
+  guildAccountIds?: Record<string, string>;
   subscriptions: SubscriptionLite[];
 };
 
@@ -150,7 +152,11 @@ export type Entitlements = {
 export function resolveEntitlements(input: EntitlementInput): Entitlements {
   const isOwner = isPlatformOwner(input.discordUserId);
   const bot = new Set(input.botGuildIds);
-  const eligible = input.ownedGuildIds.filter((id) => bot.has(id));
+  const eligible = input.ownedGuildIds.filter((id) => {
+    if (!bot.has(id)) return false;
+    const linkedAccountId = input.guildAccountIds?.[id];
+    return !linkedAccountId || linkedAccountId === input.discordUserId;
+  });
   const ownerEligible = (input.manageableGuildIds ?? input.ownedGuildIds).filter((id) => bot.has(id));
 
   if (isOwner) {

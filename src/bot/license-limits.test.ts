@@ -36,6 +36,30 @@ test("servidores fora da cota recebem licença inativa", async () => {
   assert.equal(licenses.g2?.priority, 1);
 });
 
+test("login de outra conta não substitui o vínculo de um servidor já atribuído", async () => {
+  await syncGuildEntitlements({
+    accountId: "owner-1",
+    discordUsername: "primeiro",
+    planId: "pro",
+    botGuildIds: ["g3"],
+    ownedGuildIds: ["g3"],
+    allowedGuildIds: ["g3"],
+  });
+  await syncGuildEntitlements({
+    accountId: "owner-2",
+    discordUsername: "segundo",
+    planId: "escala",
+    botGuildIds: ["g3"],
+    ownedGuildIds: ["g3"],
+    allowedGuildIds: ["g3"],
+  });
+
+  const license = (await readGuildLicenses()).byGuild.g3;
+  assert.equal(license?.accountId, "owner-1");
+  assert.equal(license?.discordUsername, "primeiro");
+  assert.equal(license?.planId, "pro");
+});
+
 test("OCR Pro conta 500 chamadas por conta e por mês, compartilhadas entre servidores", async () => {
   resetStoreCacheForTests("ocr-usage");
   for (let index = 0; index < 500; index += 1) {

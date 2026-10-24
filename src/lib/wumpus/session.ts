@@ -30,6 +30,7 @@ import {
   recordDashboardLogin,
 } from "./admin-store.server";
 import { syncGuildEntitlements } from "./license-store.server";
+import { readGuildLicenses } from "./license-store.server";
 import { consumeOAuthStateCookie, clearDashboardSessionCookie, getDashboardSessionCookie, markPrivateResponse, setDashboardSessionCookie } from "./session-cookie.server";
 import { enforceRequestLimit } from "./request-limits.server";
 import { loadManualSubscriptionRows, verifySignedSession } from "./session-access.server";
@@ -154,10 +155,11 @@ export const resolveAccess = createServerFn({ method: "POST" })
 
     // Relido do servidor a cada chamada: bot que saiu e assinatura que venceu
     // deixam de valer sem depender de nada guardado no navegador.
-    const [botGuildIds, billing, manualSubscriptions] = await Promise.all([
+    const [botGuildIds, billing, manualSubscriptions, licenseFile] = await Promise.all([
       loadBotGuildIds(),
       loadBilling(),
       loadManualSubscriptionRows(),
+      readGuildLicenses(),
     ]);
 
     const subscriptions = [...subscriptionRows(billing), ...manualSubscriptions];
@@ -169,6 +171,9 @@ export const resolveAccess = createServerFn({ method: "POST" })
       ownedGuildIds: payload.guilds.filter((guild) => guild.owner).map((guild) => guild.id),
       manageableGuildIds: payload.guilds.map((guild) => guild.id),
       botGuildIds,
+      guildAccountIds: Object.fromEntries(
+        Object.entries(licenseFile.byGuild).map(([guildId, license]) => [guildId, license.accountId]),
+      ),
       subscriptions,
     });
 

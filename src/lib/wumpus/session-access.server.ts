@@ -5,6 +5,7 @@ import { configuredLifetimeSubscriptions, resolveEntitlements, type Entitlements
 import { isPlatformOwner } from "./owner";
 import { enforceRequestLimit } from "./request-limits.server";
 import { loadBilling } from "./shardpay.server";
+import { readGuildLicenses } from "./license-store.server";
 import { getDashboardSessionCookie, markPrivateResponse } from "./session-cookie.server";
 import { sessionSecret, verifySession, type SessionPayload } from "./session-token";
 
@@ -63,13 +64,21 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
   if (!canManageGuild && !platformOwnerCanManageGuild) throw new Error("Você não administra este servidor no Discord.");
 
   if (!guildAccessCache || guildAccessCache.userId !== payload.userId || guildAccessCache.expiresAt < Date.now()) {
-    const [botGuildIds, billing, manualSubscriptions] = await Promise.all([loadBotGuildIds(), loadBilling(), loadManualSubscriptionRows()]);
+    const [botGuildIds, billing, manualSubscriptions, licenseFile] = await Promise.all([
+      loadBotGuildIds(),
+      loadBilling(),
+      loadManualSubscriptionRows(),
+      readGuildLicenses(),
+    ]);
     const entitlements = resolveEntitlements({
       discordUserId: payload.userId,
       discordUsername: payload.username,
       ownedGuildIds: payload.guilds.filter((guild) => guild.owner).map((guild) => guild.id),
       manageableGuildIds: payload.guilds.map((guild) => guild.id),
       botGuildIds,
+      guildAccountIds: Object.fromEntries(
+        Object.entries(licenseFile.byGuild).map(([guildId, license]) => [guildId, license.accountId]),
+      ),
       subscriptions: [...subscriptionsFor(billing), ...manualSubscriptions],
     });
     guildAccessCache = { userId: payload.userId, guildIds: new Set(entitlements.guildIds), entitlements, expiresAt: Date.now() + 30_000 };
