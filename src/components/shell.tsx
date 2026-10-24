@@ -363,6 +363,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       className="app-shell flex min-h-dvh bg-background text-foreground"
       onContextMenu={(event) => event.preventDefault()}
     >
+      <a href="#main-content" className="skip-link">Pular para o conteúdo</a>
       <ServerRail />
       <aside className="app-sidebar hidden w-[17rem] shrink-0 flex-col border-r border-border bg-card lg:flex">
         <Link to="/" aria-label="Wumpus, início" className="flex h-[4.5rem] items-center gap-3 border-b border-border px-5">
@@ -434,7 +435,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         {runtimeSyncError ? <p role="alert" className="mx-4 mb-0 mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive sm:mx-7">{runtimeSyncError}</p> : null}
-        <main className="app-page w-full flex-1 px-4 py-6 sm:px-7 sm:py-8">
+        <main id="main-content" tabIndex={-1} className="app-page w-full flex-1 px-4 py-6 outline-none sm:px-7 sm:py-8">
           {children}
         </main>
       </div>
