@@ -50,7 +50,7 @@ function ModerationPage() {
   const preview = target ? nextModerationAction(liveStrikes, mcfg.config) : null;
 
   return (
-    <div className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-[1fr_320px]">
+    <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
       <div className="space-y-4">
         <h1 className="m-0 text-xl font-semibold tracking-tight">Moderação</h1>
         <Card>

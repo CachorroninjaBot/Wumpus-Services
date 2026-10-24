@@ -53,7 +53,7 @@ function SettingsPage() {
   }, [gid]);
 
   return (
-    <div key={gid} className="mx-auto flex max-w-5xl flex-col gap-5">
+    <div key={gid} className="mx-auto flex max-w-6xl flex-col gap-6">
       <div>
         <h1 className="m-0 text-2xl font-semibold tracking-tight">Configurações do servidor</h1>
         <p className="mt-1 text-sm text-muted-foreground">

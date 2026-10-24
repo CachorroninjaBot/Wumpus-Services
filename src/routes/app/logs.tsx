@@ -62,7 +62,7 @@ function LogsPage() {
   });
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <div>
         <h1 className="m-0 text-xl font-semibold tracking-tight">Auditoria</h1>
         <p className="mb-0 mt-1 text-sm text-muted-foreground">Eventos persistidos pelo bot. Atualiza a cada 30 segundos.</p>
