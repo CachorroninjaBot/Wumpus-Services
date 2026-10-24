@@ -416,7 +416,7 @@ async function handleStats(interaction: ChatInputCommandInteraction, log: Logger
 
   const guildForms = forms.filter((row) => row.guildId === guild.id);
   const guildOccurrences = occurrences.filter((row) => row.guildId === guild.id);
-  const guildMessages = messages.filter((row) => mine.some((ticket) => ticket.id === row.ticketId));
+  const guildMessages = messages.filter((row) => !row.internal && mine.some((ticket) => ticket.id === row.ticketId));
 
   const byAction = guildOccurrences.reduce<Record<string, number>>((acc, row) => {
     const key = row.appliedAction ?? "sem efeito";

@@ -118,7 +118,7 @@ export type OutboxJob = {
   target: string;
   /** Referencia de canal da config (nome como "ch_atendimento" ou snowflake). */
   channelRef: string;
-  action?: "claim" | "reply" | "close" | "priority" | "transfer" | "escalate" | "approve_form" | "reject_form" | "security_restore" | "security_lockdown_on" | "security_lockdown_off";
+  action?: "claim" | "reply" | "note" | "close" | "priority" | "transfer" | "escalate" | "waiting_user" | "waiting_staff" | "resume" | "approve_form" | "reject_form" | "security_restore" | "security_lockdown_on" | "security_lockdown_off";
   verificationRoleId?: string;
   ticketId?: number;
   formId?: number;
@@ -156,6 +156,7 @@ export type BotTicketRecord = {
   closedAt: string | null;
   closedBy?: string | null;
   closeReason?: string | null;
+  waitingOn?: "user" | "staff" | null;
   priority: "low" | "normal" | "high" | "urgent";
   firstResponseAt: string | null;
   firstRespondedBy?: string | null;
@@ -187,6 +188,7 @@ export type BotTicketMessage = {
   authorName: string;
   content: string;
   at: string;
+  internal?: boolean;
 };
 
 export type BotFormRecord = {

@@ -30,7 +30,32 @@ const slaTone: Record<SlaState, "ok" | "warn" | "danger"> = {
   breach: "danger",
 };
 
+const priorityTone: Record<TicketPriority, "default" | "info" | "warn" | "danger"> = {
+  low: "default",
+  normal: "info",
+  high: "warn",
+  urgent: "danger",
+};
+
+const priorityLabel: Record<TicketPriority, string> = {
+  low: "Baixa",
+  normal: "Normal",
+  high: "Alta",
+  urgent: "Urgente",
+};
+
 type NoticeTone = "neutral" | "success" | "error";
+type SavedReply = { id: string; label: string; content: string };
+
+function readSavedReplies(value: unknown): SavedReply[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): SavedReply[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const row = entry as Record<string, unknown>;
+    if (typeof row.id !== "string" || typeof row.label !== "string" || typeof row.content !== "string") return [];
+    return [{ id: row.id, label: row.label, content: row.content }];
+  }).slice(0, 20);
+}
 
 const ticketTemplates: Record<string, { label: string; description: string; config: Partial<Record<string, unknown>> }> = {
   support: {
@@ -111,6 +136,8 @@ function TicketsPage() {
   const articles = useWumpus((s) => s.articles);
   const kcfg = useModule("knowledge");
   const aiAllowed = planAllows(guild.plan, "ai") && Boolean(tcfg.config.aiSupportEnabled);
+  const configuredSavedReplies = readSavedReplies(tcfg.config.savedReplies);
+  const savedReplies = configuredSavedReplies.filter((item) => item.label.trim() && item.content.trim());
   const canUseDepartments = planAllows(guild.plan, "multiDepartment");
   const departmentSettings = useMemo<TicketDepartmentConfig[]>(() => {
     const saved = Array.isArray(tcfg.config.departmentSettings)
@@ -162,6 +189,10 @@ function TicketsPage() {
     });
   }
 
+  function saveSavedReplies(next: SavedReply[]) {
+    updateConfig("tickets", { savedReplies: next.slice(0, 20) });
+  }
+
   function applyTicketTemplate(templateId: string) {
     const template = ticketTemplates[templateId];
     if (!template) return;
@@ -179,9 +210,11 @@ function TicketsPage() {
   const [query, setQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
+  const [quickFilter, setQuickFilter] = useState<"all" | "mine" | "unassigned" | "overdue" | "urgent">("all");
   const [selectedId, setSelectedId] = useState<string | null>(tickets[0]?.id ?? null);
   const [showTicketOnMobile, setShowTicketOnMobile] = useState(false);
   const [reply, setReply] = useState("");
+  const [internalNote, setInternalNote] = useState(false);
   const [transferStaffInput, setTransferStaffInput] = useState("");
   const [closeReason, setCloseReason] = useState("");
   const [activeView, setActiveView] = useState<"queue" | "panel">("queue");
@@ -229,9 +262,11 @@ function TicketsPage() {
               return previous
                 && previous.id === row.id
                 && previous.subject === row.subject
+                && previous.subject === row.subject
                 && previous.status === row.status
                 && previous.priority === row.priority
                 && previous.claimedBy === row.claimedBy
+                && previous.waitingOn === row.waitingOn
                 && previous.department === row.department
                 && previous.createdAt === row.createdAt
                 && previous.firstResponseAt === row.firstResponseAt
@@ -262,7 +297,7 @@ function TicketsPage() {
     return () => { stopped = true; window.clearInterval(timer); };
   }, [gid]);
 
-  async function runTicketAction(action: "claim" | "reply" | "close" | "priority" | "transfer" | "escalate", input: { content?: string; priority?: TicketPriority; reason?: string; targetStaffId?: string } = {}) {
+  async function runTicketAction(action: "claim" | "reply" | "note" | "close" | "priority" | "transfer" | "escalate" | "waiting_user" | "waiting_staff" | "resume", input: { content?: string; priority?: TicketPriority; reason?: string; targetStaffId?: string } = {}) {
     if (!ticket) return false;
     const token = getStoredSessionToken();
     if (!token) { announce("Entre novamente com Discord para atender tickets.", "error"); return false; }
@@ -320,40 +355,58 @@ function TicketsPage() {
       .filter((t) => departmentFilter === "all" || t.department === departmentFilter)
       .filter((t) => priorityFilter === "all" || t.priority === priorityFilter)
       .filter((t) => {
+        if (quickFilter === "mine") return t.claimedBy === user.id;
+        if (quickFilter === "unassigned") return !t.claimedBy;
+        if (quickFilter === "overdue") return ticketSla(t, tcfg.config) === "breach";
+        if (quickFilter === "urgent") return t.priority === "urgent";
+        return true;
+      })
+      .filter((t) => {
         const opener = memberById.get(t.openerId)?.displayName ?? t.openerId;
         const haystack = `#${t.number} ${t.subject} ${t.department} ${opener} ${t.claimedBy ?? ""}`;
         return haystack.toLocaleLowerCase("pt-BR").includes(normalizedQuery);
       })
       .sort((a, b) => b.createdAt - a.createdAt);
-  }, [tickets, filter, departmentFilter, priorityFilter, normalizedQuery, memberById]);
+  }, [tickets, filter, departmentFilter, priorityFilter, quickFilter, normalizedQuery, memberById, user.id, tcfg.config]);
 
   const ticket = list.find((t) => t.id === selectedId) ?? list[0] ?? null;
   const selectedTicketId = ticket?.id;
   const selectedTicketNumber = ticket?.number;
-  const selectedTicketMessageCount = ticket?.messages.length;
-
   useEffect(() => {
-    if (!selectedTicketId || !selectedTicketNumber || !gid || selectedTicketMessageCount) return;
+    if (!selectedTicketId || !selectedTicketNumber || !gid) return;
     let stopped = false;
-    const token = getStoredSessionToken();
-    if (!token) return;
-
-    setLoadingTicketId(selectedTicketId);
-    void getGuildTicketMessages({ data: { token, guildId: gid, ticketId: selectedTicketNumber } })
-      .then((detail) => {
+    let inFlight = false;
+    let firstRequest = true;
+    let errorAnnounced = false;
+    const refreshMessages = async () => {
+      if (stopped || inFlight || document.visibilityState === "hidden") return;
+      const token = getStoredSessionToken();
+      if (!token) return;
+      inFlight = true;
+      if (firstRequest) setLoadingTicketId(selectedTicketId);
+      try {
+        const detail = await getGuildTicketMessages({ data: { token, guildId: gid, ticketId: selectedTicketNumber } });
         if (stopped) return;
         setTickets((current) => current.map((row) => row.id === selectedTicketId
           ? { ...row, subject: detail.subject, messages: detail.messages }
           : row));
-      })
-      .catch((error) => {
-        if (!stopped) announce(error instanceof Error ? error.message : "Não foi possível carregar a conversa.", "error");
-      })
-      .finally(() => {
-        if (!stopped) setLoadingTicketId((current) => current === selectedTicketId ? null : current);
-      });
-    return () => { stopped = true; };
-  }, [announce, gid, selectedTicketId, selectedTicketNumber, selectedTicketMessageCount]);
+        errorAnnounced = false;
+      } catch (error) {
+        if (!stopped && !errorAnnounced) {
+          announce(error instanceof Error ? error.message : "Não foi possível carregar a conversa.", "error");
+          errorAnnounced = true;
+        }
+      } finally {
+        inFlight = false;
+        const wasFirstRequest = firstRequest;
+        firstRequest = false;
+        if (!stopped && wasFirstRequest) setLoadingTicketId((current) => current === selectedTicketId ? null : current);
+      }
+    };
+    void refreshMessages();
+    const timer = window.setInterval(() => void refreshMessages(), 5_000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [announce, gid, selectedTicketId, selectedTicketNumber]);
 
   async function runAi(t: Ticket) {
     const token = getStoredSessionToken();
@@ -368,7 +421,7 @@ function TicketsPage() {
       .replace(/(?:discord\.gg|discord\.com\/invite)\/[\w-]+/gi, "[convite removido]");
     const includeConversation = Boolean(tcfg.config.aiIncludeConversation);
     const transcript = includeConversation
-      ? t.messages.map((m) => `${m.kind}: ${redact(m.content)}`).join("\n")
+      ? t.messages.filter((message) => message.kind !== "internal").map((m) => `${m.kind}: ${redact(m.content)}`).join("\n")
       : "A conversa foi omitida conforme a configuração de privacidade do servidor.";
     const safeSubject = includeConversation ? redact(t.subject) : `Atendimento #${t.number}`;
     const related = kcfg.enabled
@@ -463,6 +516,33 @@ function TicketsPage() {
         ))}
       </div>
 
+      {filter === "active" ? (
+        <div className="flex flex-wrap gap-2" aria-label="Filtros rápidos da fila">
+          {([
+            ["all", "Todos"],
+            ["mine", "Meus tickets"],
+            ["unassigned", "Sem responsável"],
+            ["overdue", "SLA estourado"],
+            ["urgent", "Urgentes"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={quickFilter === value}
+              onClick={() => setQuickFilter(value)}
+              className={cn(
+                "min-h-10 rounded-full border px-3 text-sm transition-colors",
+                quickFilter === value
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="grid gap-2 rounded-2xl border border-border bg-card p-3 sm:grid-cols-[minmax(220px,1fr)_180px_150px]">
         <div className="relative">
           <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -517,6 +597,7 @@ function TicketsPage() {
                 <button
                   key={t.id}
                   type="button"
+                  aria-pressed={ticket?.id === t.id}
                   onClick={() => {
                     setSelectedId(t.id);
                     setShowTicketOnMobile(true);
@@ -527,14 +608,17 @@ function TicketsPage() {
                     ticket?.id === t.id ? "bg-muted" : "hover:bg-muted/50",
                   )}
                 >
-                  <span className="flex items-center gap-2 text-sm font-medium">
+                  <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
                     #{t.number}
-                    <Badge tone={slaTone[sla]}>{t.priority}</Badge>
+                    <Badge tone={priorityTone[t.priority]}>{priorityLabel[t.priority]}</Badge>
+                    <Badge tone={slaTone[sla]}>{sla === "breach" ? "SLA vencido" : sla === "warning" ? "SLA atenção" : "SLA no prazo"}</Badge>
+                    {t.waitingOn ? <Badge tone="warn">{t.waitingOn === "user" ? "Aguardando usuário" : "Aguardando equipe"}</Badge> : null}
                     {shouldAutoClose(t, tcfg.config) ? <Badge tone="warn">ocioso</Badge> : null}
                   </span>
                   <span className="truncate text-[13px] text-muted-foreground">{t.subject}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {t.department} · {formatRelative(t.createdAt)}
+                  <span className="flex min-w-0 justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span className="truncate">{t.department} · {t.claimedBy ? memberById.get(t.claimedBy)?.displayName ?? "com responsável" : "sem responsável"}</span>
+                    <span className="shrink-0">{formatRelative(t.createdAt)}</span>
                   </span>
                 </button>
               );
@@ -578,6 +662,7 @@ function TicketsPage() {
                 <span>{ticket.department}</span>
                 <span>aberto {formatTime(ticket.createdAt)}</span>
                 {ticket.claimedBy ? <span>com {memberById.get(ticket.claimedBy)?.displayName ?? ticket.claimedBy}</span> : <span>sem dono</span>}
+                {ticket.waitingOn ? <Badge tone="warn">{ticket.waitingOn === "user" ? "Aguardando usuário" : "Aguardando equipe"} · SLA ativo</Badge> : null}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {ticket.status === "open" || ticket.status === "claimed" ? (
@@ -591,6 +676,17 @@ function TicketsPage() {
                     <Button size="sm" variant="outline" disabled={actionBusy} onClick={() => setCloseOpen(true)}>
                       Encerrar
                     </Button>
+                    <Button size="sm" variant="outline" disabled={actionBusy || ticket.waitingOn === "user"} onClick={() => void runTicketAction("waiting_user")}>
+                      Aguardar usuário
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={actionBusy || ticket.waitingOn === "staff"} onClick={() => void runTicketAction("waiting_staff")}>
+                      Aguardar equipe
+                    </Button>
+                    {ticket.waitingOn ? (
+                      <Button size="sm" variant="secondary" disabled={actionBusy} onClick={() => void runTicketAction("resume")}>
+                        Retomar
+                      </Button>
+                    ) : null}
                     {aiAllowed ? (
                       <Button size="sm" variant="ghost" disabled={aiBusy} onClick={() => void runAi(ticket)}>
                         {aiBusy ? "Analisando…" : "Analisar com IA"}
@@ -613,12 +709,19 @@ function TicketsPage() {
             <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
               {ticket.messages.length ? (
                 ticket.messages.map((m) => {
-                  const who = m.kind === "system" ? null : memberById.get(m.authorId);
+                  const who = m.kind === "system" || m.kind === "internal" ? null : memberById.get(m.authorId);
                   return (
-                    <div key={m.id} className="flex gap-2">
+                    <div
+                      key={m.id}
+                      className={cn(
+                        "flex gap-2 rounded-lg px-2 py-1",
+                        m.kind === "internal" && "bg-warn/10",
+                      )}
+                    >
                       {who ? <MemberAvatar name={who.displayName} hue={who.hue} size={28} /> : <span className="size-7" />}
                       <div className="min-w-0">
                         <p className="m-0 text-[11px] text-muted-foreground">
+                          {m.kind === "internal" ? "Nota interna · " : ""}
                           {who?.displayName ?? m.authorName ?? "Sistema"} · {formatRelative(m.at)}
                         </p>
                         <p className="m-0 text-sm leading-relaxed">{m.content}</p>
@@ -661,19 +764,51 @@ function TicketsPage() {
 
             {ticket.status === "open" || ticket.status === "claimed" ? (
               <form
-                className="flex gap-2 border-t border-border p-3"
+                className="space-y-2 border-t border-border p-3"
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!reply.trim()) return;
-                  void runTicketAction("reply", { content: reply.trim() }).then((ok) => { if (ok) setReply(""); });
+                  void runTicketAction(internalNote ? "note" : "reply", { content: reply.trim() }).then((ok) => {
+                    if (ok) {
+                      setReply("");
+                      setInternalNote(false);
+                    }
+                  });
                 }}
               >
-                <Input
+                {savedReplies.length ? (
+                  <NativeSelect
+                    aria-label="Inserir resposta salva"
+                    value=""
+                    onChange={(event) => {
+                      const selectedReply = savedReplies.find((item) => item.id === event.target.value);
+                      if (selectedReply) {
+                        setInternalNote(false);
+                        setReply(selectedReply.content);
+                      }
+                    }}
+                  >
+                    <option value="">Inserir resposta salva…</option>
+                    {savedReplies.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </NativeSelect>
+                ) : null}
+                <Textarea
                   value={reply}
                   onChange={(e) => setReply(e.target.value)}
-                  placeholder="Responder como staff…"
+                  maxLength={2000}
+                  rows={3}
+                  aria-label={internalNote ? "Nota interna para a equipe" : "Resposta ao usuário"}
+                  placeholder={internalNote ? "Escreva uma nota visível apenas para a equipe…" : "Responder ao usuário…"}
                 />
-                <Button type="submit" disabled={actionBusy}>Enviar</Button>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <label className="flex min-h-11 items-center gap-2 text-sm">
+                    <Switch checked={internalNote} onCheckedChange={setInternalNote} />
+                    Nota interna
+                  </label>
+                  <Button type="submit" disabled={actionBusy || !reply.trim()}>
+                    {actionBusy ? "Enviando…" : internalNote ? "Registrar nota" : "Enviar resposta"}
+                  </Button>
+                </div>
               </form>
             ) : null}
 
@@ -954,6 +1089,64 @@ function TicketsPage() {
                   <Textarea key={asString(tcfg.config.welcomeMessage)} rows={3} defaultValue={asString(tcfg.config.welcomeMessage)} onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })} />
                   <p className="m-0 text-xs text-muted-foreground">Enviada automaticamente quando o atendimento é aberto.</p>
                 </Field>
+                <section className="space-y-3" aria-labelledby="ticket-saved-replies-heading">
+                  <div>
+                    <h3 id="ticket-saved-replies-heading" className="m-0 text-sm font-semibold">Respostas salvas</h3>
+                    <p className="m-0 mt-1 text-xs text-muted-foreground">Atalhos para mensagens frequentes da equipe. Elas só são enviadas depois da confirmação no ticket.</p>
+                  </div>
+                  {configuredSavedReplies.map((item, index) => (
+                    <div key={item.id} className="space-y-2 rounded-xl border border-border p-3">
+                      <div className="flex gap-2">
+                        <Input
+                          aria-label={`Nome da resposta salva ${index + 1}`}
+                          maxLength={60}
+                          value={item.label}
+                          placeholder="Nome da resposta"
+                          onChange={(event) => {
+                            const next = [...configuredSavedReplies];
+                            next[index] = { ...item, label: event.target.value };
+                            saveSavedReplies(next);
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Remover resposta salva ${index + 1}`}
+                          onClick={() => saveSavedReplies(configuredSavedReplies.filter((_, replyIndex) => replyIndex !== index))}
+                        >
+                          <Trash2 aria-hidden="true" className="size-4" />
+                        </Button>
+                      </div>
+                      <Textarea
+                        aria-label={`Texto da resposta salva ${index + 1}`}
+                        rows={2}
+                        maxLength={2000}
+                        value={item.content}
+                        placeholder="Texto que será inserido no campo de resposta"
+                        onChange={(event) => {
+                          const next = [...configuredSavedReplies];
+                          next[index] = { ...item, content: event.target.value };
+                          saveSavedReplies(next);
+                        }}
+                      />
+                    </div>
+                  ))}
+                  {configuredSavedReplies.length < 20 ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => saveSavedReplies([
+                        ...configuredSavedReplies,
+                        { id: `reply-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, label: "", content: "" },
+                      ])}
+                    >
+                      <Plus aria-hidden="true" className="size-4" />
+                      Adicionar resposta salva
+                    </Button>
+                  ) : <p className="m-0 text-xs text-muted-foreground">Limite de 20 respostas salvas atingido.</p>}
+                </section>
                 <ToggleRow label="IA de apoio à equipe" description="Gera sugestões privadas para os atendentes." checked={Boolean(tcfg.config.aiSupportEnabled)} onChange={(value) => updateConfig("tickets", { aiSupportEnabled: value })} />
                 <ToggleRow label="Incluir conversa nas análises por IA" description="Quando desligado, o conteúdo das mensagens não é enviado à IA." checked={Boolean(tcfg.config.aiIncludeConversation)} onChange={(value) => updateConfig("tickets", { aiIncludeConversation: value })} />
               </section>

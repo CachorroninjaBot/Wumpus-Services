@@ -67,7 +67,7 @@ export type TicketMessage = {
   authorName?: string;
   content: string;
   at: number;
-  kind: "user" | "staff" | "system";
+  kind: "user" | "staff" | "system" | "internal";
 };
 
 export type Ticket = {
@@ -79,6 +79,7 @@ export type Ticket = {
   department: string;
   subject: string;
   status: TicketStatus;
+  waitingOn?: "user" | "staff" | null;
   priority: TicketPriority;
   tags: string[];
   channelName: string;

@@ -13,7 +13,15 @@ const staffMembers = [
 test("keeps all role members, including those without recorded activity", () => {
   const rows = aggregateStaffMonitoring({
     members: staffMembers,
-    tickets: [],
+    tickets: [{
+      id: 10,
+      guildId: "guild",
+      status: "open",
+      claimedBy: "staff-1",
+      createdAt: recent,
+      closedAt: null,
+      firstResponseAt: null,
+    }],
     messages: [],
     forms: [],
     audit: [],
@@ -84,6 +92,33 @@ test("attributes ticket metrics to recorded responders, closers, raters, and rev
   assert.equal(bia?.approvedForms, 1);
   assert.equal(bia?.moderationActions, 1);
   assert.equal(bia?.ticketMessages, 1);
+});
+
+test("does not count internal ticket notes as staff responses", () => {
+  const rows = aggregateStaffMonitoring({
+    members: staffMembers,
+    tickets: [{
+      id: 10,
+      guildId: "guild",
+      status: "open",
+      claimedBy: "staff-1",
+      createdAt: recent,
+      closedAt: null,
+      firstResponseAt: null,
+    }],
+    messages: [
+      { ticketId: 10, authorId: "staff-1", at: recent, internal: true },
+      { ticketId: 10, authorId: "staff-1", at: recent },
+    ],
+    forms: [],
+    audit: [],
+    periodDays: 30,
+    responseGoalMinutes: 30,
+    slaWarningMinutes: 60,
+    now,
+  });
+
+  assert.equal(rows.find((row) => row.id === "staff-1")?.ticketMessages, 1);
 });
 
 test("excludes activity outside the selected period and does not guess legacy attribution", () => {

@@ -15,8 +15,10 @@ import {
   buildTicketPanel,
   claimTicket,
   closeTicket,
+  recordInternalTicketNote,
   sendTicketReply,
   setTicketPriority,
+  setTicketWaiting,
   transferTicket,
 } from "./tickets.ts";
 import { asSendable, resolveChannel } from "./resolve.ts";
@@ -513,10 +515,14 @@ async function processTicketAction(
   if (
     job.action !== "claim" &&
     job.action !== "reply" &&
+    job.action !== "note" &&
     job.action !== "close" &&
     job.action !== "priority" &&
     job.action !== "transfer" &&
-    job.action !== "escalate"
+    job.action !== "escalate" &&
+    job.action !== "waiting_user" &&
+    job.action !== "waiting_staff" &&
+    job.action !== "resume"
   ) {
     return { ok: false, detail: "Ação de atendimento inválida." };
   }
@@ -542,6 +548,16 @@ async function processTicketAction(
         ? "Resposta enviada ao Discord."
         : (result.error ?? "Não foi possível responder."),
     };
+  }
+  if (job.action === "note") {
+    if (!job.content) return { ok: false, detail: "A nota interna não pode ficar vazia." };
+    const result = await recordInternalTicketNote(guild, job.ticketId, job.actorId, job.content, log);
+    return { ok: result.ok, detail: result.ok ? "Nota interna registrada." : result.error ?? "Não foi possível salvar a nota." };
+  }
+  if (job.action === "waiting_user" || job.action === "waiting_staff" || job.action === "resume") {
+    const waitingOn = job.action === "waiting_user" ? "user" : job.action === "waiting_staff" ? "staff" : null;
+    const result = await setTicketWaiting(guild, job.ticketId, job.actorId, waitingOn, log);
+    return { ok: result, detail: result ? "Estado do atendimento atualizado. O SLA continua contando." : "O estado já estava selecionado ou o ticket foi encerrado." };
   }
   if (job.action === "priority") {
     if (!job.priority) return { ok: false, detail: "Prioridade inválida." };

@@ -194,6 +194,7 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     reopenEnabled: true,
     satisfactionSurvey: true,
     priorityEnabled: true,
+    savedReplies: [],
     tags: [],
     // Departamentos do atendimento. O bot ja lia `departments`, mas nao havia
     // valor padrao — entao todo servidor caia no "sem departamento" e o select

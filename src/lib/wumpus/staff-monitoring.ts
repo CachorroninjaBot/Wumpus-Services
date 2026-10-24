@@ -104,6 +104,7 @@ type StaffMonitoringMessage = {
   ticketId: number;
   authorId: string;
   at: string;
+  internal?: boolean;
 };
 
 type StaffMonitoringAudit = {
@@ -330,6 +331,7 @@ export function aggregateStaffMonitoring(input: {
   }
 
   for (const message of input.messages) {
+    if (message.internal) continue;
     if (!ticketIds.has(message.ticketId)) continue;
     const row = rows.get(message.authorId);
     const at = timestamp(message.at);

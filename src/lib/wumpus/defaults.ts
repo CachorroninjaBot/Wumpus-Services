@@ -43,6 +43,7 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     feedbackEnabled: true,
     reopenEnabled: true,
     priorityEnabled: true,
+    savedReplies: [],
     slaWarningMinutes: 60,
     namingPattern: "atendimento-{user}",
     welcomeMessage:

@@ -428,6 +428,7 @@ export const getGuildTickets = createServerFn({ method: "POST" })
         department: ticket.department ?? "Geral",
         subject: ticket.subject?.slice(0, 80) || `Atendimento #${ticket.id}`,
         status: ticket.status,
+        waitingOn: ticket.waitingOn ?? null,
         priority: ticket.priority,
         tags: [] as string[],
         channelName: ticket.channelId,
@@ -519,7 +520,7 @@ export const getGuildStaffMonitoring = createServerFn({ method: "POST" })
 
     const guildTickets = ticketRows.filter((ticket) => ticket.guildId === data.guildId);
     const ticketIds = new Set(guildTickets.map((ticket) => ticket.id));
-    const guildMessages = messages.filter((message) => ticketIds.has(message.ticketId));
+    const guildMessages = messages.filter((message) => ticketIds.has(message.ticketId) && !message.internal);
     const guildForms = forms.filter((form) => form.guildId === data.guildId);
     const guildAudit = audit.filter((event) => event.guildId === data.guildId);
     const guildModeration = moderationRows.filter((event) => event.guildId === data.guildId);
@@ -580,7 +581,11 @@ export const getGuildTicketMessages = createServerFn({ method: "POST" })
         authorName: message.authorName,
         content: message.content,
         at: Date.parse(message.at) || 0,
-        kind: message.authorId === ticket.openerId ? "user" as const : "staff" as const,
+        kind: message.internal
+          ? "internal" as const
+          : message.authorId === ticket.openerId
+            ? "user" as const
+            : "staff" as const,
       })),
     };
   });
@@ -661,13 +666,14 @@ export const requestTicketAction = createServerFn({ method: "POST" })
     guildId: z.string().regex(/^\d{17,20}$/),
     ticketId: z.number().int().positive(),
     actorId: z.string().regex(/^\d{17,20}$/),
-    action: z.enum(["claim", "reply", "close", "priority", "transfer", "escalate"]),
+    action: z.enum(["claim", "reply", "note", "close", "priority", "transfer", "escalate", "waiting_user", "waiting_staff", "resume"]),
     content: z.string().trim().min(1).max(2000).optional(),
     reason: z.string().trim().max(500).optional(),
     targetStaffId: z.string().regex(/^\d{17,20}$/).optional(),
     priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   }).strict().superRefine((input, ctx) => {
     if (input.action === "reply" && !input.content) ctx.addIssue({ code: "custom", message: "A resposta não pode ficar vazia." });
+    if (input.action === "note" && !input.content) ctx.addIssue({ code: "custom", message: "A nota interna não pode ficar vazia." });
     if (input.action === "priority" && !input.priority) ctx.addIssue({ code: "custom", message: "Escolha uma prioridade válida." });
     if (input.action === "transfer" && !input.targetStaffId) ctx.addIssue({ code: "custom", message: "Escolha um atendente para transferir o ticket." });
   }).parse(input))
