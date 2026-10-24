@@ -458,12 +458,32 @@ export const getGuildStaffMonitoring = createServerFn({ method: "POST" })
       : [];
     const now = Date.now();
     const periodDays = data.periodDays ?? 30;
-    const [rosterRows, ticketRows, messages, forms, audit] = await Promise.all([
+    const [rosterRows, ticketRows, messages, forms, audit, moderationRows] = await Promise.all([
       readBotCollection<BotStaffRosterSnapshot>("staff-rosters"),
       readBotCollection<BotTicketRecord>("tickets"),
       readBotCollection<BotTicketMessage>("ticket_messages"),
       readBotCollection<BotFormRecord>("forms"),
-      readBotCollection<{ guildId: string; module: string; actorId?: string; at: string }>("audit"),
+      readBotCollection<{
+        id: number;
+        guildId: string;
+        module: string;
+        eventType: string;
+        actorId?: string;
+        targetId?: string;
+        channelId?: string;
+        data?: Record<string, unknown>;
+        at: string;
+      }>("audit"),
+      readBotCollection<{
+        guildId: string;
+        staffId: string;
+        targetId: string;
+        requestedAction: string;
+        appliedAction: string | null;
+        status: string;
+        createdAt: string;
+        appliedAt: string | null;
+      }>("moderation"),
     ]);
     const roster = rosterRows.find((row) => row.guildId === data.guildId) ?? null;
     const sameRoles = roster?.configuredRoleRefs.slice().sort().join(",") === configuredRoleRefs.slice().sort().join(",");
@@ -502,6 +522,7 @@ export const getGuildStaffMonitoring = createServerFn({ method: "POST" })
     const guildMessages = messages.filter((message) => ticketIds.has(message.ticketId));
     const guildForms = forms.filter((form) => form.guildId === data.guildId);
     const guildAudit = audit.filter((event) => event.guildId === data.guildId);
+    const guildModeration = moderationRows.filter((event) => event.guildId === data.guildId);
     const responseGoalMinutes = Math.max(1, Math.min(10080, Number(staffConfig.responseTimeGoalMinutes) || 30));
     const slaWarningMinutes = Math.max(0, Math.min(10080, Number(ticketConfig.slaWarningMinutes) || 0));
     const members = configuredRoleRefs.length && sameRoles && roster ? roster.members : [];
@@ -511,6 +532,7 @@ export const getGuildStaffMonitoring = createServerFn({ method: "POST" })
       messages: guildMessages,
       forms: guildForms,
       audit: guildAudit,
+      moderation: guildModeration,
       periodDays,
       responseGoalMinutes,
       slaWarningMinutes,
@@ -526,7 +548,7 @@ export const getGuildStaffMonitoring = createServerFn({ method: "POST" })
       summary: {
         staffCount: staff.length,
         openTickets: openTickets.length,
-        overdueTickets: openTickets.filter((ticket) => slaState(ticket, slaWarningMinutes, now) === "breach").length,
+        overdueTickets: openTickets.filter((ticket) => slaState(ticket, slaWarningMinutes, now) !== "ok").length,
         unassignedTickets: openTickets.filter((ticket) => !ticket.claimedBy).length,
       },
     };

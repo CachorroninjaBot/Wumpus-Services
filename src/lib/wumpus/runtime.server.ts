@@ -152,8 +152,10 @@ export type BotTicketRecord = {
   claimedBy: string | null;
   claimedAt?: string | null;
   createdAt: string;
+  lastActivityAt?: string;
   closedAt: string | null;
   closedBy?: string | null;
+  closeReason?: string | null;
   priority: "low" | "normal" | "high" | "urgent";
   firstResponseAt: string | null;
   firstRespondedBy?: string | null;

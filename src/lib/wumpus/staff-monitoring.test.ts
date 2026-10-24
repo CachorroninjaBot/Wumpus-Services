@@ -53,6 +53,17 @@ test("attributes ticket metrics to recorded responders, closers, raters, and rev
     messages: [{ ticketId: 10, authorId: "staff-2", at: recent }],
     forms: [{ reviewedBy: "staff-2", reviewedAt: recent, status: "approved" }],
     audit: [{ module: "moderation", actorId: "staff-2", at: recent }],
+    moderation: [
+      {
+        staffId: "staff-2",
+        targetId: "member-2",
+        requestedAction: "warn",
+        appliedAction: "warn",
+        status: "applied",
+        createdAt: recent,
+        appliedAt: recent,
+      },
+    ],
     periodDays: 30,
     responseGoalMinutes: 30,
     slaWarningMinutes: 60,
@@ -110,4 +121,125 @@ test("excludes activity outside the selected period and does not guess legacy at
   assert.equal(ana?.moderationActions, 0);
   assert.equal(ana?.ticketMessages, 0);
   assert.equal(ana?.lastActivityAt, null);
+});
+
+test("shows open ticket aging and recent attributed activity", () => {
+  const rows = aggregateStaffMonitoring({
+    members: staffMembers,
+    tickets: [
+      {
+        id: 12,
+        guildId: "guild",
+        channelId: "channel-12",
+        subject: "Problema com pedido",
+        department: "Compras",
+        priority: "high",
+        status: "claimed",
+        claimedBy: "staff-1",
+        claimedAt: recent,
+        createdAt: "2026-04-26T00:00:00.000Z",
+        lastActivityAt: "2026-04-26T01:00:00.000Z",
+        closedAt: null,
+        firstResponseAt: null,
+      },
+    ],
+    messages: [],
+    forms: [],
+    audit: [],
+    periodDays: 30,
+    responseGoalMinutes: 30,
+    slaWarningMinutes: 60,
+    now,
+  });
+  const ana = rows.find((row) => row.id === "staff-1");
+
+  assert.equal(ana?.openTickets, 1);
+  assert.equal(ana?.openTicketDetails[0]?.subject, "Problema com pedido");
+  assert.equal(ana?.openTicketDetails[0]?.channelId, "channel-12");
+  assert.equal(ana?.openTicketDetails[0]?.ageHours, 108);
+  assert.equal(ana?.openTicketDetails[0]?.sla, "breach");
+  assert.equal(ana?.activity[0]?.title, "Assumiu atendimento #12");
+});
+
+test("counts transfer, urgent escalation, reopen and successful moderation events", () => {
+  const rows = aggregateStaffMonitoring({
+    members: staffMembers,
+    tickets: [
+      {
+        id: 13,
+        guildId: "guild",
+        channelId: "channel-13",
+        status: "claimed",
+        claimedBy: "staff-2",
+        createdAt: recent,
+        closedAt: null,
+        firstResponseAt: null,
+      },
+    ],
+    messages: [],
+    forms: [],
+    audit: [
+      {
+        id: 1,
+        module: "tickets",
+        eventType: "ticket_transferred",
+        actorId: "staff-1",
+        targetId: "staff-2",
+        channelId: "channel-13",
+        at: recent,
+      },
+      {
+        id: 2,
+        module: "tickets",
+        eventType: "ticket_priority_changed",
+        actorId: "staff-2",
+        channelId: "channel-13",
+        data: { ticketId: 13, priority: "urgent" },
+        at: recent,
+      },
+      {
+        id: 3,
+        module: "tickets",
+        eventType: "ticket_reopened",
+        actorId: "staff-1",
+        channelId: "channel-13",
+        at: recent,
+      },
+    ],
+    moderation: [
+      {
+        staffId: "staff-1",
+        targetId: "member-1",
+        requestedAction: "warn",
+        appliedAction: "warn",
+        status: "applied",
+        createdAt: recent,
+        appliedAt: recent,
+      },
+      {
+        staffId: "staff-1",
+        targetId: "member-2",
+        requestedAction: "ban",
+        appliedAction: null,
+        status: "failed",
+        createdAt: recent,
+        appliedAt: null,
+      },
+    ],
+    periodDays: 30,
+    responseGoalMinutes: 30,
+    slaWarningMinutes: 60,
+    now,
+  });
+  const ana = rows.find((row) => row.id === "staff-1");
+  const bia = rows.find((row) => row.id === "staff-2");
+
+  assert.equal(ana?.transfersMade, 1);
+  assert.equal(ana?.reopenActions, 1);
+  assert.equal(ana?.moderationActions, 1);
+  assert.equal(ana?.moderationAttempts, 2);
+  assert.equal(bia?.transfersReceived, 1);
+  assert.equal(bia?.escalations, 1);
+  assert.ok(ana?.activity.some((event) => event.title.startsWith("Transferiu atendimento")));
+  assert.ok(ana?.activity.some((event) => event.kind === "moderation"));
 });

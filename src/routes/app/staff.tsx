@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { getGuildStaffMonitoring } from "@/lib/wumpus/runtime-store";
 import type { StaffMonitoringResult } from "@/lib/wumpus/staff-monitoring";
+import type { StaffActivityEntry, StaffMonitoringRow } from "@/lib/wumpus/staff-monitoring";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { useModule, useWumpus } from "@/lib/wumpus/store";
 
@@ -21,8 +22,327 @@ function formatMinutes(value: number | null): string {
 }
 
 function formatLastActivity(value: number | null): string {
-  if (value === null) return "Sem atividade registrada";
+  if (value === null) return "Sem ação registrada";
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(value);
+}
+
+function StaffProfile({
+  person,
+  guildId,
+  periodDays,
+  roleNames,
+  goal,
+  maxConcurrent,
+  onPeriodChange,
+  onClose,
+  loading,
+  error,
+}: {
+  person: StaffMonitoringRow;
+  guildId: string;
+  periodDays: 7 | 30 | 90;
+  roleNames: string[];
+  goal: number;
+  maxConcurrent: number;
+  onPeriodChange: (periodDays: 7 | 30 | 90) => void;
+  onClose: () => void;
+  loading: boolean;
+  error: string | null;
+}) {
+  const ageBuckets = [
+    {
+      label: "Menos de 24 h",
+      count: person.openTicketDetails.filter((ticket) => ticket.ageHours < 24).length,
+    },
+    {
+      label: "1 a 3 dias",
+      count: person.openTicketDetails.filter(
+        (ticket) => ticket.ageHours >= 24 && ticket.ageHours < 72,
+      ).length,
+    },
+    {
+      label: "Mais de 3 dias",
+      count: person.openTicketDetails.filter((ticket) => ticket.ageHours >= 72).length,
+    },
+  ];
+  const ratingTotal = Object.values(person.ratingDistribution).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+
+  return (
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
+        <div className="flex items-center gap-3">
+          <MemberAvatar name={person.displayName} hue={176} size={52} />
+          <div>
+            <h1 className="m-0 text-xl font-semibold tracking-tight">{person.displayName}</h1>
+            <p className="m-0 mt-1 text-sm text-muted-foreground">
+              {roleNames.join(" · ") || person.username}
+            </p>
+            <p className="m-0 mt-1 text-xs text-muted-foreground">
+              Última ação registrada: {formatLastActivity(person.lastActivityAt)}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-end gap-2">
+          <div>
+            <Label htmlFor="profile-period">Período</Label>
+            <NativeSelect
+              id="profile-period"
+              value={periodDays}
+              disabled={loading}
+              onChange={(event) => onPeriodChange(Number(event.target.value) as 7 | 30 | 90)}
+            >
+              <option value={7}>7 dias</option>
+              <option value={30}>30 dias</option>
+              <option value={90}>90 dias</option>
+            </NativeSelect>
+          </div>
+          <Button
+            variant="outline"
+            onClick={onClose}
+            aria-label="Fechar perfil e voltar para a equipe"
+          >
+            Fechar perfil
+          </Button>
+        </div>
+      </header>
+
+      {error ? (
+        <p className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn" role="alert">
+          Não foi possível atualizar os dados. Exibindo a última sincronização disponível. {error}
+        </p>
+      ) : loading ? (
+        <p className="m-0 text-sm text-muted-foreground" role="status">
+          Atualizando as estatísticas da equipe…
+        </p>
+      ) : null}
+
+      <p className="m-0 -mt-4 text-xs text-muted-foreground">
+        Estatísticas do período de {periodDays} dias. A carga e os tickets abertos refletem o estado
+        atual.
+      </p>
+
+      <section aria-labelledby="profile-overview-heading">
+        <h2 id="profile-overview-heading" className="m-0 mb-3 text-base font-semibold">
+          Resumo do período
+        </h2>
+        <Card className="grid grid-cols-2 gap-x-6 gap-y-4 p-4 sm:grid-cols-4 lg:grid-cols-6">
+          <Metric label="Abertos agora" value={`${person.openTickets}/${maxConcurrent}`} />
+          <Metric label="Fora do SLA" value={String(person.overdueTickets)} />
+          <Metric label="Assumidos no período" value={String(person.claimedTickets)} />
+          <Metric label="Encerrados no período" value={String(person.closedTickets)} />
+          <Metric
+            label="Média de 1ª resposta"
+            value={formatMinutes(person.averageFirstResponseMinutes)}
+          />
+          <Metric label="Resolução média" value={formatMinutes(person.averageResolutionMinutes)} />
+        </Card>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <h2 className="m-0 mb-3 text-base font-semibold">Carga e envelhecimento</h2>
+          <Card className="p-4">
+            <div className="grid grid-cols-3 gap-3">
+              {ageBuckets.map((bucket) => (
+                <div key={bucket.label}>
+                  <p className="m-0 text-xs text-muted-foreground">{bucket.label}</p>
+                  <p className="m-0 mt-1 font-mono-num text-xl font-semibold">{bucket.count}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 divide-y divide-border">
+              {person.openTicketDetails.length ? (
+                person.openTicketDetails.map((ticket) => (
+                  <div
+                    key={ticket.id}
+                    className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="m-0 truncate font-medium">
+                        {ticket.channelId ? (
+                          <a
+                            className="underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2"
+                            href={`https://discord.com/channels/${guildId}/${ticket.channelId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            #{ticket.id} · {ticket.subject}
+                          </a>
+                        ) : (
+                          `#${ticket.id} · ${ticket.subject}`
+                        )}
+                      </p>
+                      <p className="m-0 mt-1 text-xs text-muted-foreground">
+                        {ticket.department} · {ticket.priority} · aberto há{" "}
+                        {formatAge(ticket.ageHours)}
+                      </p>
+                      <p className="m-0 mt-1 text-xs text-muted-foreground">
+                        Última atividade: {formatLastActivity(ticket.lastActivityAt)}
+                      </p>
+                    </div>
+                    <Badge
+                      tone={
+                        ticket.sla === "breach"
+                          ? "danger"
+                          : ticket.sla === "warning"
+                            ? "warn"
+                            : "ok"
+                      }
+                    >
+                      {ticket.sla === "breach"
+                        ? "SLA estourado"
+                        : ticket.sla === "warning"
+                          ? "Atenção ao SLA"
+                          : "No prazo"}
+                    </Badge>
+                  </div>
+                ))
+              ) : (
+                <p className="m-0 text-sm text-muted-foreground">
+                  Nenhum atendimento aberto atribuído a esta pessoa.
+                </p>
+              )}
+            </div>
+          </Card>
+        </div>
+
+        <div>
+          <h2 className="m-0 mb-3 text-base font-semibold">Qualidade e encaminhamentos</h2>
+          <Card className="space-y-4 p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <Metric
+                label="Respostas dentro da meta"
+                value={person.responseGoalRate === null ? "—" : `${person.responseGoalRate}%`}
+              />
+              <Metric label="Respostas avaliadas" value={String(person.firstResponseCount)} />
+              <Metric label="Meta configurada" value={`${goal} min`} />
+              <Metric
+                label="Média das avaliações"
+                value={
+                  person.averageRating === null ? "—" : `${person.averageRating.toFixed(1)} / 5`
+                }
+              />
+              <Metric label="Avaliações recebidas" value={String(person.ratingCount)} />
+              <Metric
+                label="Formulários revisados"
+                value={`${person.reviewedForms} · ${person.approvedForms} aprovados / ${person.rejectedForms} recusados`}
+              />
+            </div>
+            <div>
+              <h3 className="m-0 mb-2 text-sm font-medium">Distribuição das avaliações</h3>
+              <div className="space-y-2">
+                {([5, 4, 3, 2, 1] as const).map((rating) => {
+                  const count = person.ratingDistribution[rating];
+                  const percent = ratingTotal ? (count / ratingTotal) * 100 : 0;
+                  return (
+                    <div
+                      key={rating}
+                      className="grid grid-cols-[2rem_1fr_2rem] items-center gap-2 text-xs"
+                    >
+                      <span>{rating} ★</span>
+                      <span
+                        className="h-2 overflow-hidden rounded-full bg-muted"
+                        aria-hidden="true"
+                      >
+                        <span
+                          className="block h-full rounded-full bg-primary"
+                          style={{ width: `${percent}%` }}
+                        />
+                      </span>
+                      <span className="text-right font-mono-num">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 border-t border-border pt-4">
+              <Metric label="Transferências feitas" value={String(person.transfersMade)} />
+              <Metric label="Atendimentos recebidos" value={String(person.transfersReceived)} />
+              <Metric label="Escalonamentos" value={String(person.escalations)} />
+              <Metric label="Reaberturas iniciadas" value={String(person.reopenActions)} />
+              <Metric
+                label="Ações de moderação aplicadas"
+                value={String(person.moderationActions)}
+              />
+              <Metric label="Tentativas de moderação" value={String(person.moderationAttempts)} />
+              <Metric label="Mensagens em atendimentos" value={String(person.ticketMessages)} />
+            </div>
+          </Card>
+        </div>
+      </section>
+
+      <section aria-labelledby="staff-activity-heading">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 id="staff-activity-heading" className="m-0 text-base font-semibold">
+              Atividade recente
+            </h2>
+            <p className="m-0 mt-1 text-sm text-muted-foreground">
+              Até 40 eventos atribuídos nos últimos {periodDays} dias.
+            </p>
+          </div>
+          <p className="m-0 text-xs text-muted-foreground">
+            Conteúdo das conversas não é exibido neste histórico.
+          </p>
+        </div>
+        <Card className="mt-3 p-4">
+          {person.activity.length ? (
+            <ol className="m-0 divide-y divide-border p-0">
+              {person.activity.map((event) => (
+                <ActivityItem key={event.id} event={event} />
+              ))}
+            </ol>
+          ) : (
+            <p className="m-0 text-sm text-muted-foreground">
+              Não há atividade registrada para esta pessoa no período. Isso não indica ausência no
+              servidor; apenas ausência de eventos atribuíveis.
+            </p>
+          )}
+        </Card>
+      </section>
+
+      <p className="m-0 text-xs text-muted-foreground">
+        Indicadores descrevem eventos registrados pelo bot, não produtividade individual. Tempos,
+        transferências e avaliações incompletos por falta de dados não são estimados.
+      </p>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="m-0 text-xs text-muted-foreground">{label}</p>
+      <p className="m-0 mt-1 break-words font-mono-num text-sm font-medium">{value}</p>
+    </div>
+  );
+}
+
+function ActivityItem({ event }: { event: StaffActivityEntry }) {
+  return (
+    <li className="flex flex-wrap items-start justify-between gap-2 py-3 first:pt-0 last:pb-0">
+      <div>
+        <p className="m-0 text-sm font-medium">{event.title}</p>
+        <p className="m-0 mt-1 text-xs text-muted-foreground">{event.detail}</p>
+      </div>
+      <time
+        className="shrink-0 text-xs text-muted-foreground"
+        dateTime={new Date(event.at).toISOString()}
+      >
+        {formatLastActivity(event.at)}
+      </time>
+    </li>
+  );
+}
+
+function formatAge(hours: number): string {
+  if (hours < 24) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  const remainderHours = hours % 24;
+  return remainderHours ? `${days} d ${remainderHours} h` : `${days} d`;
 }
 
 function StaffPage() {
@@ -32,6 +352,7 @@ function StaffPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [windowDays, setWindowDays] = useState<7 | 30 | 90>(30);
+  const [activeStaffId, setActiveStaffId] = useState<string | null>(null);
   const scfg = useModule("staff");
   const updateConfig = useWumpus((s) => s.updateConfig);
   const roles = useWumpus((s) => s.roles[gid] ?? []);
@@ -74,7 +395,6 @@ function StaffPage() {
         }
       }
     };
-    setMonitoring(null);
     setLoading(true);
     void load();
     const timer = window.setInterval(() => void load(), 30_000);
@@ -83,6 +403,12 @@ function StaffPage() {
       window.clearInterval(timer);
     };
   }, [gid, windowDays, refreshKey]);
+
+  useEffect(() => {
+    setActiveStaffId(null);
+    setMonitoring(null);
+    setError(null);
+  }, [gid]);
 
   const refresh = () => {
     setLoading(true);
@@ -98,6 +424,27 @@ function StaffPage() {
           : monitoring?.rosterUpdatedAt
             ? `Membros sincronizados em ${formatLastActivity(monitoring.rosterUpdatedAt)}.`
             : null;
+  const activeStaff = monitoring?.staff.find((person) => person.id === activeStaffId);
+
+  if (monitoring && activeStaff) {
+    const roleNames = roles
+      .filter((role) => activeStaff.roleIds.includes(role.id))
+      .map((role) => role.name);
+    return (
+      <StaffProfile
+        person={activeStaff}
+        guildId={gid}
+        periodDays={monitoring.periodDays}
+        roleNames={roleNames}
+        goal={goal}
+        maxConcurrent={maxConcurrent}
+        onPeriodChange={setWindowDays}
+        onClose={() => setActiveStaffId(null)}
+        loading={loading}
+        error={error}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -281,12 +628,20 @@ function StaffPage() {
                         <td className="sticky left-0 z-10 bg-card px-4 py-3">
                           <div className="flex min-w-44 items-center gap-2">
                             <MemberAvatar name={person.displayName} hue={176} size={28} />
-                            <span>
-                              <span className="block font-medium">{person.displayName}</span>
-                              <span className="block text-xs text-muted-foreground">
+                            <button
+                              type="button"
+                              className="min-w-0 rounded text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                              onClick={() => setActiveStaffId(person.id)}
+                              aria-label={`Abrir perfil de ${person.displayName}`}
+                            >
+                              <span className="block truncate font-medium hover:underline">
+                                {person.displayName}
+                              </span>
+                              <span className="block truncate text-xs text-muted-foreground">
                                 {roleNames.join(" · ") || person.username}
                               </span>
-                            </span>
+                              <span className="block text-xs text-primary">Abrir perfil</span>
+                            </button>
                           </div>
                         </td>
                         <td className="px-4 py-3 font-mono-num">

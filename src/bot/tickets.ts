@@ -432,7 +432,8 @@ export async function claimTicket(
       title: `ATENDIMENTO #${ticketId} ASSUMIDO`,
       description: `<@${staffId}> assumiu o atendimento **#${ticketId}**.`,
       accentColor: "#3ecf8e",
-      fields: [{ name: "Atendente", value: `<@${staffId}>` }]
+      fields: [{ name: "Atendente", value: `<@${staffId}>` }],
+      data: { ticketId },
     },
     log
   );
@@ -485,6 +486,7 @@ export async function transferTicket(
     title: `ATENDIMENTO #${ticketId} TRANSFERIDO`,
     description: `${actorName} transferiu o atendimento para <@${targetStaffId}>.`,
     fields: [{ name: "Novo responsável", value: `<@${targetStaffId}>` }],
+    data: { ticketId },
   }, log);
   const channel = await guild.channels.fetch(ticket.channelId).catch(() => null);
   if (channel?.isTextBased() && "send" in channel) await channel.send({ content: `Atendimento transferido para <@${targetStaffId}>.`, allowedMentions: { users: [targetStaffId], parse: [] } }).catch(() => undefined);
@@ -661,7 +663,8 @@ export async function closeTicket(
         },
         { name: "Atendente", value: ticket.claimedBy ? `<@${ticket.claimedBy}>` : "ninguem assumiu" },
         ...(reason ? [{ name: "Motivo", value: reason.slice(0, 1000) }] : [])
-      ]
+      ],
+      data: { ticketId }
     },
     log
   );
@@ -950,7 +953,8 @@ export async function setTicketPriority(
       title: `PRIORIDADE · #${ticketId}`,
       description: `<@${actorId}> mudou a prioridade para **${wanted}**.`,
       accentColor: "#f5a524",
-      fields: [{ name: "Nova prioridade", value: wanted }]
+      fields: [{ name: "Nova prioridade", value: wanted }],
+      data: { ticketId, priority: wanted }
     },
     log
   );
@@ -1000,7 +1004,8 @@ export async function reopenClosedTicket(
       fields: [
         { name: "Original", value: `#${ticketId}` },
         { name: "Novo canal", value: `<#${opened.channelId}>` }
-      ]
+      ],
+      data: { ticketId: opened.ticket.id, reopenedFromTicketId: ticketId }
     },
     log
   );
