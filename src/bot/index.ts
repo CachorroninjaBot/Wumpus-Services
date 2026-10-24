@@ -372,7 +372,7 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
       return;
     }
     if (action === "claim") {
-      const result = await claimSupportChat(chat.id, interaction.user.id);
+      const result = await claimSupportChat(chat.id, interaction.user.id, interaction.user.username);
       if (result !== "claimed") {
         await interaction.reply({
           content: result === "already_claimed" ? "Este atendimento já foi reivindicado por outra pessoa da equipe." : "Este atendimento já está encerrado.",

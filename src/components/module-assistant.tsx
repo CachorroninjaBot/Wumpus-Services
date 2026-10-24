@@ -1,5 +1,5 @@
 import { useRouterState } from "@tanstack/react-router";
-import { ChevronLeft, ExternalLink, Headset, LoaderCircle, MessageCircle, Plus, Send, Sparkles, X } from "lucide-react";
+import { ChevronLeft, Headset, LoaderCircle, MessageCircle, Plus, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/markdown-content";
@@ -19,14 +19,13 @@ import { navItems } from "@/lib/wumpus/brand";
 import type { ModuleKey } from "@/lib/wumpus/defaults";
 import { useWumpus } from "@/lib/wumpus/store";
 
-type ChatMessage = { role: "user" | "assistant" | "staff"; content: string; id?: string; at?: number; delivery?: "queued" | "sent" | "failed" };
+type ChatMessage = { role: "user" | "assistant" | "staff" | "system"; content: string; id?: string; at?: number; delivery?: "queued" | "sent" | "failed" };
 type PastChat = { id: string; page: string; title: string; updatedAt: number; kind: "assistant" | "support"; status?: string };
 type HandoffState = {
   status: "idle" | "requesting" | "queued" | "open" | "closed" | "failed";
   jobId?: string;
   guildId?: string;
   detail?: string;
-  threadUrl?: string;
   rating?: number | null;
 };
 const moduleContext: Record<string, ModuleKey[]> = {
@@ -153,7 +152,6 @@ export function ModuleAssistant() {
         guildId,
         jobId: storedId,
         detail: result.detail ?? (status === "queued" ? "Seu pedido está chegando à equipe." : status === "failed" ? "Não foi possível criar o tópico do atendimento." : "Em breve uma pessoa da equipe entrará em contato por aqui."),
-        threadUrl: result.channelId ? `https://discord.com/channels/${result.channelGuildId ?? guildId}/${result.channelId}` : undefined,
         rating: result.rating,
       });
       if (result.messages?.length) setMessages(result.messages);
@@ -187,7 +185,6 @@ export function ModuleAssistant() {
             ...current,
             status: result.status === "open" ? "open" : "queued",
             detail: result.status === "open" ? "Em breve uma pessoa da equipe entrará em contato por aqui." : "Seu pedido está chegando à equipe.",
-            threadUrl: result.channelId ? `https://discord.com/channels/${result.channelGuildId ?? guildId}/${result.channelId}` : current.threadUrl,
             rating: result.rating,
           }));
         }
@@ -337,7 +334,6 @@ export function ModuleAssistant() {
           guildId,
           jobId: entry.id,
           detail: result.detail ?? (result.status === "closed" ? "Este atendimento foi encerrado." : result.status === "failed" ? "Não foi possível criar o tópico do atendimento." : "Em breve uma pessoa da equipe entrará em contato por aqui."),
-          threadUrl: result.channelId ? `https://discord.com/channels/${result.channelGuildId ?? guildId}/${result.channelId}` : undefined,
           rating: result.rating,
         });
         window.localStorage.setItem(`wumpus-human-support:${guildId}`, entry.id);
@@ -395,7 +391,7 @@ export function ModuleAssistant() {
         </div> : !messages.length ? <div className="space-y-3">
           <p className="m-0 text-sm leading-6">Posso explicar esta tela e ajudar com as configurações de <strong>{page.label.toLocaleLowerCase("pt-BR")}</strong>. Já tenho o contexto do servidor e desta seção.</p>
           <div className="flex flex-wrap gap-2">{["O que devo configurar primeiro?", "Explique essas opções", "Como resolvo um problema aqui?"].map((suggestion) => <button key={suggestion} type="button" onClick={() => setQuestion(suggestion)} className="rounded-xl border border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">{suggestion}</button>)}</div>
-        </div> : messages.map((message, index) => <div key={message.id ?? `${index}-${message.role}`} className={`max-w-[92%] rounded-2xl px-3 py-2.5 text-sm leading-6 ${message.role === "user" ? "ml-auto whitespace-pre-wrap rounded-br-md bg-primary text-primary-foreground" : message.role === "staff" ? "rounded-bl-md bg-secondary text-foreground" : "rounded-bl-md bg-muted text-foreground"}`}>
+        </div> : messages.map((message, index) => <div key={message.id ?? `${index}-${message.role}`} className={`max-w-[92%] rounded-2xl px-3 py-2.5 text-sm leading-6 ${message.role === "user" ? "ml-auto whitespace-pre-wrap rounded-br-md bg-primary text-primary-foreground" : message.role === "system" ? "mx-auto bg-muted/70 text-center text-xs text-muted-foreground" : message.role === "staff" ? "rounded-bl-md bg-secondary text-foreground" : "rounded-bl-md bg-muted text-foreground"}`}>
           {message.role === "staff" ? <p className="mb-1 mt-0 text-xs font-semibold text-primary">Equipe de atendimento</p> : null}
           {message.role === "assistant" || message.role === "staff" ? <MarkdownContent content={message.content} /> : message.content}
           {message.delivery === "queued" ? <span className="mt-1 block text-[11px] opacity-70">Enviando para a equipe…</span> : null}
@@ -405,17 +401,6 @@ export function ModuleAssistant() {
         {error ? <p role="alert" className="m-0 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
         {!showHistory && messages.some((message) => message.role === "assistant") ? (
           <div className="space-y-2 border-t border-border pt-3">
-            {handoff.status === "queued" || handoff.status === "requesting" ? (
-              <p role="status" className="m-0 rounded-lg bg-muted px-3 py-2 text-sm">{handoff.detail ?? "Seu pedido está chegando à equipe."}</p>
-            ) : null}
-            {handoff.status === "open" && handoff.threadUrl ? (
-              <>
-                <p role="status" className="m-0 rounded-lg bg-muted px-3 py-2 text-sm">Em breve uma pessoa da equipe entrará em contato com você por aqui. As mensagens que você enviar neste chat serão encaminhadas ao tópico do fórum.</p>
-                <a href={handoff.threadUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary underline underline-offset-2">
-                  Ver tópico no fórum <ExternalLink className="size-3.5" />
-                </a>
-              </>
-            ) : null}
             {handoff.status === "closed" ? (
               <section className="space-y-3 rounded-xl border border-border bg-background px-3.5 py-3.5" aria-labelledby="support-rating-title">
                 {handoff.rating ? (

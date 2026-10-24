@@ -32,7 +32,7 @@ export type RuntimeGuild = {
 
 export type SupportChatMessage = {
   id: string;
-  role: "user" | "assistant" | "staff";
+  role: "user" | "assistant" | "staff" | "system";
   content: string;
   at: number;
   authorId?: string;

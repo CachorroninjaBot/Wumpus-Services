@@ -45,13 +45,24 @@ export async function addSupportStaffMessage(threadId: string, authorId: string,
   return added;
 }
 
-export async function claimSupportChat(chatId: string, staffId: string): Promise<"claimed" | "already_claimed" | "closed" | "missing"> {
+export async function claimSupportChat(chatId: string, staffId: string, username: string): Promise<"claimed" | "already_claimed" | "closed" | "missing"> {
   let result: "claimed" | "already_claimed" | "closed" | "missing" = "missing";
   const chat = await updateSupportChat(chatId, (current) => {
     if (current.status !== "open") { result = "closed"; return current; }
     if (current.claimedBy) { result = current.claimedBy === staffId ? "claimed" : "already_claimed"; return current; }
     result = "claimed";
-    return { ...current, claimedBy: staffId, updatedAt: Date.now() };
+    const safeUsername = username.replace(/[\r\n]/g, " ").slice(0, 80);
+    return {
+      ...current,
+      claimedBy: staffId,
+      messages: [...current.messages, {
+        id: `claim_${Date.now().toString(36)}`,
+        role: "system" as const,
+        content: `${safeUsername} está atendendo você agora.`,
+        at: Date.now(),
+      }].slice(-100),
+      updatedAt: Date.now(),
+    };
   });
   return chat ? result : "missing";
 }
