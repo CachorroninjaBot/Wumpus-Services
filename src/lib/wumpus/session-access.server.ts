@@ -6,7 +6,7 @@ import { isPlatformOwner } from "./owner";
 import { enforceRequestLimit } from "./request-limits.server";
 import { loadBilling } from "./shardpay.server";
 import { readGuildLicenses } from "./license-store.server";
-import { getDashboardSessionCookie, markPrivateResponse } from "./session-cookie.server";
+import { getDashboardSessionCredential, markPrivateResponse } from "./session-cookie.server";
 import { sessionSecret, verifySession, type SessionPayload } from "./session-token";
 
 let guildAccessCache: { userId: string; guildIds: Set<string>; entitlements: Entitlements; expiresAt: number } | null = null;
@@ -15,12 +15,12 @@ export function invalidateGuildAccessCache(userId: string): void {
   if (guildAccessCache?.userId === userId) guildAccessCache = null;
 }
 
-/** Lê identidade apenas do cookie assinado e confere a sessão revogável no servidor. */
-export async function verifySignedSession(_legacyToken: string): Promise<SessionPayload> {
+/** Lê a identidade da sessão assinada enviada por cookie web ou bearer da Activity. */
+export async function verifySignedSession(token: string): Promise<SessionPayload> {
   const secret = sessionSecret();
   if (!secret) throw new Error("A configuração segura de sessão está incompleta.");
   markPrivateResponse();
-  const payload = await verifySession(getDashboardSessionCookie() ?? "", secret);
+  const payload = await verifySession(getDashboardSessionCredential(token), secret);
   if (!payload || !(await dashboardSessionIsUsable(payload.sessionId, payload.userId))) {
     throw new Error("Sessão inválida, encerrada ou revogada. Entre novamente.");
   }

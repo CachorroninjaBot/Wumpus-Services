@@ -17,7 +17,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { exchangeDiscordCodeDirect } from "@/lib/discord/oauth";
+import { jwtVerify, SignJWT } from "jose";
+import { discordClientId, exchangeDiscordCodeDirect } from "@/lib/discord/oauth";
 import { loadBotGuildIds } from "./bot-guilds";
 import { planById, serverLimit } from "./catalog";
 import { configuredLifetimeSubscriptions, planForUser, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
@@ -33,7 +34,7 @@ import {
   saveDashboardGuildSelection,
 } from "./admin-store.server";
 import { readGuildLicenses, syncGuildEntitlements } from "./license-store.server";
-import { consumeOAuthStateCookie, clearDashboardSessionCookie, getDashboardSessionCookie, markPrivateResponse, setDashboardSessionCookie } from "./session-cookie.server";
+import { consumeOAuthStateCookie, clearDashboardSessionCookie, getDashboardSessionCredential, markPrivateResponse, setDashboardSessionCookie } from "./session-cookie.server";
 import { enforceRequestLimit } from "./request-limits.server";
 import { invalidateGuildAccessCache, loadManualSubscriptionRows, verifySignedSession } from "./session-access.server";
 import {
@@ -114,38 +115,122 @@ export const startSession = createServerFn({ method: "POST" })
       console.error("Falha de rede durante autenticação Discord.", error);
       return { ok: false, error: "Não foi possível concluir o login com o Discord. Tente novamente." };
     }
-    if (!exchanged.ok) return { ok: false, error: exchanged.error };
-    if (await isDashboardAccountSuspended(exchanged.user.id)) {
-      return { ok: false, error: "Esta conta está suspensa. Fale com o suporte da plataforma." };
-    }
-
-    const payload: SessionPayload = {
-      sessionId: randomUUID(),
-      userId: exchanged.user.id,
-      username: exchanged.user.username,
-      globalName: exchanged.user.globalName,
-      avatar: exchanged.user.avatar ?? null,
-      mfaEnabled: exchanged.user.mfaEnabled,
-      guilds: exchanged.guilds.map((guild) => ({
-        id: guild.id,
-        name: guild.name,
-        iconUrl: guild.iconUrl ?? null,
-        owner: guild.owner,
-      })),
-    };
-
-    const token = await signSession(payload, secret);
-    try {
-      await recordDashboardLogin({ id: payload.userId, username: payload.username }, payload.sessionId, payload.guilds);
-    } catch (error) {
-      console.error("Não foi possível registrar a sessão autenticada.", error);
-      return { ok: false, error: error instanceof Error && error.message.includes("suspensa")
-        ? error.message
-        : "Não foi possível registrar a sessão com segurança. Tente novamente." };
-    }
-    setDashboardSessionCookie(token);
+    if (!exchanged.ok) return exchanged;
+    const created = await createDashboardSession(exchanged);
+    if (!created.ok) return created;
+    setDashboardSessionCookie(created.sessionToken);
     return { ok: true };
   });
+
+function activityClientId(): string {
+  const clientId = discordClientId().trim();
+  if (!/^\d{17,20}$/.test(clientId)) throw new Error("Configure DISCORD_CLIENT_ID com o ID da aplicação Discord.");
+  return clientId;
+}
+
+export const getActivityAuthorizationState = createServerFn({ method: "GET" })
+  .validator((input: unknown) => z.object({}).strict().parse(input))
+  .handler(async (): Promise<{ state: string; clientId: string }> => {
+    enforceRequestLimit("discord-activity-state", 30, 10 * 60_000);
+    markPrivateResponse();
+    const secret = sessionSecret();
+    if (!secret) throw new Error("A configuração segura de sessão está incompleta.");
+    const state = await new SignJWT({ purpose: "discord-activity-oauth" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuer("wumpus")
+      .setAudience("discord-activity")
+      .setJti(randomUUID())
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(secret);
+    return { state, clientId: activityClientId() };
+  });
+
+export const startActivitySession = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    code: z.string().min(1).max(2048),
+    state: z.string().min(1).max(4096),
+    codeVerifier: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),
+  }).strict().parse(input))
+  .handler(async ({ data }): Promise<
+    | { ok: true; sessionToken: string; discordAccessToken: string }
+    | { ok: false; error: string }
+  > => {
+    enforceRequestLimit("discord-activity-login", 10, 10 * 60_000);
+    markPrivateResponse();
+    const secret = sessionSecret();
+    if (!secret) return { ok: false, error: "A configuração segura de sessão está incompleta." };
+    try {
+      const { payload } = await jwtVerify(data.state, secret, {
+        algorithms: ["HS256"],
+        issuer: "wumpus",
+        audience: "discord-activity",
+      });
+      if (payload.purpose !== "discord-activity-oauth") {
+        return { ok: false, error: "A autorização da Activity é inválida. Feche e abra a Activity novamente." };
+      }
+    } catch {
+      return { ok: false, error: "A autorização da Activity expirou. Feche e abra a Activity novamente." };
+    }
+
+    let exchanged: Awaited<ReturnType<typeof exchangeDiscordCodeDirect>>;
+    try {
+      exchanged = await exchangeDiscordCodeDirect(data.code, {
+        includeAccessToken: true,
+        codeVerifier: data.codeVerifier,
+      });
+    } catch (error) {
+      console.error("Falha de rede durante autenticação Discord da Activity.", error);
+      return { ok: false, error: "Não foi possível autenticar no Discord. Tente novamente." };
+    }
+    if (!exchanged.ok) return exchanged;
+    if (!exchanged.accessToken) return { ok: false, error: "O Discord não retornou o token necessário para abrir a Activity." };
+
+    const created = await createDashboardSession(exchanged);
+    if (!created.ok) return created;
+    return {
+      ok: true,
+      sessionToken: created.sessionToken,
+      discordAccessToken: exchanged.accessToken,
+    };
+  });
+
+async function createDashboardSession(
+  exchanged: Extract<Awaited<ReturnType<typeof exchangeDiscordCodeDirect>>, { ok: true }>,
+): Promise<{ ok: true; sessionToken: string } | { ok: false; error: string }> {
+  if (await isDashboardAccountSuspended(exchanged.user.id)) {
+    return { ok: false, error: "Esta conta está suspensa. Fale com o suporte da plataforma." };
+  }
+  const secret = sessionSecret();
+  if (!secret) return { ok: false, error: "A configuração segura de sessão está incompleta." };
+  const payload: SessionPayload = {
+    sessionId: randomUUID(),
+    userId: exchanged.user.id,
+    username: exchanged.user.username,
+    globalName: exchanged.user.globalName,
+    avatar: exchanged.user.avatar ?? null,
+    mfaEnabled: exchanged.user.mfaEnabled,
+    guilds: exchanged.guilds.map((guild) => ({
+      id: guild.id,
+      name: guild.name,
+      iconUrl: guild.iconUrl ?? null,
+      owner: guild.owner,
+    })),
+  };
+  const sessionToken = await signSession(payload, secret);
+  try {
+    await recordDashboardLogin({ id: payload.userId, username: payload.username }, payload.sessionId, payload.guilds);
+  } catch (error) {
+    console.error("Não foi possível registrar a sessão autenticada.", error);
+    return {
+      ok: false,
+      error: error instanceof Error && error.message.includes("suspensa")
+        ? error.message
+        : "Não foi possível registrar a sessão com segurança. Tente novamente.",
+    };
+  }
+  return { ok: true, sessionToken };
+}
 
 /**
  * Resolve o que esta pessoa pode ver AGORA.
@@ -155,9 +240,9 @@ export const startSession = createServerFn({ method: "POST" })
  */
 export const resolveAccess = createServerFn({ method: "POST" })
   .validator((input: unknown) =>
-    z.object({ token: z.string().max(64).optional() }).strict().parse(input),
+    z.object({ token: z.string().max(16_384).optional() }).strict().parse(input),
   )
-  .handler(async (): Promise<AccessResult> => {
+  .handler(async ({ data }): Promise<AccessResult> => {
     enforceRequestLimit("resolve-access", 60, 60_000);
     markPrivateResponse();
     const secret = sessionSecret();
@@ -165,7 +250,7 @@ export const resolveAccess = createServerFn({ method: "POST" })
 
     let payload: SessionPayload;
     try {
-      payload = await verifySignedSession("");
+      payload = await verifySignedSession(data.token ?? "");
     } catch (error) {
       if (error instanceof Error && /sessão inválida|encerrada ou revogada/i.test(error.message)) {
         clearDashboardSessionCookie();
@@ -458,7 +543,7 @@ export const heartbeatDashboardSession = createServerFn({ method: "POST" })
 export const logoutDashboardSession = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({}).strict().parse(input))
   .handler(async () => {
-    const raw = getDashboardSessionCookie();
+    const raw = getDashboardSessionCredential();
     const secret = sessionSecret();
     if (raw && secret) {
       const payload = await verifySession(raw, secret);

@@ -5,11 +5,13 @@ const csrfMiddleware = createCsrfMiddleware({ filter: (context) => context.handl
 
 const securityHeaders = createMiddleware().server(async ({ next }) => {
   setResponseHeader("X-Content-Type-Options", "nosniff");
-  setResponseHeader("X-Frame-Options", "DENY");
   setResponseHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   setResponseHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   setResponseHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
-  setResponseHeader("Content-Security-Policy", "base-uri 'self'; object-src 'none'; frame-ancestors 'none'");
+  setResponseHeader(
+    "Content-Security-Policy",
+    "base-uri 'self'; object-src 'none'; frame-ancestors 'self' https://discord.com https://*.discord.com https://discordapp.com https://*.discordapp.com https://*.discordsays.com",
+  );
   if (process.env.NODE_ENV === "production") {
     setResponseHeader("Strict-Transport-Security", "max-age=31536000");
   }

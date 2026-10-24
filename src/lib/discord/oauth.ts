@@ -3,7 +3,7 @@ import { setOAuthStateCookie } from "@/lib/wumpus/session-cookie.server";
 import { enforceRequestLimit } from "@/lib/wumpus/request-limits.server";
 import { parseDiscordGuilds } from "./guilds.ts";
 
-const CLIENT_ID = () => process.env.DISCORD_CLIENT_ID || "1187601667559002225";
+export const discordClientId = () => process.env.DISCORD_CLIENT_ID || "1187601667559002225";
 const CLIENT_SECRET = () => process.env.DISCORD_CLIENT_SECRET || "";
 const REDIRECT_URI = () =>
   process.env.DISCORD_REDIRECT_URI || "https://wumpus-dashboard.shardweb.app/auth/discord/callback";
@@ -15,7 +15,7 @@ export function discordIconUrl(id: string, icon: string | null | undefined) {
 }
 export function discordAuthorizeUrl(state: string) {
   const q = new URLSearchParams({
-    client_id: CLIENT_ID(),
+    client_id: discordClientId(),
     response_type: "code",
     scope: "identify guilds",
     redirect_uri: REDIRECT_URI(),
@@ -43,17 +43,23 @@ export const getDiscordLoginUrl = createServerFn({ method: "GET" }).handler(asyn
  * vieram do Discord, nunca do navegador. O `createServerFn` abaixo e so a
  * porta de entrada do cliente.
  */
-export async function exchangeDiscordCodeDirect(code: string) {
+type DiscordOAuthOptions = {
+  codeVerifier?: string;
+  includeAccessToken?: boolean;
+};
+
+export async function exchangeDiscordCodeDirect(code: string, options: DiscordOAuthOptions = {}) {
   const secret = CLIENT_SECRET();
   if (!secret) return { ok: false as const, error: "DISCORD_CLIENT_SECRET ausente." };
 
   const body = new URLSearchParams({
-    client_id: CLIENT_ID(),
+    client_id: discordClientId(),
     client_secret: secret,
     grant_type: "authorization_code",
     code,
-    redirect_uri: REDIRECT_URI(),
   });
+  if (!options.includeAccessToken) body.set("redirect_uri", REDIRECT_URI());
+  if (options.codeVerifier) body.set("code_verifier", options.codeVerifier);
 
   const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
     method: "POST",
@@ -104,6 +110,7 @@ export async function exchangeDiscordCodeDirect(code: string) {
 
   return {
     ok: true as const,
+    ...(options.includeAccessToken ? { accessToken: token.access_token } : {}),
     user: {
       id: me.id,
       username: me.username.slice(0, 100),

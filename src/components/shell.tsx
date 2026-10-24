@@ -1,4 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { createClientOnlyFn } from "@tanstack/react-start";
 import {
   BookOpen,
   ChartNoAxesColumn,
@@ -26,9 +27,12 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { brand, groupLabels, navItems, type ModuleGroupId, type NavId } from "@/lib/wumpus/brand";
 import { SESSION_TOKEN_KEY } from "@/lib/wumpus/session-token";
 import { getOwnerGuildDiagnostics, logoutDashboardSession, type OwnerGuildDiagnostics } from "@/lib/wumpus/session";
+import { isDiscordActivityContext } from "@/lib/discord/activity-session.client";
 import { useWumpus } from "@/lib/wumpus/store";
 import { cn } from "@/lib/utils";
 import { ModuleAssistant } from "@/components/module-assistant";
+
+const isActivityClient = createClientOnlyFn(isDiscordActivityContext);
 
 const iconByNav: Record<NavId, typeof LayoutDashboard> = {
   overview: LayoutDashboard,
@@ -391,7 +395,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               void logoutDashboardSession({ data: {} }).catch(() => undefined).finally(() => {
                 localStorage.removeItem(SESSION_TOKEN_KEY);
                 localStorage.removeItem("wumpus-demo-v2");
-                window.location.assign("/");
+                window.location.assign(isActivityClient()
+                  ? `${window.location.pathname}${window.location.search}`
+                  : "/");
               });
             }} className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground">
               <LogOut className="size-4" />
