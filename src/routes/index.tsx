@@ -121,6 +121,14 @@ function Home() {
         </div>
       </section>
 
+      <section aria-label="Benefícios principais" className="border-y border-border bg-muted/35">
+        <div className="mx-auto grid max-w-6xl gap-4 px-4 py-5 sm:grid-cols-3 sm:gap-8">
+          <TrustItem title="Configuração visual" body="Mude o comportamento do servidor sem decorar comandos." />
+          <TrustItem title="Ações com aprovação" body="O Wumpus sugere e registra; sua equipe decide." />
+          <TrustItem title="Dados sincronizados" body="Publicações, tickets e auditoria ficam no mesmo painel." />
+        </div>
+      </section>
+
       <section id="modulos" className="border-t border-border">
         <div className="mx-auto max-w-6xl px-4 py-16">
           <p className="m-0 text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
@@ -247,6 +255,18 @@ function Home() {
           </Link>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function TrustItem({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="flex gap-3">
+      <span aria-hidden="true" className="mt-1 grid size-5 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">✓</span>
+      <div>
+        <p className="m-0 text-sm font-semibold">{title}</p>
+        <p className="m-0 mt-0.5 text-xs leading-5 text-muted-foreground">{body}</p>
+      </div>
     </div>
   );
 }
