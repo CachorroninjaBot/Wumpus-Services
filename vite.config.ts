@@ -8,6 +8,8 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 
+const buildId = Date.now().toString(36);
+
 function authPopupPlugin(): Plugin {
   return {
     name: "app-builder:auth-popup",
@@ -84,6 +86,14 @@ function authPopupPlugin(): Plugin {
 }
 
 export default defineConfig(({ command, isPreview }) => ({
+  build: {
+    rollupOptions: {
+      output: {
+        entryFileNames: `assets/[name]-[hash]-${buildId}.js`,
+        chunkFileNames: `assets/[name]-[hash]-${buildId}.js`,
+      },
+    },
+  },
   server: {
     host: "0.0.0.0",
     port: 8080,

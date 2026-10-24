@@ -4,47 +4,6 @@ import { AuthProvider } from "@/lib/auth/provider";
 import "../styles.css";
 
 const APP_NAME = "Wumpus";
-const PRELOAD_RETRY_KEY = "wumpus:preload-retry-at";
-const PRELOAD_RETRY_WINDOW_MS = 30_000;
-
-function AssetLoadRecovery() {
-  useEffect(() => {
-    const handlePreloadError = (event: Event) => {
-      let lastRetryAt: number;
-      try {
-        lastRetryAt = Number(sessionStorage.getItem(PRELOAD_RETRY_KEY) ?? 0);
-      } catch {
-        return;
-      }
-      if (Date.now() - lastRetryAt < PRELOAD_RETRY_WINDOW_MS) return;
-
-      try {
-        sessionStorage.setItem(PRELOAD_RETRY_KEY, String(Date.now()));
-      } catch {
-        return;
-      }
-
-      event.preventDefault();
-      window.location.reload();
-    };
-
-    window.addEventListener("vite:preloadError", handlePreloadError);
-    const retryWindow = window.setTimeout(() => {
-      try {
-        sessionStorage.removeItem(PRELOAD_RETRY_KEY);
-      } catch {
-        // O navegador pode bloquear o armazenamento da sessão.
-      }
-    }, PRELOAD_RETRY_WINDOW_MS);
-
-    return () => {
-      window.removeEventListener("vite:preloadError", handlePreloadError);
-      window.clearTimeout(retryWindow);
-    };
-  }, []);
-
-  return null;
-}
 
 function FigmaCaptureScript() {
   useEffect(() => {
@@ -84,7 +43,6 @@ export const Route = createRootRoute({
       </head>
       <body>
         <AuthProvider>
-          <AssetLoadRecovery />
           <FigmaCaptureScript />
           <Outlet />
         </AuthProvider>
