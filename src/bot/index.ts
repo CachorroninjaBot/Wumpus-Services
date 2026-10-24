@@ -32,18 +32,40 @@ import {
   type PartialMessage,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
-  type UserSelectMenuInteraction
+  type UserSelectMenuInteraction,
 } from "discord.js";
 import { handleGhostPing, handleImageContent, handleMessage } from "./automod.ts";
 import { handleCommand, registerCommands } from "./commands.ts";
-import { bool, guildEntitlement, guildEntitlementStatus, guildPlan, isEnabled, list, moduleConfig } from "./config.ts";
+import {
+  bool,
+  guildEntitlement,
+  guildEntitlementStatus,
+  guildPlan,
+  isEnabled,
+  list,
+  moduleConfig,
+} from "./config.ts";
 import { syncBotPlanLicenses } from "./license-sync.ts";
-import { buildFormModal, handleFormSelect, openForm, parseFields, readDraft, reviewForm, submitForm } from "./forms.ts";
+import {
+  buildFormModal,
+  handleFormSelect,
+  openForm,
+  parseFields,
+  readDraft,
+  reviewForm,
+  submitForm,
+} from "./forms.ts";
 import { id, parseId } from "./ids.ts";
 import { handleKnowledgeMessage } from "./knowledge.ts";
 import { trackFrequentQuestion } from "./knowledge-faq.ts";
 import { consoleLogger, type Logger } from "./logger.ts";
-import { auditAndLog, logToChannel, pruneAudit, recordAudit, shouldIgnoreLogEvent } from "./logs.ts";
+import {
+  auditAndLog,
+  logToChannel,
+  pruneAudit,
+  recordAudit,
+  shouldIgnoreLogEvent,
+} from "./logs.ts";
 import { renderAuditDiff } from "./log-diff.ts";
 import { renderLogEvent } from "./log-render.ts";
 import { resolveRoles } from "./resolve.ts";
@@ -60,13 +82,28 @@ import {
   recordTicketMessage,
   reopenClosedTicket,
   setTicketPriority,
-  transferTicket
+  transferTicket,
 } from "./tickets.ts";
-import { clearPersistedSecurityWindow, gateNewChannel, handleAuditLogEntry, handleMassMention, handleMemberAdd, grantVerifiedRole, isVerificationActive, readPersistedSecurityWindow, setLockdown } from "./security.ts";
-import { processOutbox } from "./outbox-send.ts";
+import {
+  clearPersistedSecurityWindow,
+  gateNewChannel,
+  handleAuditLogEntry,
+  handleMassMention,
+  handleMemberAdd,
+  grantVerifiedRole,
+  isVerificationActive,
+  readPersistedSecurityWindow,
+  setLockdown,
+} from "./security.ts";
+import { processOutbox, syncStaffRosterMember } from "./outbox-send.ts";
 import { writeBotHealth } from "../lib/wumpus/health.server.ts";
 import { handleMemberLeave, handleMemberWelcome, maintenanceNotice } from "./guild-events.ts";
-import { addSupportStaffMessage, claimSupportChat, closeSupportChat, findSupportChatByThread } from "./human-support.ts";
+import {
+  addSupportStaffMessage,
+  claimSupportChat,
+  closeSupportChat,
+  findSupportChatByThread,
+} from "./human-support.ts";
 
 export type BotHandle = {
   client: Client;
@@ -83,114 +120,401 @@ export const INTENTS = [
   GatewayIntentBits.GuildModeration,
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.GuildVoiceStates,
-  GatewayIntentBits.MessageContent
+  GatewayIntentBits.MessageContent,
 ];
 
-async function recordMessageLog(message: Message | PartialMessage, eventType: string, title: string, content: string, log: Logger): Promise<void> {
+async function recordMessageLog(
+  message: Message | PartialMessage,
+  eventType: string,
+  title: string,
+  content: string,
+  log: Logger,
+): Promise<void> {
   if (!message.guild) return;
   const config = await moduleConfig(message.guild.id, "logs");
   if (!isEnabled(config) || !bool(config, "logMessages", false)) return;
-  const details = { actorId: message.author?.id, targetId: message.author?.id, channelId: message.channelId };
+  const details = {
+    actorId: message.author?.id,
+    targetId: message.author?.id,
+    channelId: message.channelId,
+  };
   if (await shouldIgnoreLogEvent(message.guild, config, details)) return;
   const text = content.slice(0, 1800);
-  await auditAndLog(message.guild, {
-    module: "messages", category: "messages", eventType,
-    ...details,
-    title, description: `<@${message.author?.id}> · <#${message.channelId}>\n\n${text || "(sem texto)"}`,
-  }, log);
+  await auditAndLog(
+    message.guild,
+    {
+      module: "messages",
+      category: "messages",
+      eventType,
+      ...details,
+      title,
+      description: `<@${message.author?.id}> · <#${message.channelId}>\n\n${text || "(sem texto)"}`,
+    },
+    log,
+  );
 }
 
-const AUDIT_CATEGORIES: Partial<Record<AuditLogEvent, { module: string; category: string; title: string }>> = {
-  [AuditLogEvent.GuildUpdate]: { module: "server", category: "channels", title: "SERVIDOR ATUALIZADO" },
-  [AuditLogEvent.ChannelCreate]: { module: "channels", category: "channels", title: "CANAL CRIADO" },
-  [AuditLogEvent.ChannelUpdate]: { module: "channels", category: "channels", title: "CANAL ATUALIZADO" },
-  [AuditLogEvent.ChannelDelete]: { module: "channels", category: "channels", title: "CANAL APAGADO" },
-  [AuditLogEvent.ChannelOverwriteCreate]: { module: "channels", category: "channels", title: "PERMISSÃO DE CANAL CRIADA" },
-  [AuditLogEvent.ChannelOverwriteUpdate]: { module: "channels", category: "channels", title: "PERMISSÃO DE CANAL ATUALIZADA" },
-  [AuditLogEvent.ChannelOverwriteDelete]: { module: "channels", category: "channels", title: "PERMISSÃO DE CANAL REMOVIDA" },
+const AUDIT_CATEGORIES: Partial<
+  Record<AuditLogEvent, { module: string; category: string; title: string }>
+> = {
+  [AuditLogEvent.GuildUpdate]: {
+    module: "server",
+    category: "channels",
+    title: "SERVIDOR ATUALIZADO",
+  },
+  [AuditLogEvent.ChannelCreate]: {
+    module: "channels",
+    category: "channels",
+    title: "CANAL CRIADO",
+  },
+  [AuditLogEvent.ChannelUpdate]: {
+    module: "channels",
+    category: "channels",
+    title: "CANAL ATUALIZADO",
+  },
+  [AuditLogEvent.ChannelDelete]: {
+    module: "channels",
+    category: "channels",
+    title: "CANAL APAGADO",
+  },
+  [AuditLogEvent.ChannelOverwriteCreate]: {
+    module: "channels",
+    category: "channels",
+    title: "PERMISSÃO DE CANAL CRIADA",
+  },
+  [AuditLogEvent.ChannelOverwriteUpdate]: {
+    module: "channels",
+    category: "channels",
+    title: "PERMISSÃO DE CANAL ATUALIZADA",
+  },
+  [AuditLogEvent.ChannelOverwriteDelete]: {
+    module: "channels",
+    category: "channels",
+    title: "PERMISSÃO DE CANAL REMOVIDA",
+  },
   [AuditLogEvent.MemberKick]: { module: "members", category: "members", title: "MEMBRO EXPULSO" },
-  [AuditLogEvent.MemberPrune]: { module: "members", category: "members", title: "MEMBROS REMOVIDOS POR INATIVIDADE" },
+  [AuditLogEvent.MemberPrune]: {
+    module: "members",
+    category: "members",
+    title: "MEMBROS REMOVIDOS POR INATIVIDADE",
+  },
   [AuditLogEvent.MemberBanAdd]: { module: "bans", category: "bans", title: "MEMBRO BANIDO" },
-  [AuditLogEvent.MemberBanRemove]: { module: "bans", category: "bans", title: "BANIMENTO REMOVIDO" },
-  [AuditLogEvent.MemberUpdate]: { module: "members", category: "members", title: "MEMBRO ATUALIZADO" },
-  [AuditLogEvent.MemberRoleUpdate]: { module: "roles", category: "roles", title: "CARGOS DO MEMBRO ALTERADOS" },
-  [AuditLogEvent.MemberMove]: { module: "voice", category: "voice", title: "MEMBRO MOVIDO DE CANAL DE VOZ" },
-  [AuditLogEvent.MemberDisconnect]: { module: "voice", category: "voice", title: "MEMBRO DESCONECTADO DA VOZ" },
-  [AuditLogEvent.MessagePin]: { module: "messages", category: "messages", title: "MENSAGEM FIXADA" },
-  [AuditLogEvent.MessageUnpin]: { module: "messages", category: "messages", title: "MENSAGEM DESAFIXADA" },
-  [AuditLogEvent.MessageBulkDelete]: { module: "messages", category: "messages", title: "MENSAGENS APAGADAS EM MASSA" },
+  [AuditLogEvent.MemberBanRemove]: {
+    module: "bans",
+    category: "bans",
+    title: "BANIMENTO REMOVIDO",
+  },
+  [AuditLogEvent.MemberUpdate]: {
+    module: "members",
+    category: "members",
+    title: "MEMBRO ATUALIZADO",
+  },
+  [AuditLogEvent.MemberRoleUpdate]: {
+    module: "roles",
+    category: "roles",
+    title: "CARGOS DO MEMBRO ALTERADOS",
+  },
+  [AuditLogEvent.MemberMove]: {
+    module: "voice",
+    category: "voice",
+    title: "MEMBRO MOVIDO DE CANAL DE VOZ",
+  },
+  [AuditLogEvent.MemberDisconnect]: {
+    module: "voice",
+    category: "voice",
+    title: "MEMBRO DESCONECTADO DA VOZ",
+  },
+  [AuditLogEvent.MessagePin]: {
+    module: "messages",
+    category: "messages",
+    title: "MENSAGEM FIXADA",
+  },
+  [AuditLogEvent.MessageUnpin]: {
+    module: "messages",
+    category: "messages",
+    title: "MENSAGEM DESAFIXADA",
+  },
+  [AuditLogEvent.MessageBulkDelete]: {
+    module: "messages",
+    category: "messages",
+    title: "MENSAGENS APAGADAS EM MASSA",
+  },
   [AuditLogEvent.BotAdd]: { module: "members", category: "members", title: "BOT ADICIONADO" },
   [AuditLogEvent.RoleCreate]: { module: "roles", category: "roles", title: "CARGO CRIADO" },
   [AuditLogEvent.RoleUpdate]: { module: "roles", category: "roles", title: "CARGO ATUALIZADO" },
   [AuditLogEvent.RoleDelete]: { module: "roles", category: "roles", title: "CARGO APAGADO" },
-  [AuditLogEvent.InviteCreate]: { module: "invites", category: "channels", title: "CONVITE CRIADO" },
-  [AuditLogEvent.InviteUpdate]: { module: "invites", category: "channels", title: "CONVITE ATUALIZADO" },
-  [AuditLogEvent.InviteDelete]: { module: "invites", category: "channels", title: "CONVITE APAGADO" },
-  [AuditLogEvent.WebhookCreate]: { module: "integrations", category: "channels", title: "WEBHOOK CRIADO" },
-  [AuditLogEvent.WebhookUpdate]: { module: "integrations", category: "channels", title: "WEBHOOK ATUALIZADO" },
-  [AuditLogEvent.WebhookDelete]: { module: "integrations", category: "channels", title: "WEBHOOK APAGADO" },
-  [AuditLogEvent.IntegrationCreate]: { module: "integrations", category: "channels", title: "INTEGRAÇÃO ADICIONADA" },
-  [AuditLogEvent.IntegrationUpdate]: { module: "integrations", category: "channels", title: "INTEGRAÇÃO ATUALIZADA" },
-  [AuditLogEvent.IntegrationDelete]: { module: "integrations", category: "channels", title: "INTEGRAÇÃO REMOVIDA" },
+  [AuditLogEvent.InviteCreate]: {
+    module: "invites",
+    category: "channels",
+    title: "CONVITE CRIADO",
+  },
+  [AuditLogEvent.InviteUpdate]: {
+    module: "invites",
+    category: "channels",
+    title: "CONVITE ATUALIZADO",
+  },
+  [AuditLogEvent.InviteDelete]: {
+    module: "invites",
+    category: "channels",
+    title: "CONVITE APAGADO",
+  },
+  [AuditLogEvent.WebhookCreate]: {
+    module: "integrations",
+    category: "channels",
+    title: "WEBHOOK CRIADO",
+  },
+  [AuditLogEvent.WebhookUpdate]: {
+    module: "integrations",
+    category: "channels",
+    title: "WEBHOOK ATUALIZADO",
+  },
+  [AuditLogEvent.WebhookDelete]: {
+    module: "integrations",
+    category: "channels",
+    title: "WEBHOOK APAGADO",
+  },
+  [AuditLogEvent.IntegrationCreate]: {
+    module: "integrations",
+    category: "channels",
+    title: "INTEGRAÇÃO ADICIONADA",
+  },
+  [AuditLogEvent.IntegrationUpdate]: {
+    module: "integrations",
+    category: "channels",
+    title: "INTEGRAÇÃO ATUALIZADA",
+  },
+  [AuditLogEvent.IntegrationDelete]: {
+    module: "integrations",
+    category: "channels",
+    title: "INTEGRAÇÃO REMOVIDA",
+  },
   [AuditLogEvent.EmojiCreate]: { module: "server", category: "channels", title: "EMOJI CRIADO" },
-  [AuditLogEvent.EmojiUpdate]: { module: "server", category: "channels", title: "EMOJI ATUALIZADO" },
+  [AuditLogEvent.EmojiUpdate]: {
+    module: "server",
+    category: "channels",
+    title: "EMOJI ATUALIZADO",
+  },
   [AuditLogEvent.EmojiDelete]: { module: "server", category: "channels", title: "EMOJI APAGADO" },
-  [AuditLogEvent.StickerCreate]: { module: "server", category: "channels", title: "FIGURINHA CRIADA" },
-  [AuditLogEvent.StickerUpdate]: { module: "server", category: "channels", title: "FIGURINHA ATUALIZADA" },
-  [AuditLogEvent.StickerDelete]: { module: "server", category: "channels", title: "FIGURINHA APAGADA" },
+  [AuditLogEvent.StickerCreate]: {
+    module: "server",
+    category: "channels",
+    title: "FIGURINHA CRIADA",
+  },
+  [AuditLogEvent.StickerUpdate]: {
+    module: "server",
+    category: "channels",
+    title: "FIGURINHA ATUALIZADA",
+  },
+  [AuditLogEvent.StickerDelete]: {
+    module: "server",
+    category: "channels",
+    title: "FIGURINHA APAGADA",
+  },
   [AuditLogEvent.ThreadCreate]: { module: "channels", category: "threads", title: "THREAD CRIADA" },
-  [AuditLogEvent.ThreadUpdate]: { module: "channels", category: "threads", title: "THREAD ATUALIZADA" },
-  [AuditLogEvent.ThreadDelete]: { module: "channels", category: "threads", title: "THREAD APAGADA" },
-  [AuditLogEvent.StageInstanceCreate]: { module: "events", category: "stages", title: "STAGE CRIADO" },
-  [AuditLogEvent.StageInstanceUpdate]: { module: "events", category: "stages", title: "STAGE ATUALIZADO" },
-  [AuditLogEvent.StageInstanceDelete]: { module: "events", category: "stages", title: "STAGE ENCERRADO" },
-  [AuditLogEvent.GuildScheduledEventCreate]: { module: "events", category: "scheduled", title: "EVENTO AGENDADO CRIADO" },
-  [AuditLogEvent.GuildScheduledEventUpdate]: { module: "events", category: "scheduled", title: "EVENTO AGENDADO ATUALIZADO" },
-  [AuditLogEvent.GuildScheduledEventDelete]: { module: "events", category: "scheduled", title: "EVENTO AGENDADO APAGADO" },
-  [AuditLogEvent.AutoModerationRuleCreate]: { module: "automod", category: "automod", title: "REGRA DO AUTOMOD CRIADA" },
-  [AuditLogEvent.AutoModerationRuleUpdate]: { module: "automod", category: "automod", title: "REGRA DO AUTOMOD ATUALIZADA" },
-  [AuditLogEvent.AutoModerationRuleDelete]: { module: "automod", category: "automod", title: "REGRA DO AUTOMOD APAGADA" },
-  [AuditLogEvent.AutoModerationBlockMessage]: { module: "automod", category: "automod", title: "MENSAGEM BLOQUEADA PELO AUTOMOD" },
-  [AuditLogEvent.AutoModerationFlagToChannel]: { module: "automod", category: "automod", title: "MENSAGEM SINALIZADA PELO AUTOMOD" },
-  [AuditLogEvent.AutoModerationUserCommunicationDisabled]: { module: "automod", category: "automod", title: "USUÁRIO LIMITADO PELO AUTOMOD" },
-  [AuditLogEvent.AutoModerationQuarantineUser]: { module: "automod", category: "automod", title: "USUÁRIO EM QUARENTENA PELO AUTOMOD" },
-  [AuditLogEvent.SoundboardSoundCreate]: { module: "server", category: "channels", title: "SOM DO SOUNDBOARD CRIADO" },
-  [AuditLogEvent.SoundboardSoundUpdate]: { module: "server", category: "channels", title: "SOM DO SOUNDBOARD ATUALIZADO" },
-  [AuditLogEvent.SoundboardSoundDelete]: { module: "server", category: "channels", title: "SOM DO SOUNDBOARD APAGADO" },
-  [AuditLogEvent.OnboardingPromptCreate]: { module: "server", category: "channels", title: "PERGUNTA DE ONBOARDING CRIADA" },
-  [AuditLogEvent.OnboardingPromptUpdate]: { module: "server", category: "channels", title: "PERGUNTA DE ONBOARDING ATUALIZADA" },
-  [AuditLogEvent.OnboardingPromptDelete]: { module: "server", category: "channels", title: "PERGUNTA DE ONBOARDING REMOVIDA" },
-  [AuditLogEvent.OnboardingCreate]: { module: "server", category: "channels", title: "ONBOARDING CONFIGURADO" },
-  [AuditLogEvent.OnboardingUpdate]: { module: "server", category: "channels", title: "ONBOARDING ATUALIZADO" },
-  [AuditLogEvent.HomeSettingsCreate]: { module: "server", category: "channels", title: "CONFIGURAÇÃO DA PÁGINA INICIAL CRIADA" },
-  [AuditLogEvent.HomeSettingsUpdate]: { module: "server", category: "channels", title: "CONFIGURAÇÃO DA PÁGINA INICIAL ATUALIZADA" },
-  [AuditLogEvent.VoiceChannelStatusCreate]: { module: "voice", category: "voice", title: "STATUS DO CANAL DE VOZ CRIADO" },
-  [AuditLogEvent.VoiceChannelStatusDelete]: { module: "voice", category: "voice", title: "STATUS DO CANAL DE VOZ REMOVIDO" },
-  [AuditLogEvent.ApplicationCommandPermissionUpdate]: { module: "integrations", category: "channels", title: "PERMISSÕES DE COMANDO ATUALIZADAS" },
-  [AuditLogEvent.CreatorMonetizationRequestCreated]: { module: "server", category: "channels", title: "PEDIDO DE MONETIZAÇÃO CRIADO" },
-  [AuditLogEvent.CreatorMonetizationTermsAccepted]: { module: "server", category: "channels", title: "TERMOS DE MONETIZAÇÃO ACEITOS" },
+  [AuditLogEvent.ThreadUpdate]: {
+    module: "channels",
+    category: "threads",
+    title: "THREAD ATUALIZADA",
+  },
+  [AuditLogEvent.ThreadDelete]: {
+    module: "channels",
+    category: "threads",
+    title: "THREAD APAGADA",
+  },
+  [AuditLogEvent.StageInstanceCreate]: {
+    module: "events",
+    category: "stages",
+    title: "STAGE CRIADO",
+  },
+  [AuditLogEvent.StageInstanceUpdate]: {
+    module: "events",
+    category: "stages",
+    title: "STAGE ATUALIZADO",
+  },
+  [AuditLogEvent.StageInstanceDelete]: {
+    module: "events",
+    category: "stages",
+    title: "STAGE ENCERRADO",
+  },
+  [AuditLogEvent.GuildScheduledEventCreate]: {
+    module: "events",
+    category: "scheduled",
+    title: "EVENTO AGENDADO CRIADO",
+  },
+  [AuditLogEvent.GuildScheduledEventUpdate]: {
+    module: "events",
+    category: "scheduled",
+    title: "EVENTO AGENDADO ATUALIZADO",
+  },
+  [AuditLogEvent.GuildScheduledEventDelete]: {
+    module: "events",
+    category: "scheduled",
+    title: "EVENTO AGENDADO APAGADO",
+  },
+  [AuditLogEvent.AutoModerationRuleCreate]: {
+    module: "automod",
+    category: "automod",
+    title: "REGRA DO AUTOMOD CRIADA",
+  },
+  [AuditLogEvent.AutoModerationRuleUpdate]: {
+    module: "automod",
+    category: "automod",
+    title: "REGRA DO AUTOMOD ATUALIZADA",
+  },
+  [AuditLogEvent.AutoModerationRuleDelete]: {
+    module: "automod",
+    category: "automod",
+    title: "REGRA DO AUTOMOD APAGADA",
+  },
+  [AuditLogEvent.AutoModerationBlockMessage]: {
+    module: "automod",
+    category: "automod",
+    title: "MENSAGEM BLOQUEADA PELO AUTOMOD",
+  },
+  [AuditLogEvent.AutoModerationFlagToChannel]: {
+    module: "automod",
+    category: "automod",
+    title: "MENSAGEM SINALIZADA PELO AUTOMOD",
+  },
+  [AuditLogEvent.AutoModerationUserCommunicationDisabled]: {
+    module: "automod",
+    category: "automod",
+    title: "USUÁRIO LIMITADO PELO AUTOMOD",
+  },
+  [AuditLogEvent.AutoModerationQuarantineUser]: {
+    module: "automod",
+    category: "automod",
+    title: "USUÁRIO EM QUARENTENA PELO AUTOMOD",
+  },
+  [AuditLogEvent.SoundboardSoundCreate]: {
+    module: "server",
+    category: "channels",
+    title: "SOM DO SOUNDBOARD CRIADO",
+  },
+  [AuditLogEvent.SoundboardSoundUpdate]: {
+    module: "server",
+    category: "channels",
+    title: "SOM DO SOUNDBOARD ATUALIZADO",
+  },
+  [AuditLogEvent.SoundboardSoundDelete]: {
+    module: "server",
+    category: "channels",
+    title: "SOM DO SOUNDBOARD APAGADO",
+  },
+  [AuditLogEvent.OnboardingPromptCreate]: {
+    module: "server",
+    category: "channels",
+    title: "PERGUNTA DE ONBOARDING CRIADA",
+  },
+  [AuditLogEvent.OnboardingPromptUpdate]: {
+    module: "server",
+    category: "channels",
+    title: "PERGUNTA DE ONBOARDING ATUALIZADA",
+  },
+  [AuditLogEvent.OnboardingPromptDelete]: {
+    module: "server",
+    category: "channels",
+    title: "PERGUNTA DE ONBOARDING REMOVIDA",
+  },
+  [AuditLogEvent.OnboardingCreate]: {
+    module: "server",
+    category: "channels",
+    title: "ONBOARDING CONFIGURADO",
+  },
+  [AuditLogEvent.OnboardingUpdate]: {
+    module: "server",
+    category: "channels",
+    title: "ONBOARDING ATUALIZADO",
+  },
+  [AuditLogEvent.HomeSettingsCreate]: {
+    module: "server",
+    category: "channels",
+    title: "CONFIGURAÇÃO DA PÁGINA INICIAL CRIADA",
+  },
+  [AuditLogEvent.HomeSettingsUpdate]: {
+    module: "server",
+    category: "channels",
+    title: "CONFIGURAÇÃO DA PÁGINA INICIAL ATUALIZADA",
+  },
+  [AuditLogEvent.VoiceChannelStatusCreate]: {
+    module: "voice",
+    category: "voice",
+    title: "STATUS DO CANAL DE VOZ CRIADO",
+  },
+  [AuditLogEvent.VoiceChannelStatusDelete]: {
+    module: "voice",
+    category: "voice",
+    title: "STATUS DO CANAL DE VOZ REMOVIDO",
+  },
+  [AuditLogEvent.ApplicationCommandPermissionUpdate]: {
+    module: "integrations",
+    category: "channels",
+    title: "PERMISSÕES DE COMANDO ATUALIZADAS",
+  },
+  [AuditLogEvent.CreatorMonetizationRequestCreated]: {
+    module: "server",
+    category: "channels",
+    title: "PEDIDO DE MONETIZAÇÃO CRIADO",
+  },
+  [AuditLogEvent.CreatorMonetizationTermsAccepted]: {
+    module: "server",
+    category: "channels",
+    title: "TERMOS DE MONETIZAÇÃO ACEITOS",
+  },
 };
 
-async function recordGatewayAudit(entry: import("discord.js").GuildAuditLogsEntry, guild: Guild, log: Logger): Promise<void> {
+async function recordGatewayAudit(
+  entry: import("discord.js").GuildAuditLogsEntry,
+  guild: Guild,
+  log: Logger,
+): Promise<void> {
   let mapped = AUDIT_CATEGORIES[entry.action as AuditLogEvent];
   if (!mapped) return;
-  const isTimeout = entry.action === AuditLogEvent.MemberUpdate && entry.changes.some((change) => change.key === "communication_disabled_until");
-  if (isTimeout) mapped = { module: "moderation", category: "moderation", title: "TIMEOUT DE MEMBRO" };
+  const isTimeout =
+    entry.action === AuditLogEvent.MemberUpdate &&
+    entry.changes.some((change) => change.key === "communication_disabled_until");
+  if (isTimeout)
+    mapped = { module: "moderation", category: "moderation", title: "TIMEOUT DE MEMBRO" };
   const changes = renderAuditDiff(entry.changes, 900);
   const target = entry.target as { id?: string; name?: string } | null;
   const targetId = target?.id;
   const details = {
     actorId: entry.executorId ?? undefined,
     targetId,
-    channelId: entry.extra && "channel" in entry.extra ? (entry.extra.channel as { id?: string } | null)?.id : undefined,
+    channelId:
+      entry.extra && "channel" in entry.extra
+        ? (entry.extra.channel as { id?: string } | null)?.id
+        : undefined,
   };
-  const severity = isTimeout || entry.action === AuditLogEvent.MemberBanAdd || entry.action === AuditLogEvent.ChannelDelete
-    ? "warning" as const : "info" as const;
-  const eventType = mapped.title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-  const diffSummary = changes.map((field) => field.value.replaceAll("**", "")).join(" · ").slice(0, 900);
+  const severity =
+    isTimeout ||
+    entry.action === AuditLogEvent.MemberBanAdd ||
+    entry.action === AuditLogEvent.ChannelDelete
+      ? ("warning" as const)
+      : ("info" as const);
+  const eventType = mapped.title
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+  const diffSummary = changes
+    .map((field) => field.value.replaceAll("**", ""))
+    .join(" · ")
+    .slice(0, 900);
   await recordAudit({
-    guildId: guild.id, module: mapped.module, eventType, actorId: details.actorId, targetId, channelId: details.channelId, severity,
-    data: { targetName: target?.name, summary: `${mapped.title}${target?.name ? ` · ${target.name}` : ""}${diffSummary ? ` · ${diffSummary}` : ""}`, changes: entry.changes },
+    guildId: guild.id,
+    module: mapped.module,
+    eventType,
+    actorId: details.actorId,
+    targetId,
+    channelId: details.channelId,
+    severity,
+    data: {
+      targetName: target?.name,
+      summary: `${mapped.title}${target?.name ? ` · ${target.name}` : ""}${diffSummary ? ` · ${diffSummary}` : ""}`,
+      changes: entry.changes,
+    },
   });
   const config = await moduleConfig(guild.id, "logs");
   const rendered = renderLogEvent({
@@ -203,26 +527,46 @@ async function recordGatewayAudit(entry: import("discord.js").GuildAuditLogsEntr
   if (await shouldIgnoreLogEvent(guild, config, details)) return;
   const burstKey = `${guild.id}:${entry.action}`;
   const current = auditBursts.get(burstKey);
-  const item = { summary: target?.name ?? (targetId ? `<@${targetId}>` : "evento"), changes: rendered.fields.find((field) => field.name === "Alterações")?.value };
+  const item = {
+    summary: target?.name ?? (targetId ? `<@${targetId}>` : "evento"),
+    changes: rendered.fields.find((field) => field.name === "Alterações")?.value,
+  };
   if (current) {
     current.items.push(item);
     return;
   }
-  const burst = { items: [item], timer: setTimeout(() => {
-    auditBursts.delete(burstKey);
-    const items = burst.items.slice(0, 10);
-    const compact = items.map((row) => `• ${row.summary}${row.changes ? ` — ${row.changes.replaceAll("\n", "; ")}` : ""}`).join("\n");
-    void logToChannel(guild, mapped.category, {
-      title: items.length > 1 ? `${mapped.title} · ${items.length} eventos` : mapped.title,
-      description: items.length > 1 ? compact.slice(0, 1800) : rendered.description,
-      fields: items.length > 1 ? [] : rendered.fields,
-      accentColor: severity === "warning" ? "#f5a524" : "#7c5cff",
-    }, log, {});
-  }, 1500) };
+  const burst = {
+    items: [item],
+    timer: setTimeout(() => {
+      auditBursts.delete(burstKey);
+      const items = burst.items.slice(0, 10);
+      const compact = items
+        .map(
+          (row) =>
+            `• ${row.summary}${row.changes ? ` — ${row.changes.replaceAll("\n", "; ")}` : ""}`,
+        )
+        .join("\n");
+      void logToChannel(
+        guild,
+        mapped.category,
+        {
+          title: items.length > 1 ? `${mapped.title} · ${items.length} eventos` : mapped.title,
+          description: items.length > 1 ? compact.slice(0, 1800) : rendered.description,
+          fields: items.length > 1 ? [] : rendered.fields,
+          accentColor: severity === "warning" ? "#f5a524" : "#7c5cff",
+        },
+        log,
+        {},
+      );
+    }, 1500),
+  };
   auditBursts.set(burstKey, burst);
 }
 
-const auditBursts = new Map<string, { items: { summary: string; changes?: string }[]; timer: ReturnType<typeof setTimeout> }>();
+const auditBursts = new Map<
+  string,
+  { items: { summary: string; changes?: string }[]; timer: ReturnType<typeof setTimeout> }
+>();
 
 async function respond(interaction: Interaction, content: string): Promise<void> {
   try {
@@ -271,8 +615,8 @@ async function promptDepartment(interaction: ButtonInteraction, log: Logger): Pr
         (() => {
           const settings = departmentSettings.find((entry) => entry.name === department);
           const option = new StringSelectMenuOptionBuilder()
-          .setLabel(department.slice(0, 100))
-          .setValue(department.slice(0, 100));
+            .setLabel(department.slice(0, 100))
+            .setValue(department.slice(0, 100));
           if (typeof settings?.description === "string" && settings.description.trim()) {
             option.setDescription(settings.description.trim().slice(0, 100));
           }
@@ -280,20 +624,25 @@ async function promptDepartment(interaction: ButtonInteraction, log: Logger): Pr
             option.setEmoji(settings.emoji.trim());
           }
           return option;
-        })()
-      )
+        })(),
+      ),
     );
 
   await interaction.reply({
     content: "Escolha o departamento para abrir o atendimento:",
     ephemeral: true,
-    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)]
+    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
   });
 }
 
-function getTicketDepartmentSettings(config: Awaited<ReturnType<typeof moduleConfig>>): Record<string, unknown>[] {
+function getTicketDepartmentSettings(
+  config: Awaited<ReturnType<typeof moduleConfig>>,
+): Record<string, unknown>[] {
   return Array.isArray(config?.departmentSettings)
-    ? config.departmentSettings.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    ? config.departmentSettings.filter(
+        (entry): entry is Record<string, unknown> =>
+          Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+      )
     : [];
 }
 
@@ -307,7 +656,12 @@ async function beginTicketOpen(
   const config = await moduleConfig(guild.id, "tickets");
   const settings = getTicketDepartmentSettings(config).find((entry) => entry.name === department);
   const questions = Array.isArray(settings?.intakeQuestions)
-    ? settings.intakeQuestions.filter((question): question is string => typeof question === "string" && Boolean(question.trim())).slice(0, 5)
+    ? settings.intakeQuestions
+        .filter(
+          (question): question is string =>
+            typeof question === "string" && Boolean(question.trim()),
+        )
+        .slice(0, 5)
     : [];
 
   if (questions.length && settings && typeof settings.id === "string") {
@@ -330,13 +684,15 @@ async function beginTicketOpen(
 
   await interaction.deferReply({ ephemeral: true });
   const result = await openTicket(guild, interaction.user.id, department, log);
-  await interaction.editReply(result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error);
+  await interaction.editReply(
+    result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error,
+  );
 }
 
 /** Abre o atendimento no departamento escolhido no select. */
 async function handleDepartmentSelect(
   interaction: StringSelectMenuInteraction,
-  log: Logger
+  log: Logger,
 ): Promise<void> {
   const guild = interaction.guild;
   if (!guild) return;
@@ -362,33 +718,59 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "support" && (action === "claim" || action === "close")) {
     if (!(await canManageTicket(guild, interaction.user.id))) {
-      await interaction.reply({ content: "Somente a equipe de atendimento pode gerenciar este pedido.", ephemeral: true });
+      await interaction.reply({
+        content: "Somente a equipe de atendimento pode gerenciar este pedido.",
+        ephemeral: true,
+      });
       return;
     }
     const thread = interaction.channel;
     const chat = thread?.isThread() ? await findSupportChatByThread(thread.id) : null;
     if (!thread?.isThread() || thread.guildId !== guild.id || chat?.id !== args[0]) {
-      await interaction.reply({ content: "Este atendimento não está disponível.", ephemeral: true });
+      await interaction.reply({
+        content: "Este atendimento não está disponível.",
+        ephemeral: true,
+      });
       return;
     }
     if (action === "claim") {
-      const result = await claimSupportChat(chat.id, interaction.user.id, interaction.user.username);
+      const result = await claimSupportChat(
+        chat.id,
+        interaction.user.id,
+        interaction.user.username,
+      );
       if (result !== "claimed") {
         await interaction.reply({
-          content: result === "already_claimed" ? "Este atendimento já foi reivindicado por outra pessoa da equipe." : "Este atendimento já está encerrado.",
+          content:
+            result === "already_claimed"
+              ? "Este atendimento já foi reivindicado por outra pessoa da equipe."
+              : "Este atendimento já está encerrado.",
           ephemeral: true,
         });
         return;
       }
       await interaction.update({
         content: `${interaction.message.content ?? ""}\n\nAtendimento reivindicado por <@${interaction.user.id}>.`,
-        components: [{
-          type: 1,
-          components: [
-            { type: 2, style: 3, label: "Atendimento reivindicado", custom_id: id("support", "claim", chat.id), disabled: true },
-            { type: 2, style: 4, label: "Fechar atendimento", custom_id: id("support", "close", chat.id) },
-          ],
-        }] as never,
+        components: [
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 3,
+                label: "Atendimento reivindicado",
+                custom_id: id("support", "claim", chat.id),
+                disabled: true,
+              },
+              {
+                type: 2,
+                style: 4,
+                label: "Fechar atendimento",
+                custom_id: id("support", "close", chat.id),
+              },
+            ],
+          },
+        ] as never,
         allowedMentions: { parse: [] },
       });
       return;
@@ -412,7 +794,10 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
       return;
     }
     if (!interaction.memberPermissions?.has("ManageGuild")) {
-      await interaction.reply({ content: "Você precisa de Gerenciar servidor para usar essa ação.", ephemeral: true });
+      await interaction.reply({
+        content: "Você precisa de Gerenciar servidor para usar essa ação.",
+        ephemeral: true,
+      });
       return;
     }
     if (action === "lockdown") {
@@ -424,13 +809,36 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
     if (action === "ignore") {
       const windowKind = (args[0] ?? "raid-alert") as "raid-alert" | "nuke-cooldown";
       await clearPersistedSecurityWindow(guild.id, windowKind);
-      await auditAndLog(guild, { module: "security", category: "automod", eventType: "security_alert_ignored", actorId: interaction.user.id, severity: "info", title: "ALERTA DE SEGURANÇA REVISADO", description: `<@${interaction.user.id}> marcou o alerta como revisado.` }, log);
-      await interaction.reply({ content: "Alerta marcado como revisado. A próxima detecção poderá gerar novo alerta.", ephemeral: true });
+      await auditAndLog(
+        guild,
+        {
+          module: "security",
+          category: "automod",
+          eventType: "security_alert_ignored",
+          actorId: interaction.user.id,
+          severity: "info",
+          title: "ALERTA DE SEGURANÇA REVISADO",
+          description: `<@${interaction.user.id}> marcou o alerta como revisado.`,
+        },
+        log,
+      );
+      await interaction.reply({
+        content: "Alerta marcado como revisado. A próxima detecção poderá gerar novo alerta.",
+        ephemeral: true,
+      });
       return;
     }
     if (action === "ban_recent") {
-      const modal = new ModalBuilder().setCustomId(id("security", "ban_confirm")).setTitle("Banir membros recentes");
-      const count = new TextInputBuilder().setCustomId("count").setLabel("Quantidade (1 a 10)").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2).setPlaceholder("5");
+      const modal = new ModalBuilder()
+        .setCustomId(id("security", "ban_confirm"))
+        .setTitle("Banir membros recentes");
+      const count = new TextInputBuilder()
+        .setCustomId("count")
+        .setLabel("Quantidade (1 a 10)")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(2)
+        .setPlaceholder("5");
       modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(count));
       await interaction.showModal(modal);
       return;
@@ -444,11 +852,18 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "ticket" && action === "claim") {
     const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode assumir tickets.", ephemeral: true }); return; }
+    if (!(await canManageTicket(guild, interaction.user.id))) {
+      await interaction.reply({
+        content: "Somente a equipe de atendimento pode assumir tickets.",
+        ephemeral: true,
+      });
+      return;
+    }
     await interaction.deferReply({ ephemeral: true });
     const result = await claimTicket(guild, ticketId, interaction.user.id, log);
 
-    if (result.alreadyBy) await interaction.editReply(`<@${result.alreadyBy}> ja assumiu este atendimento.`);
+    if (result.alreadyBy)
+      await interaction.editReply(`<@${result.alreadyBy}> ja assumiu este atendimento.`);
     else if (result.ok) await interaction.editReply("Voce assumiu o atendimento.");
     else await interaction.editReply("Nao foi possivel assumir este atendimento.");
     return;
@@ -456,9 +871,23 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "ticket" && action === "close") {
     const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode encerrar tickets.", ephemeral: true }); return; }
-    const modal = new ModalBuilder().setCustomId(id("ticket", "close_reason_submit", ticketId)).setTitle(`Encerrar atendimento #${ticketId}`);
-    const reason = new TextInputBuilder().setCustomId("motivo").setLabel("Motivo do encerramento").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder("Ex.: dúvida resolvida, solicitação concluída…");
+    if (!(await canManageTicket(guild, interaction.user.id))) {
+      await interaction.reply({
+        content: "Somente a equipe de atendimento pode encerrar tickets.",
+        ephemeral: true,
+      });
+      return;
+    }
+    const modal = new ModalBuilder()
+      .setCustomId(id("ticket", "close_reason_submit", ticketId))
+      .setTitle(`Encerrar atendimento #${ticketId}`);
+    const reason = new TextInputBuilder()
+      .setCustomId("motivo")
+      .setLabel("Motivo do encerramento")
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(500)
+      .setPlaceholder("Ex.: dúvida resolvida, solicitação concluída…");
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
     await interaction.showModal(modal);
     return;
@@ -466,9 +895,23 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "ticket" && action === "close_reason") {
     const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode encerrar tickets.", ephemeral: true }); return; }
-    const modal = new ModalBuilder().setCustomId(id("ticket", "close_reason_submit", ticketId)).setTitle(`Encerrar atendimento #${ticketId}`);
-    const reason = new TextInputBuilder().setCustomId("motivo").setLabel("Motivo do encerramento").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder("Ex.: dúvida resolvida, solicitação concluída…");
+    if (!(await canManageTicket(guild, interaction.user.id))) {
+      await interaction.reply({
+        content: "Somente a equipe de atendimento pode encerrar tickets.",
+        ephemeral: true,
+      });
+      return;
+    }
+    const modal = new ModalBuilder()
+      .setCustomId(id("ticket", "close_reason_submit", ticketId))
+      .setTitle(`Encerrar atendimento #${ticketId}`);
+    const reason = new TextInputBuilder()
+      .setCustomId("motivo")
+      .setLabel("Motivo do encerramento")
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(500)
+      .setPlaceholder("Ex.: dúvida resolvida, solicitação concluída…");
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
     await interaction.showModal(modal);
     return;
@@ -476,17 +919,43 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "ticket" && action === "transfer_pick") {
     const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode transferir tickets.", ephemeral: true }); return; }
-    const picker = new UserSelectMenuBuilder().setCustomId(id("ticket", "transfer", ticketId)).setPlaceholder("Escolha um atendente").setMinValues(1).setMaxValues(1);
-    await interaction.reply({ content: "Escolha quem assumirá este atendimento. O Wumpus confirma o cargo antes de transferir.", components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(picker)], ephemeral: true });
+    if (!(await canManageTicket(guild, interaction.user.id))) {
+      await interaction.reply({
+        content: "Somente a equipe de atendimento pode transferir tickets.",
+        ephemeral: true,
+      });
+      return;
+    }
+    const picker = new UserSelectMenuBuilder()
+      .setCustomId(id("ticket", "transfer", ticketId))
+      .setPlaceholder("Escolha um atendente")
+      .setMinValues(1)
+      .setMaxValues(1);
+    await interaction.reply({
+      content:
+        "Escolha quem assumirá este atendimento. O Wumpus confirma o cargo antes de transferir.",
+      components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(picker)],
+      ephemeral: true,
+    });
     return;
   }
 
   if (kind === "ticket" && action === "escalate") {
     const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode escalar tickets.", ephemeral: true }); return; }
+    if (!(await canManageTicket(guild, interaction.user.id))) {
+      await interaction.reply({
+        content: "Somente a equipe de atendimento pode escalar tickets.",
+        ephemeral: true,
+      });
+      return;
+    }
     const applied = await setTicketPriority(guild, ticketId, "urgent", interaction.user.id, log);
-    await interaction.reply({ content: applied ? `Atendimento **#${ticketId}** escalado para urgente.` : "O atendimento já está urgente, foi encerrado ou não existe.", ephemeral: true });
+    await interaction.reply({
+      content: applied
+        ? `Atendimento **#${ticketId}** escalado para urgente.`
+        : "O atendimento já está urgente, foi encerrado ou não existe.",
+      ephemeral: true,
+    });
     return;
   }
 
@@ -497,7 +966,11 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
     try {
       const saved = await recordFeedback(guild.id, ticketId, rating, log);
       if (!saved) {
-        await interaction.followUp({ content: "Não consegui registrar a nota. O atendimento pode já ter recebido uma avaliação.", ephemeral: true });
+        await interaction.followUp({
+          content:
+            "Não consegui registrar a nota. O atendimento pode já ter recebido uma avaliação.",
+          ephemeral: true,
+        });
         return;
       }
       await interaction.editReply({
@@ -505,22 +978,38 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
         components: interaction.message.components.slice(1).map((row) => row.toJSON()),
       });
     } catch (error) {
-      log.error("falha ao registrar avaliacao de atendimento", { guildId: guild.id, ticketId, error: String(error).slice(0, 300) });
-      await interaction.followUp({ content: "O Discord recebeu seu clique, mas não consegui salvar a nota. Tente novamente em instantes.", ephemeral: true }).catch(() => undefined);
+      log.error("falha ao registrar avaliacao de atendimento", {
+        guildId: guild.id,
+        ticketId,
+        error: String(error).slice(0, 300),
+      });
+      await interaction
+        .followUp({
+          content:
+            "O Discord recebeu seu clique, mas não consegui salvar a nota. Tente novamente em instantes.",
+          ephemeral: true,
+        })
+        .catch(() => undefined);
     }
     return;
   }
 
   if (kind === "ticket" && action === "prior") {
     const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode alterar prioridades.", ephemeral: true }); return; }
+    if (!(await canManageTicket(guild, interaction.user.id))) {
+      await interaction.reply({
+        content: "Somente a equipe de atendimento pode alterar prioridades.",
+        ephemeral: true,
+      });
+      return;
+    }
     const priority = args[1] ?? "normal";
     const applied = await setTicketPriority(guild, ticketId, priority, interaction.user.id, log);
     await interaction.reply({
       content: applied
         ? `Prioridade do atendimento **#${ticketId}** agora e **${priority}**.`
         : "Este atendimento nao existe ou ja foi encerrado.",
-      ephemeral: true
+      ephemeral: true,
     });
     return;
   }
@@ -530,7 +1019,9 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
     await interaction.deferReply({ ephemeral: true });
     const result = await reopenClosedTicket(guild, ticketId, interaction.user.id, log);
     await interaction.editReply(
-      result.ok ? `Atendimento reaberto em <#${result.channelId}>.` : (result.error ?? "Nao foi possivel reabrir.")
+      result.ok
+        ? `Atendimento reaberto em <#${result.channelId}>.`
+        : (result.error ?? "Nao foi possivel reabrir."),
     );
     return;
   }
@@ -550,7 +1041,9 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
     }
     const config = await moduleConfig(guild.id, "forms");
     const draft = await readDraft(guild.id, interaction.user.id);
-    await interaction.showModal(buildFormModal(parseFields(config), id("form", "submit"), draft?.values ?? {}));
+    await interaction.showModal(
+      buildFormModal(parseFields(config), id("form", "submit"), draft?.values ?? {}),
+    );
     return;
   }
 
@@ -559,8 +1052,17 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
     if (action === "approve") {
       await interaction.deferReply({ ephemeral: true });
-      const result = await reviewForm(guild, submissionId, interaction.user.id, "approved", null, log);
-      await interaction.editReply(result.ok ? "Candidatura aprovada." : (result.error ?? "Falhou."));
+      const result = await reviewForm(
+        guild,
+        submissionId,
+        interaction.user.id,
+        "approved",
+        null,
+        log,
+      );
+      await interaction.editReply(
+        result.ok ? "Candidatura aprovada." : (result.error ?? "Falhou."),
+      );
       return;
     }
 
@@ -578,11 +1080,11 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
               label: "Motivo da recusa",
               style: 2,
               required: true,
-              max_length: 500
-            }
-          ]
-        }
-      ]
+              max_length: 500,
+            },
+          ],
+        },
+      ],
     };
 
     await interaction.showModal(modal as never);
@@ -595,25 +1097,76 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
   if (!parsed) return;
 
   if (parsed.kind === "security" && parsed.action === "ban_confirm" && interaction.guild) {
-    if (!interaction.memberPermissions?.has("ManageGuild")) { await interaction.reply({ content: "Você precisa de Gerenciar servidor para usar essa ação.", ephemeral: true }); return; }
+    if (!interaction.memberPermissions?.has("ManageGuild")) {
+      await interaction.reply({
+        content: "Você precisa de Gerenciar servidor para usar essa ação.",
+        ephemeral: true,
+      });
+      return;
+    }
     const requested = Number(interaction.fields.getTextInputValue("count"));
-    if (!Number.isInteger(requested) || requested < 1 || requested > 10) { await interaction.reply({ content: "Informe uma quantidade entre 1 e 10.", ephemeral: true }); return; }
+    if (!Number.isInteger(requested) || requested < 1 || requested > 10) {
+      await interaction.reply({ content: "Informe uma quantidade entre 1 e 10.", ephemeral: true });
+      return;
+    }
     await interaction.deferReply({ ephemeral: true });
     const config = await moduleConfig(interaction.guild.id, "security");
-    const trusted = new Set([...list(config, "trustedRoleIds"), ...list(config, "whitelistRoleIds")]);
+    const trusted = new Set([
+      ...list(config, "trustedRoleIds"),
+      ...list(config, "whitelistRoleIds"),
+    ]);
     const windowMs = Math.max(5, Number(config?.raidWindowSeconds ?? 60)) * 1000;
     const entries = await readPersistedSecurityWindow(interaction.guild.id, "raid", windowMs);
-    const ids = [...new Set(entries.slice().reverse().map((entry) => entry.actorId).filter((value): value is string => Boolean(value)))].slice(0, requested);
+    const ids = [
+      ...new Set(
+        entries
+          .slice()
+          .reverse()
+          .map((entry) => entry.actorId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ].slice(0, requested);
     let banned = 0;
     for (const userId of ids) {
       const member = await interaction.guild.members.fetch(userId).catch(() => null);
-      if (!member || member.id === interaction.user.id || member.user.bot || member.roles.cache.some((role) => trusted.has(role.id)) || !member.bannable) continue;
-      await member.ban({ reason: `ação manual de resposta ao alerta anti-raid por ${interaction.user.tag}` }).then(async () => {
-        banned++;
-        await auditAndLog(interaction.guild!, { module: "security", category: "bans", eventType: "security_recent_member_ban", actorId: interaction.user.id, targetId: member.id, severity: "critical", title: "BAN MANUAL APÓS ALERTA DE RAID", description: `<@${member.id}> banido por <@${interaction.user.id}>.` }, log);
-      }).catch((error) => log.warn("falha ao banir membro recente", { guildId: interaction.guildId, userId, error: String(error) }));
+      if (
+        !member ||
+        member.id === interaction.user.id ||
+        member.user.bot ||
+        member.roles.cache.some((role) => trusted.has(role.id)) ||
+        !member.bannable
+      )
+        continue;
+      await member
+        .ban({ reason: `ação manual de resposta ao alerta anti-raid por ${interaction.user.tag}` })
+        .then(async () => {
+          banned++;
+          await auditAndLog(
+            interaction.guild!,
+            {
+              module: "security",
+              category: "bans",
+              eventType: "security_recent_member_ban",
+              actorId: interaction.user.id,
+              targetId: member.id,
+              severity: "critical",
+              title: "BAN MANUAL APÓS ALERTA DE RAID",
+              description: `<@${member.id}> banido por <@${interaction.user.id}>.`,
+            },
+            log,
+          );
+        })
+        .catch((error) =>
+          log.warn("falha ao banir membro recente", {
+            guildId: interaction.guildId,
+            userId,
+            error: String(error),
+          }),
+        );
     }
-    await interaction.editReply(`Banidos ${banned} de ${ids.length} membros recentes elegíveis. Membros protegidos ou acima do cargo do bot foram ignorados.`);
+    await interaction.editReply(
+      `Banidos ${banned} de ${ids.length} membros recentes elegíveis. Membros protegidos ou acima do cargo do bot foram ignorados.`,
+    );
     return;
   }
 
@@ -626,10 +1179,18 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
     const config = await moduleConfig(guild.id, "tickets");
     const settings = getTicketDepartmentSettings(config).find((entry) => entry.id === args[0]);
     const questions = Array.isArray(settings?.intakeQuestions)
-      ? settings.intakeQuestions.filter((question): question is string => typeof question === "string" && Boolean(question.trim())).slice(0, 5)
+      ? settings.intakeQuestions
+          .filter(
+            (question): question is string =>
+              typeof question === "string" && Boolean(question.trim()),
+          )
+          .slice(0, 5)
       : [];
     if (!settings || typeof settings.name !== "string" || !questions.length) {
-      await interaction.reply({ content: "Este formulário mudou. Volte ao painel e tente abrir o atendimento novamente.", ephemeral: true });
+      await interaction.reply({
+        content: "Este formulário mudou. Volte ao painel e tente abrir o atendimento novamente.",
+        ephemeral: true,
+      });
       return;
     }
     const answers = questions.map((question, index) => ({
@@ -637,7 +1198,10 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
       answer: interaction.fields.getTextInputValue(`q${index}`).trim(),
     }));
     if (answers.some(({ answer }) => !answer)) {
-      await interaction.reply({ content: "Preencha todas as respostas para abrir o atendimento.", ephemeral: true });
+      await interaction.reply({
+        content: "Preencha todas as respostas para abrir o atendimento.",
+        ephemeral: true,
+      });
       return;
     }
     const maintenance = await maintenanceNotice(guild.id);
@@ -647,17 +1211,29 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
     }
     await interaction.deferReply({ ephemeral: true });
     const result = await openTicket(guild, interaction.user.id, settings.name, log, answers);
-    await interaction.editReply(result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error);
+    await interaction.editReply(
+      result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error,
+    );
     return;
   }
 
   if (kind === "ticket" && action === "close_reason_submit") {
     const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) { await interaction.reply({ content: "Somente a equipe de atendimento pode encerrar tickets.", ephemeral: true }); return; }
+    if (!(await canManageTicket(guild, interaction.user.id))) {
+      await interaction.reply({
+        content: "Somente a equipe de atendimento pode encerrar tickets.",
+        ephemeral: true,
+      });
+      return;
+    }
     const reason = interaction.fields.getTextInputValue("motivo").trim();
     await interaction.deferReply({ ephemeral: true });
     const result = await closeTicket(guild, ticketId, interaction.user.id, log, reason);
-    await interaction.editReply(result.ok ? `Atendimento encerrado. Motivo: ${reason.slice(0, 400)}` : "Este atendimento já estava encerrado ou não existe.");
+    await interaction.editReply(
+      result.ok
+        ? `Atendimento encerrado. Motivo: ${reason.slice(0, 400)}`
+        : "Este atendimento já estava encerrado ou não existe.",
+    );
     return;
   }
 
@@ -678,12 +1254,22 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
     const reason = interaction.fields.getTextInputValue("motivo");
 
     await interaction.deferReply({ ephemeral: true });
-    const result = await reviewForm(guild, submissionId, interaction.user.id, "rejected", reason, log);
+    const result = await reviewForm(
+      guild,
+      submissionId,
+      interaction.user.id,
+      "rejected",
+      reason,
+      log,
+    );
     await interaction.editReply(result.ok ? "Candidatura recusada." : (result.error ?? "Falhou."));
   }
 }
 
-async function handleTicketTransferSelect(interaction: UserSelectMenuInteraction, log: Logger): Promise<void> {
+async function handleTicketTransferSelect(
+  interaction: UserSelectMenuInteraction,
+  log: Logger,
+): Promise<void> {
   const parsed = parseId(interaction.customId);
   const guild = interaction.guild;
   if (!guild || parsed?.kind !== "ticket" || parsed.action !== "transfer") return;
@@ -695,7 +1281,11 @@ async function handleTicketTransferSelect(interaction: UserSelectMenuInteraction
   }
   await interaction.deferReply({ ephemeral: true });
   const result = await transferTicket(guild, ticketId, interaction.user.id, targetStaffId, log);
-  await interaction.editReply(result.ok ? `Atendimento **#${ticketId}** transferido para <@${targetStaffId}>.` : result.error ?? "Não foi possível transferir o atendimento.");
+  await interaction.editReply(
+    result.ok
+      ? `Atendimento **#${ticketId}** transferido para <@${targetStaffId}>.`
+      : (result.error ?? "Não foi possível transferir o atendimento."),
+  );
 }
 
 async function canManageTicket(guild: Guild, userId: string): Promise<boolean> {
@@ -706,7 +1296,10 @@ async function canManageTicket(guild: Guild, userId: string): Promise<boolean> {
   ]);
   if (!member) return false;
   if (member.permissions.has("ManageGuild")) return true;
-  const roles = resolveRoles(guild, [...list(tickets, "staffRoleIds"), ...list(staff, "staffRoleIds")]);
+  const roles = resolveRoles(guild, [
+    ...list(tickets, "staffRoleIds"),
+    ...list(staff, "staffRoleIds"),
+  ]);
   return roles.some((role) => member.roles.cache.has(role.id));
 }
 
@@ -732,24 +1325,46 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
       startedAt,
       guildCount: client.guilds.cache.size,
       guildIds: [...client.guilds.cache.keys()],
-      guildResources: Object.fromEntries([...client.guilds.cache.values()].map((guild) => [guild.id, {
-        channels: [...guild.channels.cache.values()].flatMap((channel): Array<{ id: string; name: string; type: "text" | "category" }> =>
-          channel.type === ChannelType.GuildCategory
-            ? [{ id: channel.id, name: channel.name, type: "category" as const }]
-            : channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement
-              ? [{ id: channel.id, name: channel.name, type: "text" as const }]
-              : [],
-        ),
-        roles: [...guild.roles.cache.values()].filter((role) => role.id !== guild.id && !role.managed).map((role) => ({ id: role.id, name: role.name, color: role.hexColor, position: role.position })),
-        permissions: guild.members.me ? {
-          manageMessages: guild.members.me.permissions.has(PermissionFlagsBits.ManageMessages),
-          manageChannels: guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels),
-          manageRoles: guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles),
-          moderateMembers: guild.members.me.permissions.has(PermissionFlagsBits.ModerateMembers),
-          viewAuditLog: guild.members.me.permissions.has(PermissionFlagsBits.ViewAuditLog),
-          banMembers: guild.members.me.permissions.has(PermissionFlagsBits.BanMembers),
-        } : null,
-      }])),
+      guildResources: Object.fromEntries(
+        [...client.guilds.cache.values()].map((guild) => [
+          guild.id,
+          {
+            channels: [...guild.channels.cache.values()].flatMap(
+              (channel): Array<{ id: string; name: string; type: "text" | "category" }> =>
+                channel.type === ChannelType.GuildCategory
+                  ? [{ id: channel.id, name: channel.name, type: "category" as const }]
+                  : channel.type === ChannelType.GuildText ||
+                      channel.type === ChannelType.GuildAnnouncement
+                    ? [{ id: channel.id, name: channel.name, type: "text" as const }]
+                    : [],
+            ),
+            roles: [...guild.roles.cache.values()]
+              .filter((role) => role.id !== guild.id && !role.managed)
+              .map((role) => ({
+                id: role.id,
+                name: role.name,
+                color: role.hexColor,
+                position: role.position,
+              })),
+            permissions: guild.members.me
+              ? {
+                  manageMessages: guild.members.me.permissions.has(
+                    PermissionFlagsBits.ManageMessages,
+                  ),
+                  manageChannels: guild.members.me.permissions.has(
+                    PermissionFlagsBits.ManageChannels,
+                  ),
+                  manageRoles: guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles),
+                  moderateMembers: guild.members.me.permissions.has(
+                    PermissionFlagsBits.ModerateMembers,
+                  ),
+                  viewAuditLog: guild.members.me.permissions.has(PermissionFlagsBits.ViewAuditLog),
+                  banMembers: guild.members.me.permissions.has(PermissionFlagsBits.BanMembers),
+                }
+              : null,
+          },
+        ]),
+      ),
       pingMs: client.ws.ping >= 0 ? client.ws.ping : null,
     });
   const startedAt = Date.now();
@@ -759,28 +1374,47 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     void syncBotPlanLicenses(log);
     licenseSyncTimer = setInterval(() => void syncBotPlanLicenses(log), 5 * 60_000);
     licenseSyncTimer.unref();
-    await reportHealth("online").catch((error) => log.error("falha ao publicar saúde do bot", { error: String(error) }));
+    await reportHealth("online").catch((error) =>
+      log.error("falha ao publicar saúde do bot", { error: String(error) }),
+    );
     healthTimer = setInterval(() => {
-      void reportHealth("online").catch((error) => log.error("falha ao publicar saúde do bot", { error: String(error) }));
+      void reportHealth("online").catch((error) =>
+        log.error("falha ao publicar saúde do bot", { error: String(error) }),
+      );
     }, 30_000);
     if (client.user) await registerCommands(client.user.id, token, log);
   });
 
   client.on(Events.GuildCreate, (guild: Guild) => {
-    log.info("entrou em servidor", { guildId: guild.id, name: guild.name, members: guild.memberCount });
-    void reportHealth("online").catch((error) => log.error("falha ao sincronizar servidores do bot", { error: String(error) }));
+    log.info("entrou em servidor", {
+      guildId: guild.id,
+      name: guild.name,
+      members: guild.memberCount,
+    });
+    void reportHealth("online").catch((error) =>
+      log.error("falha ao sincronizar servidores do bot", { error: String(error) }),
+    );
     const activationTimer = setTimeout(() => {
       void (async () => {
         if (await guildPlan(guild.id)) return;
-        log.warn("servidor sem licença ativa após o período de ativação; saindo", { guildId: guild.id });
-        await guild.leave().catch((error) => log.warn("não foi possível sair do servidor sem licença", { guildId: guild.id, error: String(error) }));
+        log.warn("servidor sem licença ativa após o período de ativação; saindo", {
+          guildId: guild.id,
+        });
+        await guild.leave().catch((error) =>
+          log.warn("não foi possível sair do servidor sem licença", {
+            guildId: guild.id,
+            error: String(error),
+          }),
+        );
       })();
     }, 15 * 60_000);
     activationTimer.unref();
   });
 
   client.on(Events.GuildDelete, () => {
-    void reportHealth("online").catch((error) => log.error("falha ao sincronizar servidores do bot", { error: String(error) }));
+    void reportHealth("online").catch((error) =>
+      log.error("falha ao sincronizar servidores do bot", { error: String(error) }),
+    );
   });
 
   const licenseSweepTimer = setInterval(() => {
@@ -789,12 +1423,23 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
         const license = await guildEntitlement(guild.id);
         const status = await guildEntitlementStatus(guild.id);
         if (status !== "inactive" && !(license && license.accountId !== guild.ownerId)) continue;
-        log.warn("licença inativa ou fora do limite do plano; saindo do servidor", { guildId: guild.id });
+        log.warn("licença inativa ou fora do limite do plano; saindo do servidor", {
+          guildId: guild.id,
+        });
         const owner = await guild.fetchOwner().catch(() => null);
         if (owner) {
-          await owner.send("O Wumpus saiu deste servidor porque ele está sem licença ativa ou acima do limite do plano. Entre na dashboard com a conta Discord proprietária para conferir o plano e a cota; depois, se necessário, adicione o bot novamente.").catch(() => undefined);
+          await owner
+            .send(
+              "O Wumpus saiu deste servidor porque ele está sem licença ativa ou acima do limite do plano. Entre na dashboard com a conta Discord proprietária para conferir o plano e a cota; depois, se necessário, adicione o bot novamente.",
+            )
+            .catch(() => undefined);
         }
-        await guild.leave().catch((error) => log.warn("não foi possível sair do servidor sem licença", { guildId: guild.id, error: String(error) }));
+        await guild.leave().catch((error) =>
+          log.warn("não foi possível sair do servidor sem licença", {
+            guildId: guild.id,
+            error: String(error),
+          }),
+        );
       }
     })();
   }, 60_000);
@@ -802,21 +1447,40 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
 
   client.on(Events.GuildMemberAdd, (member) => {
     void handleMemberWelcome(member, log);
-    void handleMemberAdd(member, log).then(async () => {
-      // Não atribuir cargos padrão que possam contornar a barreira de verificação.
-      if (!(await isVerificationActive(member.guild.id))) await applyDefaultRole(member, log);
-    }).catch((error) => log.error("falha no fluxo de entrada de membro", { error: String(error) }));
+    void syncStaffRosterMember(member).catch((error) =>
+      log.warn("falha ao atualizar lista da equipe após entrada de membro", {
+        guildId: member.guild.id,
+        memberId: member.id,
+        error: String(error).slice(0, 200),
+      }),
+    );
+    void handleMemberAdd(member, log)
+      .then(async () => {
+        // Não atribuir cargos padrão que possam contornar a barreira de verificação.
+        if (!(await isVerificationActive(member.guild.id))) await applyDefaultRole(member, log);
+        await syncStaffRosterMember(member);
+      })
+      .catch((error) => log.error("falha no fluxo de entrada de membro", { error: String(error) }));
     void bump(member.guild.id, "joins").catch(() => undefined);
   });
 
   client.on(Events.GuildMemberRemove, (member) => {
+    void syncStaffRosterMember(member, { removed: true }).catch((error) =>
+      log.warn("falha ao atualizar lista da equipe após saída de membro", {
+        guildId: member.guild.id,
+        memberId: member.id,
+        error: String(error).slice(0, 200),
+      }),
+    );
     void handleMemberLeave(member, log);
     void removeManagedRolesOnLeave(member.guild, member, log).catch(() => undefined);
     void bump(member.guild.id, "leaves").catch(() => undefined);
   });
 
   client.on(Events.ChannelCreate, (channel) => {
-    void gateNewChannel(channel, log).catch((error) => log.error("falha ao restringir canal novo", { channelId: channel.id, error: String(error) }));
+    void gateNewChannel(channel, log).catch((error) =>
+      log.error("falha ao restringir canal novo", { channelId: channel.id, error: String(error) }),
+    );
   });
 
   client.on(Events.MessageCreate, (message: Message) => {
@@ -825,84 +1489,156 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     const supportContent = [
       message.content,
       ...message.attachments.map((attachment) => attachment.url),
-    ].filter(Boolean).join("\n");
-    if (message.channel.isThread() && message.channel.parentId === process.env.WUMPUS_SUPPORT_FORUM_ID) {
-      void canManageTicket(message.guild, message.author.id).then((authorized) => {
-        if (!authorized) {
-          log.warn("mensagem não encaminhada do tópico de suporte: autor sem permissão de equipe", {
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (
+      message.channel.isThread() &&
+      message.channel.parentId === process.env.WUMPUS_SUPPORT_FORUM_ID
+    ) {
+      void canManageTicket(message.guild, message.author.id)
+        .then((authorized) => {
+          if (!authorized) {
+            log.warn(
+              "mensagem não encaminhada do tópico de suporte: autor sem permissão de equipe",
+              {
+                guildId,
+                channelId: message.channelId,
+                authorId: message.author.id,
+              },
+            );
+            return;
+          }
+          return addSupportStaffMessage(message.channelId, message.author.id, supportContent);
+        })
+        .catch((error) =>
+          log.error("falha ao encaminhar resposta do staff para o chat do site", {
             guildId,
             channelId: message.channelId,
-            authorId: message.author.id,
-          });
-          return;
-        }
-        return addSupportStaffMessage(message.channelId, message.author.id, supportContent);
-      }).catch((error) =>
-        log.error("falha ao encaminhar resposta do staff para o chat do site", { guildId, channelId: message.channelId, error: String(error).slice(0, 200) }),
-      );
+            error: String(error).slice(0, 200),
+          }),
+        );
       return;
     }
     void recordMessageLog(message, "message_created", "Mensagem enviada", message.content, log);
 
     void handleMessage(message, log).catch((error) =>
-      log.error("falha no automod", { error: String(error) })
+      log.error("falha no automod", { error: String(error) }),
     );
-    void handleMassMention(message, log).catch((error) => log.error("falha no detector de menções em massa", { error: String(error) }));
+    void handleMassMention(message, log).catch((error) =>
+      log.error("falha no detector de menções em massa", { error: String(error) }),
+    );
     void handleImageContent(message, log).catch((error) =>
-      log.error("falha no automod de imagem", { error: String(error) })
+      log.error("falha no automod de imagem", { error: String(error) }),
     );
     void recordTicketMessage(message).catch(() => undefined);
     void bump(message.guild.id, "messages").catch(() => undefined);
     void handleKnowledgeMessage(message, log).catch((error) =>
-      log.error("falha na base de conhecimento", { error: String(error) })
+      log.error("falha na base de conhecimento", { error: String(error) }),
     );
     void trackFrequentQuestion(message, log).catch((error) =>
-      log.error("falha ao analisar perguntas frequentes", { guildId, error: String(error) })
+      log.error("falha ao analisar perguntas frequentes", { guildId, error: String(error) }),
     );
   });
 
   client.on(Events.MessageDelete, (message) => {
     if (!message.guild || message.author?.bot) return;
-    void recordMessageLog(message, "message_deleted", "Mensagem apagada", message.content ?? "(conteúdo indisponível)", log);
+    void recordMessageLog(
+      message,
+      "message_deleted",
+      "Mensagem apagada",
+      message.content ?? "(conteúdo indisponível)",
+      log,
+    );
     void handleGhostPing(message, log).catch(() => undefined);
   });
 
   client.on(Events.MessageUpdate, (before, after) => {
     if (!after.guild || after.author?.bot) return;
     if (before.content === after.content) return;
-    void recordMessageLog(after, "message_edited", "Mensagem editada", `**Antes:** ${before.content || "(vazio)"}\n**Depois:** ${after.content || "(vazio)"}`, log);
+    void recordMessageLog(
+      after,
+      "message_edited",
+      "Mensagem editada",
+      `**Antes:** ${before.content || "(vazio)"}\n**Depois:** ${after.content || "(vazio)"}`,
+      log,
+    );
   });
 
   client.on(Events.GuildMemberAdd, (member) => {
-    void auditAndLog(member.guild, {
-      module: "members", category: "members", eventType: "member_joined", targetId: member.id,
-      title: "MEMBRO ENTROU", description: `<@${member.id}> entrou no servidor.`,
-      fields: [{ name: "Conta criada", value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>` }],
-    }, log);
+    void auditAndLog(
+      member.guild,
+      {
+        module: "members",
+        category: "members",
+        eventType: "member_joined",
+        targetId: member.id,
+        title: "MEMBRO ENTROU",
+        description: `<@${member.id}> entrou no servidor.`,
+        fields: [
+          {
+            name: "Conta criada",
+            value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`,
+          },
+        ],
+      },
+      log,
+    );
   });
 
   client.on(Events.GuildMemberRemove, (member) => {
-    void auditAndLog(member.guild, {
-      module: "members", category: "members", eventType: "member_left", targetId: member.id,
-      title: "MEMBRO SAIU", description: `<@${member.id}> saiu do servidor.`,
-    }, log);
+    void auditAndLog(
+      member.guild,
+      {
+        module: "members",
+        category: "members",
+        eventType: "member_left",
+        targetId: member.id,
+        title: "MEMBRO SAIU",
+        description: `<@${member.id}> saiu do servidor.`,
+      },
+      log,
+    );
   });
 
   client.on(Events.GuildMemberUpdate, (before, after) => {
     const changes: string[] = [];
-    if (before.nickname !== after.nickname) changes.push(`Apelido: ${before.nickname ?? "nenhum"} → ${after.nickname ?? "nenhum"}`);
+    if (before.nickname !== after.nickname)
+      changes.push(`Apelido: ${before.nickname ?? "nenhum"} → ${after.nickname ?? "nenhum"}`);
     const oldRoles = new Set(before.roles.cache.keys());
     const newRoles = new Set(after.roles.cache.keys());
     const added = [...newRoles].filter((id) => !oldRoles.has(id));
     const removed = [...oldRoles].filter((id) => !newRoles.has(id));
-    if (added.length) changes.push(`Cargos adicionados: ${added.map((id) => `<@&${id}>`).join(", ")}`);
-    if (removed.length) changes.push(`Cargos removidos: ${removed.map((id) => `<@&${id}>`).join(", ")}`);
+    if (before.nickname !== after.nickname || added.length || removed.length) {
+      void syncStaffRosterMember(after, {
+        changedRoleIds: [...added, ...removed],
+        profileChanged: before.nickname !== after.nickname,
+      }).catch((error) =>
+        log.warn("falha ao atualizar lista da equipe após alteração de membro", {
+          guildId: after.guild.id,
+          memberId: after.id,
+          error: String(error).slice(0, 200),
+        }),
+      );
+    }
+    if (added.length)
+      changes.push(`Cargos adicionados: ${added.map((id) => `<@&${id}>`).join(", ")}`);
+    if (removed.length)
+      changes.push(`Cargos removidos: ${removed.map((id) => `<@&${id}>`).join(", ")}`);
     if (!changes.length) return;
-    void auditAndLog(after.guild, {
-      module: "members", category: "members", eventType: "member_updated", targetId: after.id,
-      title: "MEMBRO ATUALIZADO", description: `Alterações em <@${after.id}>.`,
-      fields: [{ name: "Antes → depois", value: changes.join("\n").slice(0, 900) }],
-    }, log);
+    void auditAndLog(
+      after.guild,
+      {
+        module: "members",
+        category: "members",
+        eventType: "member_updated",
+        targetId: after.id,
+        title: "MEMBRO ATUALIZADO",
+        description: `Alterações em <@${after.id}>.`,
+        fields: [{ name: "Antes → depois", value: changes.join("\n").slice(0, 900) }],
+      },
+      log,
+    );
   });
 
   client.on(Events.VoiceStateUpdate, (before, after) => {
@@ -911,17 +1647,32 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     const newChannel = after.channel;
     if (oldChannel?.id === newChannel?.id) return;
     const eventType = !oldChannel ? "voice_joined" : !newChannel ? "voice_left" : "voice_moved";
-    const transition = !oldChannel ? `entrou em <#${newChannel!.id}>` : !newChannel ? `saiu de <#${oldChannel.id}>` : `moveu-se de <#${oldChannel.id}> para <#${newChannel.id}>`;
-    void auditAndLog(guild, {
-      module: "voice", category: "voice", eventType, targetId: after.id,
-      title: "ATIVIDADE DE VOZ", description: `<@${after.id}> ${transition}.`,
-      channelId: newChannel?.id ?? oldChannel?.id,
-    }, log);
+    const transition = !oldChannel
+      ? `entrou em <#${newChannel!.id}>`
+      : !newChannel
+        ? `saiu de <#${oldChannel.id}>`
+        : `moveu-se de <#${oldChannel.id}> para <#${newChannel.id}>`;
+    void auditAndLog(
+      guild,
+      {
+        module: "voice",
+        category: "voice",
+        eventType,
+        targetId: after.id,
+        title: "ATIVIDADE DE VOZ",
+        description: `<@${after.id}> ${transition}.`,
+        channelId: newChannel?.id ?? oldChannel?.id,
+      },
+      log,
+    );
   });
 
   client.on(Events.GuildAuditLogEntryCreate, (entry, guild) => {
     void recordGatewayAudit(entry, guild, log).catch((error) =>
-      log.warn("falha ao registrar evento do audit log", { guildId: guild.id, error: String(error) })
+      log.warn("falha ao registrar evento do audit log", {
+        guildId: guild.id,
+        error: String(error),
+      }),
     );
   });
 
@@ -962,7 +1713,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
       } catch (error) {
         log.error("falha ao tratar interacao", {
           kind: interaction.type,
-          error: String(error)
+          error: String(error),
         });
         await respond(interaction, "Algo falhou do meu lado. A equipe foi avisada pelo log.");
       } finally {
@@ -1000,7 +1751,12 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
       for (const guild of client.guilds.cache.values()) {
         await pruneAudit(log, undefined, guild.id).catch(() => 0);
         await pruneStatistics(guild.id, log).catch(() => 0);
-        await pruneTicketContent(guild, log).catch((error) => log.warn("falha ao aplicar retenção de tickets", { guildId: guild.id, error: String(error).slice(0, 250) }));
+        await pruneTicketContent(guild, log).catch((error) =>
+          log.warn("falha ao aplicar retenção de tickets", {
+            guildId: guild.id,
+            error: String(error).slice(0, 250),
+          }),
+        );
       }
     })();
   }, PRUNE_INTERVAL_MS);
@@ -1014,7 +1770,10 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     try {
       for (const guild of client.guilds.cache.values()) {
         await processOutbox(guild, log).catch((error) => {
-          log.error("falha ao processar fila de ações", { guildId: guild.id, error: String(error).slice(0, 300) });
+          log.error("falha ao processar fila de ações", {
+            guildId: guild.id,
+            error: String(error).slice(0, 300),
+          });
         });
       }
     } finally {
@@ -1029,22 +1788,29 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   client.once(Events.ClientReady, () => void processQueuedActions());
 
   // Inatividade da equipe roda uma vez por dia — nao precisa de mais que isso.
-  const inactivityTimer = setInterval(() => {
-    void (async () => {
-      for (const guild of client.guilds.cache.values()) {
-        await checkInactivity(guild, log).catch(() => 0);
-      }
-    })();
-  }, 24 * 60 * 60_000);
+  const inactivityTimer = setInterval(
+    () => {
+      void (async () => {
+        for (const guild of client.guilds.cache.values()) {
+          await checkInactivity(guild, log).catch(() => 0);
+        }
+      })();
+    },
+    24 * 60 * 60_000,
+  );
 
   const stop = async (): Promise<void> => {
     clearInterval(slaTimer);
     clearInterval(pruneTimer);
     clearInterval(inactivityTimer);
     clearInterval(outboxTimer);
-    await flushPendingStatistics().catch((error) => log.error("falha ao persistir estatísticas no encerramento", { error: String(error) }));
+    await flushPendingStatistics().catch((error) =>
+      log.error("falha ao persistir estatísticas no encerramento", { error: String(error) }),
+    );
     if (healthTimer) clearInterval(healthTimer);
-    await reportHealth("offline").catch((error) => log.error("falha ao marcar bot offline", { error: String(error) }));
+    await reportHealth("offline").catch((error) =>
+      log.error("falha ao marcar bot offline", { error: String(error) }),
+    );
     await client.destroy();
     log.info("desconectado");
   };
@@ -1061,7 +1827,10 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
  * Sobe o bot se houver token. Sem token o processo nao morre — quem sobe o
  * painel nao pode ser derrubado por falta de credencial do bot.
  */
-export function startBot(token = process.env.DISCORD_TOKEN ?? process.env.WUMPUS_DISCORD_TOKEN, log: Logger = consoleLogger): BotHandle | null {
+export function startBot(
+  token = process.env.DISCORD_TOKEN ?? process.env.WUMPUS_DISCORD_TOKEN,
+  log: Logger = consoleLogger,
+): BotHandle | null {
   if (!token) {
     log.info("sem token do Discord — bot nao iniciado");
     return null;

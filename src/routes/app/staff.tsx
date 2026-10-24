@@ -365,17 +365,18 @@ function StaffPage() {
 
   useEffect(() => {
     let active = true;
+    let requestPending = false;
     const load = async () => {
-      const token = getStoredSessionToken();
-      if (!token || !gid) {
-        if (active) {
+      if (!active || requestPending || document.visibilityState === "hidden") return;
+      requestPending = true;
+      try {
+        const token = getStoredSessionToken();
+        if (!token || !gid) {
           setMonitoring(null);
           setError("Entre com Discord para ver a atividade real da equipe.");
           setLoading(false);
+          return;
         }
-        return;
-      }
-      try {
         const result = await getGuildStaffMonitoring({
           data: { token, guildId: gid, periodDays: windowDays },
         });
@@ -393,14 +394,21 @@ function StaffPage() {
           );
           setLoading(false);
         }
+      } finally {
+        requestPending = false;
       }
     };
     setLoading(true);
     void load();
-    const timer = window.setInterval(() => void load(), 30_000);
+    const timer = window.setInterval(() => void load(), 5_000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       active = false;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [gid, windowDays, refreshKey]);
 
@@ -509,7 +517,9 @@ function StaffPage() {
           <h2 className="m-0 text-base font-semibold">Cargos monitorados</h2>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
             Todos os membros que possuem estes cargos entram na lista, mesmo sem histórico de
-            atendimento. A sincronização é feita sob demanda e armazenada por até 5 minutos.
+            atendimento. Entradas, saídas e mudanças de cargo são sincronizadas pelo bot; a
+            dashboard verifica novidades a cada 5 segundos. Uma sincronização completa também ocorre
+            a cada 5 minutos.
           </p>
         </div>
         <DiscordMultiSelect
