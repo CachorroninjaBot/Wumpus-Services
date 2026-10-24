@@ -11,10 +11,15 @@
  */
 import {
   ChannelType,
+  ApplicationCommandType,
+  type ApplicationIntegrationType,
+  type EntryPointCommandHandlerType,
+  type InteractionContextType,
   PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
+  type RESTPostAPIApplicationCommandsJSONBody,
   type ChatInputCommandInteraction
 } from "discord.js";
 import { guildPlan, list, loadRuntime, moduleConfig, num } from "./config.ts";
@@ -163,10 +168,37 @@ export const COMMANDS = [
 export async function registerCommands(clientId: string, token: string, log: Logger): Promise<number> {
   try {
     const rest = new REST({ version: "10" }).setToken(token);
+    const registeredCommands = await rest.get(Routes.applicationCommands(clientId)) as Array<{
+      name: string;
+      type: ApplicationCommandType;
+      description?: string;
+      handler?: EntryPointCommandHandlerType | null;
+      contexts?: InteractionContextType[] | null;
+      integration_types?: ApplicationIntegrationType[] | null;
+      default_member_permissions?: string | null;
+    }>;
+    const entryPoint = registeredCommands.find(
+      (command) => command.type === ApplicationCommandType.PrimaryEntryPoint,
+    );
+    const body: RESTPostAPIApplicationCommandsJSONBody[] = COMMANDS.map((command) => command.toJSON());
+    if (entryPoint) {
+      body.push({
+        name: entryPoint.name,
+        type: ApplicationCommandType.PrimaryEntryPoint,
+        description: entryPoint.description ?? "",
+        ...(entryPoint.handler != null ? { handler: entryPoint.handler } : {}),
+        ...(entryPoint.contexts != null ? { contexts: entryPoint.contexts } : {}),
+        ...(entryPoint.integration_types != null ? { integration_types: entryPoint.integration_types } : {}),
+        default_member_permissions: entryPoint.default_member_permissions,
+      });
+    }
     await rest.put(Routes.applicationCommands(clientId), {
-      body: COMMANDS.map((command) => command.toJSON())
+      body
     });
-    log.info("comandos do Discord atualizados", { quantidade: COMMANDS.length });
+    log.info("comandos do Discord atualizados", {
+      quantidade: COMMANDS.length,
+      entryPointPreservado: Boolean(entryPoint),
+    });
     return COMMANDS.length;
   } catch (error) {
     log.error("falha ao registrar slash", { error: String(error) });

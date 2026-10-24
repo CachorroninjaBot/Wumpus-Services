@@ -49,7 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     rememberActivityClient();
-    document.querySelector('link[href^="https://fonts.googleapis.com"]')?.remove();
     document.documentElement.dataset.discordActivity = "true";
     setMode("activity");
     connect();

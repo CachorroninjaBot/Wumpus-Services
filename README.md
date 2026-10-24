@@ -59,6 +59,8 @@ A dashboard web e a Activity usam as mesmas rotas e componentes. Configure
 `DISCORD_CLIENT_ID` e `DISCORD_CLIENT_SECRET` com a mesma aplicação Discord já
 usada pelo bot e pelo login web. A Activity usa OAuth com PKCE; permissões,
 assinatura e acesso aos servidores continuam validados pelo backend.
+Os comandos globais são atualizados preservando o comando Entry Point (Launch)
+criado pelo Discord; não o remova ao registrar os slash commands.
 
 No Discord Developer Portal, abra a aplicação do Wumpus:
 
@@ -75,5 +77,12 @@ No Discord Developer Portal, abra a aplicação do Wumpus:
 5. Para testes não distribuídos, inicie a Activity com uma conta que pertença
    à equipe proprietária da aplicação. Para disponibilizá-la a outros usuários,
    conclua o processo de distribuição exigido pelo Discord.
+
+Se o iframe ainda falhar com `X-Frame-Options: DENY`, remova esse cabeçalho na
+hospedagem, CDN ou proxy reverso: o servidor da aplicação não o configura e um
+servidor de origem não consegue anular um cabeçalho `DENY` inserido depois pelo
+proxy. Mantenha a proteção de incorporação pela diretiva `frame-ancestors` da
+CSP. A dashboard não carrega mais Google Fonts remotamente, evitando bloqueios
+de estilos impostos pelo proxy do Discord.
 
 Checkout público: https://shardpay.app/pt-br/store/hubexpress
