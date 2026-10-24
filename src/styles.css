@@ -250,6 +250,16 @@ html[data-theme="dark"] .shadow-border {
   backdrop-filter: blur(18px);
 }
 
+@media (max-width: 767px) {
+  html[data-discord-activity="true"] .app-shell {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 3.5rem);
+  }
+
+  html[data-discord-activity="true"] .app-bar {
+    top: calc(env(safe-area-inset-top, 0px) + 3.5rem);
+  }
+}
+
 .app-sidebar {
   background: color-mix(in srgb, var(--color-card) 92%, var(--color-primary));
 }
