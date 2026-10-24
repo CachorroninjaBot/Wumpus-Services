@@ -19,6 +19,7 @@ import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import type { Ticket, TicketDepartmentConfig, TicketPriority } from "@/lib/wumpus/types";
 import { cn, formatRelative, formatTime } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MarkdownContent } from "@/components/markdown-content";
 
 export const Route = createFileRoute("/app/tickets")({ component: TicketsPage });
 
@@ -624,7 +625,7 @@ function TicketsPage() {
                 </p>
               )}
               {ai ? (
-                <div className="rounded-xl bg-primary/10 px-3 py-2 text-sm whitespace-pre-wrap">{ai}</div>
+                <div className="rounded-xl bg-primary/10 px-3 py-2 text-sm leading-6"><MarkdownContent content={ai} /></div>
               ) : null}
               {ticket.transcript && ticket.status !== "open" ? (
                 <details className="rounded-xl bg-muted px-3 py-2 text-sm">

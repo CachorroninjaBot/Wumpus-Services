@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MarkdownContent } from "@/components/markdown-content";
 import { analyzeWithGrok } from "@/lib/wumpus/analyze";
 import { asString, planAllows } from "@/lib/wumpus/engine";
 import { formatRelative, uid } from "@/lib/utils";
@@ -428,7 +429,7 @@ function FormsPage() {
                       </div>
                     ))}
                   </dl>
-                  {aiNotes[selected.id] ? <div className="rounded-lg bg-secondary/70 px-4 py-3 text-sm leading-6"><p className="mb-1 mt-0 font-semibold"><Sparkles className="mr-1 inline size-4" /> Nota de apoio da IA</p><p className="m-0 whitespace-pre-wrap">{aiNotes[selected.id]}</p></div> : null}
+                  {aiNotes[selected.id] ? <div className="rounded-lg bg-secondary/70 px-4 py-3 text-sm leading-6"><p className="mb-1 mt-0 font-semibold"><Sparkles className="mr-1 inline size-4" /> Nota de apoio da IA</p><MarkdownContent content={aiNotes[selected.id]} /></div> : null}
                   {selected.status === "pending" ? (
                     <div className="border-t border-border pt-5">
                       {fcfg.config.requireReasonOnReject ? (

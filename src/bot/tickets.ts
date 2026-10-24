@@ -314,19 +314,9 @@ export async function openTicket(
           components: [
             { type: 2, style: 2, label: "Assumir", custom_id: id("ticket", "claim", ticketId) },
             { type: 2, style: 4, label: "Encerrar", custom_id: id("ticket", "close_reason", ticketId) },
-            ...(bool(config, "priorityEnabled", true)
-              ? [
-                  { type: 2, style: 2, label: "Baixa", custom_id: id("ticket", "prio", ticketId, "low") },
-                  { type: 2, style: 2, label: "Normal", custom_id: id("ticket", "prio", ticketId, "normal") },
-                  { type: 2, style: 2, label: "Alta", custom_id: id("ticket", "prio", ticketId, "high") },
-                ]
-              : [])
+            { type: 2, style: 2, label: "Transferir", custom_id: id("ticket", "transfer_pick", ticketId) }
           ]
-        },
-        { type: 1, components: [
-          ...(bool(config, "priorityEnabled", true) ? [{ type: 2, style: 2, label: "Escalar", custom_id: id("ticket", "escalate", ticketId) }] : []),
-          { type: 2, style: 2, label: "Transferir", custom_id: id("ticket", "transfer_pick", ticketId) }
-        ] }
+        }
       ]
     });
 

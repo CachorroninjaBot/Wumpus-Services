@@ -2,7 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { ExternalLink, Headset, LoaderCircle, MessageCircle, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { AssistantMarkdown } from "@/components/assistant-markdown";
+import { MarkdownContent } from "@/components/markdown-content";
 import { askWumpusAssistant, getHumanSupportStatus, requestHumanSupport } from "@/lib/wumpus/assistant";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { navItems } from "@/lib/wumpus/brand";
@@ -153,7 +153,7 @@ export function ModuleAssistant() {
         {!messages.length ? <div className="space-y-3">
           <p className="m-0 text-sm leading-6">Posso explicar esta tela e ajudar com as configurações de <strong>{page.label.toLocaleLowerCase("pt-BR")}</strong>. Já tenho o contexto do servidor e desta seção.</p>
           <div className="flex flex-wrap gap-2">{["O que devo configurar primeiro?", "Explique essas opções", "Como resolvo um problema aqui?"].map((suggestion) => <button key={suggestion} type="button" onClick={() => setQuestion(suggestion)} className="rounded-xl border border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">{suggestion}</button>)}</div>
-        </div> : messages.map((message, index) => <div key={`${index}-${message.role}`} className={`max-w-[92%] rounded-2xl px-3 py-2.5 text-sm leading-6 ${message.role === "user" ? "ml-auto whitespace-pre-wrap rounded-br-md bg-primary text-primary-foreground" : "rounded-bl-md bg-muted text-foreground"}`}>{message.role === "assistant" ? <AssistantMarkdown content={message.content} /> : message.content}</div>)}
+        </div> : messages.map((message, index) => <div key={`${index}-${message.role}`} className={`max-w-[92%] rounded-2xl px-3 py-2.5 text-sm leading-6 ${message.role === "user" ? "ml-auto whitespace-pre-wrap rounded-br-md bg-primary text-primary-foreground" : "rounded-bl-md bg-muted text-foreground"}`}>{message.role === "assistant" ? <MarkdownContent content={message.content} /> : message.content}</div>)}
         {busy ? <p className="m-0 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Entendendo o contexto…</p> : null}
         {error ? <p role="alert" className="m-0 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
         {messages.some((message) => message.role === "assistant") ? (
