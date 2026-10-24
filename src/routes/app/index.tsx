@@ -198,13 +198,22 @@ function Overview() {
         </ul>
       </Card>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        {/* #8 — Quick usa Link do TanStack Router para navegação client-side */}
-        <Quick to={priorityTicket ? `/app/tickets?ticket=${encodeURIComponent(priorityTicket.id)}` : "/app/tickets"} icon={<Ticket className="size-4" />} title={priorityTicket ? breaches.length ? `Abrir ticket atrasado #${priorityTicket.number}` : `Abrir ticket #${priorityTicket.number}` : "Abrir fila de tickets"} />
-        {/* #2 — Ícone correto para formulários */}
-        <Quick to="/app/forms" icon={<ClipboardCheck className="size-4" />} title="Revisar formulários" />
-        <Quick to="/app/protect" icon={<Shield className="size-4" />} title="Testar o AutoMod" />
-      </div>
+      <section aria-labelledby="next-actions-title" className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <p className="m-0 text-xs font-semibold uppercase tracking-[0.12em] text-primary">Próximo passo</p>
+            <h2 id="next-actions-title" className="m-0 mt-1 text-lg font-semibold">Ações para manter a operação fluindo</h2>
+          </div>
+          <span className="text-xs text-muted-foreground">Atalhos para os módulos mais usados</span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {/* #8 — Quick usa Link do TanStack Router para navegação client-side */}
+          <Quick to={priorityTicket ? `/app/tickets?ticket=${encodeURIComponent(priorityTicket.id)}` : "/app/tickets"} icon={<Ticket className="size-4" />} title={priorityTicket ? breaches.length ? `Abrir ticket atrasado #${priorityTicket.number}` : `Abrir ticket #${priorityTicket.number}` : "Abrir fila de tickets"} />
+          {/* #2 — Ícone correto para formulários */}
+          <Quick to="/app/forms" icon={<ClipboardCheck className="size-4" />} title={submissions ? `Revisar ${submissions} formulário${submissions === 1 ? "" : "s"}` : "Revisar formulários"} />
+          <Quick to="/app/protect" icon={<Shield className="size-4" />} title="Testar o AutoMod" />
+        </div>
+      </section>
 
       {logs.some((event) => event.module === "security" && event.severity === "critical") ? (
         <Card>
