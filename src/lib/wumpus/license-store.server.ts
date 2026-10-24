@@ -77,7 +77,8 @@ export async function syncGuildEntitlements(input: {
     const now = Date.now();
     for (const [priority, guildId] of guildIds.entries()) {
       const currentOwner = current.byGuild[guildId]?.accountId;
-      if (currentOwner && currentOwner !== input.accountId) continue;
+      const currentLicense = current.byGuild[guildId];
+      if (currentOwner && currentOwner !== input.accountId && currentLicense?.status === "active") continue;
       const active = allowed.has(guildId) && input.planId !== null;
       current.byGuild[guildId] = {
         status: active ? "active" : "inactive",

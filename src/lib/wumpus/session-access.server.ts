@@ -77,7 +77,9 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
       manageableGuildIds: payload.guilds.map((guild) => guild.id),
       botGuildIds,
       guildAccountIds: Object.fromEntries(
-        Object.entries(licenseFile.byGuild).map(([guildId, license]) => [guildId, license.accountId]),
+        Object.entries(licenseFile.byGuild)
+          .filter(([, license]) => license.status === "active")
+          .map(([guildId, license]) => [guildId, license.accountId]),
       ),
       subscriptions: [...subscriptionsFor(billing), ...manualSubscriptions],
     });

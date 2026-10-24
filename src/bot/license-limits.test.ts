@@ -60,6 +60,30 @@ test("login de outra conta não substitui o vínculo de um servidor já atribuí
   assert.equal(license?.planId, "pro");
 });
 
+test("servidor com vínculo inativo pode ser assumido pelo dono atual", async () => {
+  await syncGuildEntitlements({
+    accountId: "owner-1",
+    discordUsername: "antigo",
+    planId: null,
+    botGuildIds: ["g4"],
+    ownedGuildIds: ["g4"],
+    allowedGuildIds: [],
+  });
+  await syncGuildEntitlements({
+    accountId: "owner-2",
+    discordUsername: "dono-atual",
+    planId: "pro",
+    botGuildIds: ["g4"],
+    ownedGuildIds: ["g4"],
+    allowedGuildIds: ["g4"],
+  });
+
+  const license = (await readGuildLicenses()).byGuild.g4;
+  assert.equal(license?.accountId, "owner-2");
+  assert.equal(license?.status, "active");
+  assert.equal(license?.planId, "pro");
+});
+
 test("OCR Pro conta 500 chamadas por conta e por mês, compartilhadas entre servidores", async () => {
   resetStoreCacheForTests("ocr-usage");
   for (let index = 0; index < 500; index += 1) {

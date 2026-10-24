@@ -19,7 +19,8 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { exchangeDiscordCodeDirect } from "@/lib/discord/oauth";
 import { loadBotGuildIds } from "./bot-guilds";
-import { configuredLifetimeSubscriptions, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
+import { planById } from "./catalog";
+import { configuredLifetimeSubscriptions, planForUser, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
 import { inspectBotHealth } from "./health.server";
 import { isPlatformOwner } from "./owner";
 import { loadBilling } from "./shardpay.server";
@@ -66,6 +67,19 @@ export type OwnerGuildDiagnostics = {
   matchingGuildCount: number;
   errorCode?: string;
   issue: "none" | "discord-guilds" | "health-file" | "health-invalid" | "health-unreadable" | "health-stale" | "bot-offline" | "bot-no-guilds" | "guild-mismatch";
+  recommendation: string;
+};
+
+export type GuildAccessDiagnostics = {
+  checkedAt: number;
+  ownedGuildCount: number;
+  botGuildCount: number;
+  matchingGuildCount: number;
+  linkedToAnotherAccountCount: number;
+  eligibleGuildCount: number;
+  planName: string | null;
+  billingAvailable: boolean;
+  issue: "none" | "bot-unavailable" | "no-owned-guilds" | "no-bot-match" | "linked-elsewhere" | "billing-unavailable" | "no-plan" | "refresh-session";
   recommendation: string;
 };
 
@@ -172,7 +186,9 @@ export const resolveAccess = createServerFn({ method: "POST" })
       manageableGuildIds: payload.guilds.map((guild) => guild.id),
       botGuildIds,
       guildAccountIds: Object.fromEntries(
-        Object.entries(licenseFile.byGuild).map(([guildId, license]) => [guildId, license.accountId]),
+        Object.entries(licenseFile.byGuild)
+          .filter(([, license]) => license.status === "active")
+          .map(([guildId, license]) => [guildId, license.accountId]),
       ),
       subscriptions,
     });
@@ -276,6 +292,72 @@ export const getOwnerGuildDiagnostics = createServerFn({ method: "POST" })
       recommendation: diagnostics.recommendation,
     }));
     return diagnostics;
+  });
+
+export const getMyGuildAccessDiagnostics = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({}).strict().parse(input))
+  .handler(async (): Promise<GuildAccessDiagnostics> => {
+    enforceRequestLimit("guild-access-diagnostics", 20, 60_000);
+    const session = await verifySignedSession("");
+    const [health, billing, manualSubscriptions, licenses] = await Promise.all([
+      inspectBotHealth(),
+      loadBilling(),
+      loadManualSubscriptionRows(),
+      readGuildLicenses(),
+    ]);
+    const botRecord = health.state === "available" ? health.record : null;
+    const healthAgeMs = botRecord ? Date.now() - botRecord.at : Number.POSITIVE_INFINITY;
+    const botAvailable = botRecord !== null && botRecord.status === "online" &&
+      healthAgeMs <= 90_000 && botRecord.guildIds.length > 0;
+    const botGuildIds = new Set(botAvailable && botRecord ? botRecord.guildIds : []);
+    const ownedGuilds = session.guilds.filter((guild) => guild.owner);
+    const matchingGuilds = ownedGuilds.filter((guild) => botGuildIds.has(guild.id));
+    const linkedToAnotherAccountCount = matchingGuilds.filter((guild) => {
+      const license = licenses.byGuild[guild.id];
+      return license?.status === "active" && license.accountId !== session.userId;
+    }).length;
+    const eligibleGuildCount = matchingGuilds.length - linkedToAnotherAccountCount;
+    const plan = planForUser(
+      [...subscriptionRows(billing), ...manualSubscriptions],
+      session.userId,
+      session.username,
+    );
+
+    let issue: GuildAccessDiagnostics["issue"] = "none";
+    let recommendation = "A conta tem servidores elegíveis. Atualize a conexão com o Discord para recarregar a lista.";
+    if (!botAvailable) {
+      issue = "bot-unavailable";
+      recommendation = "O painel não recebeu uma lista recente de servidores do bot. Verifique o volume compartilhado e WUMPUS_HEALTH_PATH entre o bot e o painel.";
+    } else if (!ownedGuilds.length) {
+      issue = "no-owned-guilds";
+      recommendation = "O Discord não marcou nenhum servidor desta conta como propriedade dela. Confirme a conta conectada e atualize a conexão com o Discord.";
+    } else if (!matchingGuilds.length) {
+      issue = "no-bot-match";
+      recommendation = "O bot não está em nenhum servidor que o Discord identifica como seu. Confira o servidor e a conta conectada.";
+    } else if (!eligibleGuildCount) {
+      issue = "linked-elsewhere";
+      recommendation = "Os servidores em comum estão vinculados na dashboard a outra conta. Peça ao titular desse vínculo para liberar o servidor antes de usar esta conta.";
+    } else if (!billing.ok && !manualSubscriptions.some((sub) => sub.discordUserId === session.userId) &&
+      !configuredLifetimeSubscriptions().some((sub) => sub.discordUserId === session.userId)) {
+      issue = "billing-unavailable";
+      recommendation = "Não foi possível consultar a ShardPay agora. Aguarde a restauração do serviço e verifique novamente antes de concluir que esta conta não tem plano.";
+    } else if (!plan) {
+      issue = "no-plan";
+      recommendation = "O bot e a propriedade dos servidores foram confirmados, mas esta conta não tem um plano ativo. Assine um plano ou solicite uma concessão manual ao administrador.";
+    }
+
+    return {
+      checkedAt: Date.now(),
+      ownedGuildCount: ownedGuilds.length,
+      botGuildCount: botAvailable && botRecord ? botRecord.guildIds.length : 0,
+      matchingGuildCount: matchingGuilds.length,
+      linkedToAnotherAccountCount,
+      eligibleGuildCount,
+      planName: plan ? planById(plan.plan).name : null,
+      billingAvailable: billing.ok,
+      issue,
+      recommendation,
+    };
   });
 
 export const heartbeatDashboardSession = createServerFn({ method: "POST" })

@@ -24,7 +24,7 @@ import { SearchSelect } from "@/components/search-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { brand, groupLabels, navItems, type ModuleGroupId, type NavId } from "@/lib/wumpus/brand";
 import { SESSION_TOKEN_KEY } from "@/lib/wumpus/session-token";
-import { getOwnerGuildDiagnostics, logoutDashboardSession, type OwnerGuildDiagnostics } from "@/lib/wumpus/session";
+import { getMyGuildAccessDiagnostics, getOwnerGuildDiagnostics, logoutDashboardSession, type GuildAccessDiagnostics, type OwnerGuildDiagnostics } from "@/lib/wumpus/session";
 import { useWumpus } from "@/lib/wumpus/store";
 import { cn } from "@/lib/utils";
 import { ModuleAssistant } from "@/components/module-assistant";
@@ -242,6 +242,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [diagnostics, setDiagnostics] = useState<OwnerGuildDiagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
+  const [accountDiagnostics, setAccountDiagnostics] = useState<GuildAccessDiagnostics | null>(null);
+  const [accountDiagnosticsLoading, setAccountDiagnosticsLoading] = useState(false);
+  const [accountDiagnosticsError, setAccountDiagnosticsError] = useState<string | null>(null);
   const active = useActiveNav();
   const nextTheme = theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
   const isOwner = user.isAdmin;
@@ -264,9 +267,26 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const inspectAccountGuildAccess = useCallback(async () => {
+    setAccountDiagnosticsLoading(true);
+    setAccountDiagnosticsError(null);
+    try {
+      setAccountDiagnostics(await getMyGuildAccessDiagnostics({ data: {} }));
+    } catch (cause) {
+      console.error("Não foi possível carregar o diagnóstico dos servidores da conta.", cause);
+      setAccountDiagnosticsError(cause instanceof Error ? cause.message : "Não foi possível consultar o diagnóstico.");
+    } finally {
+      setAccountDiagnosticsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (hydrated && isOwner && guilds.length === 0) void inspectGuildConnection();
   }, [guilds.length, hydrated, inspectGuildConnection, isOwner]);
+
+  useEffect(() => {
+    if (hydrated && user.signedIn && !isOwner && guilds.length === 0) void inspectAccountGuildAccess();
+  }, [guilds.length, hydrated, inspectAccountGuildAccess, isOwner, user.signedIn]);
 
   if (!hydrated) {
     return <div className="grid min-h-dvh place-items-center bg-background text-muted-foreground">Carregando o Wumpus…</div>;
@@ -299,12 +319,37 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <p className="mb-6 mt-0 text-sm leading-6 text-muted-foreground">
             {isOwner
               ? "Seu acesso de dono da plataforma está ativo. O Wumpus precisa estar online em um servidor que sua conta administra e enviar um heartbeat recente (até 90 segundos). Se ele já está online, confira se o bot e o painel compartilham o volume de saúde (WUMPUS_HEALTH_PATH); depois atualize a conexão com o Discord."
-              : "Instale o Wumpus em um servidor que você administra e conecte seu plano para começar a configurar."}
+              : "Para aparecer aqui, o servidor precisa ser seu no Discord, ter o Wumpus instalado e estar vinculado a um plano ativo desta conta. Se você já cumpre isso, verifique o acesso ou atualize a conexão com o Discord."}
           </p>
           <a href={brand.invite} target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
             Adicionar o Wumpus ao Discord
           </a>
-          {isOwner ? <a href="/entrar?reconectar=1" className="mt-4 block text-center text-sm font-medium text-primary hover:underline">Atualizar conexão com o Discord</a> : null}
+          <a href="/entrar?reconectar=1" className="mt-4 block text-center text-sm font-medium text-primary hover:underline">Atualizar conexão com o Discord</a>
+          {!isOwner ? (
+            <section aria-labelledby="account-connection-diagnostics-title" className="mt-6 rounded-xl border border-border bg-muted/35 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 id="account-connection-diagnostics-title" className="m-0 text-sm font-semibold">Por que não vejo servidores?</h2>
+                <Button variant="outline" size="sm" disabled={accountDiagnosticsLoading} onClick={() => void inspectAccountGuildAccess()}>
+                  {accountDiagnosticsLoading ? "Verificando…" : accountDiagnostics ? "Verificar novamente" : "Verificar acesso"}
+                </Button>
+              </div>
+              {accountDiagnosticsError ? <p role="alert" className="mb-0 mt-3 text-sm text-destructive">{accountDiagnosticsError}</p> : null}
+              {accountDiagnostics ? (
+                <>
+                  <dl className="mb-0 mt-4 grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 text-sm">
+                    <dt className="text-muted-foreground">Servidores que você é dono</dt><dd className="m-0 text-right font-medium">{accountDiagnostics.ownedGuildCount}</dd>
+                    <dt className="text-muted-foreground">Servidores detectados no bot</dt><dd className="m-0 text-right font-medium">{accountDiagnostics.botGuildCount}</dd>
+                    <dt className="text-muted-foreground">Em comum</dt><dd className="m-0 text-right font-medium">{accountDiagnostics.matchingGuildCount}</dd>
+                    <dt className="text-muted-foreground">Vinculados a outra conta</dt><dd className="m-0 text-right font-medium">{accountDiagnostics.linkedToAnotherAccountCount}</dd>
+                    <dt className="text-muted-foreground">Plano ativo</dt><dd className="m-0 text-right font-medium">{accountDiagnostics.planName ?? "Nenhum"}</dd>
+                    <dt className="text-muted-foreground">Consulta da assinatura</dt><dd className="m-0 text-right font-medium">{accountDiagnostics.billingAvailable ? "Disponível" : "Indisponível"}</dd>
+                  </dl>
+                  <p className="mb-0 mt-3 text-sm leading-6">{accountDiagnostics.recommendation}</p>
+                  <p className="mb-0 mt-2 text-xs text-muted-foreground">Diagnóstico: <code>{accountDiagnostics.issue}</code> · {new Date(accountDiagnostics.checkedAt).toLocaleTimeString("pt-BR")}</p>
+                </>
+              ) : null}
+            </section>
+          ) : null}
           {isOwner ? (
             <section aria-labelledby="connection-diagnostics-title" className="mt-6 rounded-xl border border-border bg-muted/35 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
