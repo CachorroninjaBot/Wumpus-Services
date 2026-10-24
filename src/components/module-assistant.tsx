@@ -417,12 +417,37 @@ export function ModuleAssistant() {
               </>
             ) : null}
             {handoff.status === "closed" ? (
-              <div className="space-y-2 rounded-lg bg-muted px-3 py-3">
-                <p className="m-0 text-sm font-medium">{handoff.rating ? "Obrigado por avaliar o atendimento!" : "Atendimento encerrado. Como foi o suporte?"}</p>
-                {handoff.rating ? <p className="m-0 text-lg text-primary" aria-label={`Nota ${handoff.rating} de 5`}>{"★".repeat(handoff.rating)}{"☆".repeat(5 - handoff.rating)}</p> : <div className="flex gap-2" role="group" aria-label="Avalie o atendimento de 1 a 5 estrelas">
-                  {[1, 2, 3, 4, 5].map((rating) => <button key={rating} type="button" onClick={() => void submitRating(rating)} disabled={busy} aria-label={`${rating} ${rating === 1 ? "estrela" : "estrelas"}`} className="grid size-10 place-items-center rounded-md border border-border text-xl text-amber-600 hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">★</button>)}
-                </div>}
-              </div>
+              <section className="space-y-3 rounded-xl border border-border bg-background px-3.5 py-3.5" aria-labelledby="support-rating-title">
+                {handoff.rating ? (
+                  <>
+                    <div>
+                      <h3 id="support-rating-title" className="m-0 text-sm font-semibold">Obrigado pelo feedback!</h3>
+                      <p className="mb-0 mt-1 text-xs text-muted-foreground">Sua avaliação ajuda a equipe a melhorar o atendimento.</p>
+                    </div>
+                    <div className="flex items-center gap-2" aria-label={`Você avaliou o atendimento com ${handoff.rating} de 5 estrelas`}>
+                      <span className="text-lg leading-none tracking-[0.12em] text-amber-500">{"★".repeat(handoff.rating)}<span className="text-muted-foreground/40">{"★".repeat(5 - handoff.rating)}</span></span>
+                      <span className="text-xs font-medium text-foreground">{["", "Muito ruim", "Ruim", "Regular", "Bom", "Excelente"][handoff.rating]}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <h3 id="support-rating-title" className="m-0 text-sm font-semibold">Como foi seu atendimento?</h3>
+                      <p className="mb-0 mt-1 text-xs leading-5 text-muted-foreground">Sua opinião ajuda a equipe a oferecer um suporte melhor.</p>
+                    </div>
+                    <div className="flex justify-between gap-1" role="group" aria-label="Avalie seu atendimento de uma a cinco estrelas">
+                      {[1, 2, 3, 4, 5].map((rating) => <button key={rating} type="button" onClick={() => void submitRating(rating)} disabled={busy} aria-label={`${rating} estrelas — ${["", "Muito ruim", "Ruim", "Regular", "Bom", "Excelente"][rating]}`} className="group flex min-w-0 flex-1 flex-col items-center gap-1.5 rounded-lg border border-transparent px-1 py-2 text-muted-foreground transition-colors hover:border-amber-500/30 hover:bg-amber-500/10 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60">
+                        <span aria-hidden="true" className="text-2xl leading-none text-amber-500 transition-transform group-hover:scale-110">★</span>
+                        <span className="text-[10px] font-medium leading-none text-muted-foreground group-hover:text-foreground">{rating}</span>
+                      </button>)}
+                    </div>
+                    <div className="flex justify-between px-1 text-[11px] text-muted-foreground">
+                      <span>Muito ruim</span><span>Excelente</span>
+                    </div>
+                    {busy ? <p role="status" className="m-0 text-xs text-muted-foreground">Enviando sua avaliação…</p> : null}
+                  </>
+                )}
+              </section>
             ) : null}
             {handoff.status === "idle" || handoff.status === "failed" || handoff.status === "requesting" ? (
               <>
