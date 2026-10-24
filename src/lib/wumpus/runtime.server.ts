@@ -113,7 +113,7 @@ export type OutboxJob = {
   id: string;
   guildId: string;
   /** O que publicar. */
-  kind: "panel" | "ticket_action" | "form_action" | "support_handoff" | "support_message" | "support_rating";
+  kind: "panel" | "ticket_action" | "form_action" | "support_handoff" | "support_message" | "support_rating" | "staff_roster";
   /** "tickets" | "forms" — decide o modulo de config a usar. */
   target: string;
   /** Referencia de canal da config (nome como "ch_atendimento" ou snowflake). */
@@ -150,14 +150,33 @@ export type BotTicketRecord = {
   department: string | null;
   status: "open" | "claimed" | "closed";
   claimedBy: string | null;
+  claimedAt?: string | null;
   createdAt: string;
   closedAt: string | null;
+  closedBy?: string | null;
   priority: "low" | "normal" | "high" | "urgent";
   firstResponseAt: string | null;
+  firstRespondedBy?: string | null;
   feedback: { rating: number; comment: string | null } | null;
+  feedbackAt?: string | null;
+  feedbackStaffId?: string | null;
   transcriptChannelId?: string | null;
   transcriptMessageId?: string | null;
   transcriptUrl?: string | null;
+};
+
+export type BotStaffRosterMember = {
+  id: string;
+  username: string;
+  displayName: string;
+  roleIds: string[];
+};
+
+export type BotStaffRosterSnapshot = {
+  guildId: string;
+  updatedAt: number;
+  configuredRoleRefs: string[];
+  members: BotStaffRosterMember[];
 };
 
 export type BotTicketMessage = {
@@ -220,7 +239,7 @@ export async function readRuntime(): Promise<RuntimeFile> {
 }
 
 /** Bot collections shared on disk; malformed or missing files return empty lists. */
-export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status" | "support-chats" | "assistant-chats";
+export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status" | "support-chats" | "assistant-chats" | "staff-rosters";
 
 export async function readBotCollection<T>(name: BotCollectionName): Promise<T[]> {
   try {

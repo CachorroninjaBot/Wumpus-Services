@@ -14,7 +14,7 @@ import { buildFormPanel, reviewForm } from "./forms.ts";
 import { buildTicketPanel, claimTicket, closeTicket, sendTicketReply, setTicketPriority, transferTicket } from "./tickets.ts";
 import { asSendable, resolveChannel } from "./resolve.ts";
 import type { Logger } from "./logger.ts";
-import type { OutboxJob, RuntimeFile } from "../lib/wumpus/runtime.server.ts";
+import { updateBotCollection, type BotStaffRosterSnapshot, type OutboxJob, type RuntimeFile } from "../lib/wumpus/runtime.server.ts";
 import { setupVerification, restoreVerification, setLockdown } from "./security.ts";
 import { id } from "./ids.ts";
 import { guildPlan } from "./config.ts";
@@ -137,6 +137,43 @@ async function publishPanel(guild: Guild, job: OutboxJob, log: Logger): Promise<
   }
 }
 
+async function refreshStaffRoster(guild: Guild, runtime: RuntimeFile, log: Logger): Promise<{ ok: boolean; detail: string }> {
+  const configuredRoleRefs = Array.isArray(runtime.guilds[guild.id]?.staff?.staffRoleIds)
+    ? [...new Set((runtime.guilds[guild.id]?.staff?.staffRoleIds as unknown[]).filter((roleId): roleId is string => typeof roleId === "string" && roleId.length > 0))]
+    : [];
+  const roleIds = new Set(configuredRoleRefs.flatMap((reference) => {
+    const role = guild.roles.cache.find((candidate) => candidate.id === reference || candidate.name === reference);
+    return role ? [role.id] : [];
+  }));
+
+  try {
+    const guildMembers = configuredRoleRefs.length ? await guild.members.fetch() : new Map();
+    const members = [...guildMembers.values()]
+      .filter((member) => [...roleIds].some((roleId) => member.roles.cache.has(roleId)))
+      .map((member) => ({
+        id: member.id,
+        username: member.user.username,
+        displayName: member.displayName || member.user.username,
+        roleIds: [...member.roles.cache.keys()].filter((roleId) => roleIds.has(roleId)),
+      }));
+    const snapshot: BotStaffRosterSnapshot = {
+      guildId: guild.id,
+      updatedAt: Date.now(),
+      configuredRoleRefs,
+      members,
+    };
+    await updateBotCollection<BotStaffRosterSnapshot>("staff-rosters", (rows) => [
+      ...rows.filter((row) => row.guildId !== guild.id),
+      snapshot,
+    ]);
+    log.info("lista de equipe atualizada", { guildId: guild.id, roleCount: roleIds.size, memberCount: members.length });
+    return { ok: true, detail: `${members.length} membro(s) da equipe sincronizados.` };
+  } catch (error) {
+    log.warn("falha ao atualizar lista de membros da equipe", { guildId: guild.id, error: String(error).slice(0, 250) });
+    return { ok: false, detail: "O bot não conseguiu buscar os membros. Confira o Server Members Intent e tente novamente." };
+  }
+}
+
 /**
  * Processa a fila de um servidor.
  *
@@ -161,7 +198,14 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
         await setSupportMessageDelivery(job.supportChatId, job.supportMessageId, "failed");
       }
     }
-    await writeRuntimeFile({ ...runtime, outbox: pruneOutbox(outbox), updatedAt: Date.now() });
+    const latestRuntime = await readRuntimeFile();
+    const latestJobs = latestRuntime.outbox ?? [];
+    const latestJobIds = new Set(latestJobs.map((job) => job.id));
+    const mergedOutbox = [
+      ...latestJobs.map((job) => outbox.find((processed) => processed.id === job.id) ?? job),
+      ...outbox.filter((job) => !latestJobIds.has(job.id)),
+    ];
+    await writeRuntimeFile({ ...latestRuntime, outbox: pruneOutbox(mergedOutbox), updatedAt: Date.now() });
     return pending.length;
   }
 
@@ -200,6 +244,11 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
         const result = job.supportChatId && job.rating
           ? await postSupportRating(guild, job.supportChatId, job.rating)
           : { ok: false, detail: "Avaliação de atendimento incompleta." };
+        outbox = settleActionJob(outbox, job.id, result);
+        continue;
+      }
+      if (job.kind === "staff_roster") {
+        const result = await refreshStaffRoster(guild, runtime, log);
         outbox = settleActionJob(outbox, job.id, result);
         continue;
       }

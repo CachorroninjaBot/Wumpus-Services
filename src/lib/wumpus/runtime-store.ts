@@ -13,13 +13,15 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { enqueueOutbox, readBotCollection, readRuntime, writeBotCollection, writeRuntime, type BotFormRecord, type BotTicketMessage, type BotTicketRecord, type KnowledgeFaqSuggestion, type OutboxJob } from "./runtime.server";
+import { enqueueOutbox, readBotCollection, readRuntime, writeBotCollection, writeRuntime, type BotFormRecord, type BotStaffRosterSnapshot, type BotTicketMessage, type BotTicketRecord, type KnowledgeFaqSuggestion, type OutboxJob } from "./runtime.server";
 import { requireGuildAccess } from "./session-access.server";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 import { readBotHealth } from "./health.server";
 import { markSecurityEventReviewed, readReviewedSecurityEvents } from "./security-reviews.server";
 import { monthlyOcrLimit, planAllows } from "./engine";
+import { aggregateStaffMonitoring } from "./staff-monitoring";
+import { slaState } from "../../bot/tickets-sla";
 
 export const getDiscordGuildResources = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/) }).strict().parse(input))
@@ -437,6 +439,97 @@ export const getGuildTickets = createServerFn({ method: "POST" })
         transcriptUrl: ticket.transcriptUrl ?? null,
         messages: [] as { id: string; authorId: string; authorName: string; content: string; at: number; kind: "user" | "staff" }[],
       }));
+  });
+
+/** Actividade atribuivel a cada membro dos cargos configurados para a equipe. */
+export const getGuildStaffMonitoring = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    periodDays: z.union([z.literal(7), z.literal(30), z.literal(90)]).optional(),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const runtime = await readRuntime();
+    const staffConfig = runtime.guilds[data.guildId]?.staff ?? {};
+    const ticketConfig = runtime.guilds[data.guildId]?.tickets ?? {};
+    const configuredRoleRefs = Array.isArray(staffConfig.staffRoleIds)
+      ? [...new Set(staffConfig.staffRoleIds.filter((roleId): roleId is string => typeof roleId === "string" && roleId.length > 0))]
+      : [];
+    const now = Date.now();
+    const periodDays = data.periodDays ?? 30;
+    const [rosterRows, ticketRows, messages, forms, audit] = await Promise.all([
+      readBotCollection<BotStaffRosterSnapshot>("staff-rosters"),
+      readBotCollection<BotTicketRecord>("tickets"),
+      readBotCollection<BotTicketMessage>("ticket_messages"),
+      readBotCollection<BotFormRecord>("forms"),
+      readBotCollection<{ guildId: string; module: string; actorId?: string; at: string }>("audit"),
+    ]);
+    const roster = rosterRows.find((row) => row.guildId === data.guildId) ?? null;
+    const sameRoles = roster?.configuredRoleRefs.slice().sort().join(",") === configuredRoleRefs.slice().sort().join(",");
+    const rosterFresh = Boolean(roster && sameRoles && now - roster.updatedAt < 5 * 60_000);
+    let rosterStatus: "ready" | "refreshing" | "error" | "unconfigured" =
+      configuredRoleRefs.length ? (rosterFresh ? "ready" : "refreshing") : "unconfigured";
+    let rosterDetail: string | null = null;
+
+    if (configuredRoleRefs.length && !rosterFresh) {
+      const rosterJobs = (runtime.outbox ?? []).filter((job) => job.guildId === data.guildId && job.kind === "staff_roster");
+      const pendingJob = rosterJobs.some((job) => job.status === "queued");
+      const recentFailure = [...rosterJobs]
+        .filter((job) => job.status === "failed" && job.at && now - job.at < 60_000)
+        .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0];
+      if (pendingJob) {
+        rosterStatus = "refreshing";
+      } else if (recentFailure) {
+        rosterStatus = "error";
+        rosterDetail = recentFailure.detail ?? "Não foi possível atualizar a lista de membros.";
+      } else {
+        const job: OutboxJob = {
+          id: `staff_roster_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+          guildId: data.guildId,
+          kind: "staff_roster",
+          target: "staff",
+          channelRef: "",
+          createdAt: now,
+          status: "queued",
+        };
+        await enqueueOutbox(job);
+      }
+    }
+
+    const guildTickets = ticketRows.filter((ticket) => ticket.guildId === data.guildId);
+    const ticketIds = new Set(guildTickets.map((ticket) => ticket.id));
+    const guildMessages = messages.filter((message) => ticketIds.has(message.ticketId));
+    const guildForms = forms.filter((form) => form.guildId === data.guildId);
+    const guildAudit = audit.filter((event) => event.guildId === data.guildId);
+    const responseGoalMinutes = Math.max(1, Math.min(10080, Number(staffConfig.responseTimeGoalMinutes) || 30));
+    const slaWarningMinutes = Math.max(0, Math.min(10080, Number(ticketConfig.slaWarningMinutes) || 0));
+    const members = configuredRoleRefs.length && sameRoles && roster ? roster.members : [];
+    const staff = aggregateStaffMonitoring({
+      members,
+      tickets: guildTickets,
+      messages: guildMessages,
+      forms: guildForms,
+      audit: guildAudit,
+      periodDays,
+      responseGoalMinutes,
+      slaWarningMinutes,
+      now,
+    });
+    const openTickets = guildTickets.filter((ticket) => ticket.status === "open" || ticket.status === "claimed");
+    return {
+      rosterStatus,
+      rosterUpdatedAt: roster?.updatedAt ?? null,
+      rosterDetail,
+      periodDays,
+      staff,
+      summary: {
+        staffCount: staff.length,
+        openTickets: openTickets.length,
+        overdueTickets: openTickets.filter((ticket) => slaState(ticket, slaWarningMinutes, now) === "breach").length,
+        unassignedTickets: openTickets.filter((ticket) => !ticket.claimedBy).length,
+      },
+    };
   });
 
 /** Conversation history is loaded only for the ticket currently being viewed. */

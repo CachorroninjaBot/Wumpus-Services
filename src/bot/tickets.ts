@@ -54,10 +54,13 @@ export type Ticket = {
   priority: TicketPriority;
   /** Primeira resposta da equipe — base do SLA e das metricas por atendente. */
   firstResponseAt: string | null;
+  firstRespondedBy: string | null;
   /** Ultima mensagem de qualquer um — base do fechamento por inatividade. */
   lastActivityAt: string;
   closeReason: string | null;
   feedback: { rating: number; comment: string | null } | null;
+  feedbackAt: string | null;
+  feedbackStaffId: string | null;
   /** Referência da cópia de transcript para aplicar a política de retenção. */
   transcriptChannelId?: string | null;
   transcriptMessageId?: string | null;
@@ -109,7 +112,10 @@ export async function recordTicketMessage(message: Message): Promise<void> {
     const row = all.find((entry) => entry.id === ticket.id && entry.guildId === ticket.guildId);
     if (!row) return all;
     row.lastActivityAt = at;
-    if (firstResponse) row.firstResponseAt = firstResponse;
+    if (firstResponse) {
+      row.firstResponseAt = firstResponse;
+      row.firstRespondedBy = message.author.id;
+    }
     if (message.author.id === ticket.openerId && !row.subject) {
       row.subject = message.content.trim().slice(0, 80);
     }
@@ -158,7 +164,10 @@ export async function sendTicketReply(
     const row = rows.find((entry) => entry.guildId === guild.id && entry.id === ticketId);
     if (row) {
       row.lastActivityAt = at;
-      if (row.claimedBy === actorId && !row.firstResponseAt) row.firstResponseAt = at;
+      if (row.claimedBy === actorId && !row.firstResponseAt) {
+        row.firstResponseAt = at;
+        row.firstRespondedBy = actorId;
+      }
     }
     return rows;
   });
@@ -288,9 +297,12 @@ export async function openTicket(
       closedBy: null,
       priority: "normal",
       firstResponseAt: null,
+      firstRespondedBy: null,
       lastActivityAt: now,
       closeReason: null,
-      feedback: null
+      feedback: null,
+      feedbackAt: null,
+      feedbackStaffId: null
     };
 
     await mutate<Ticket>("tickets", (rows) => {
@@ -742,6 +754,8 @@ export async function recordFeedback(
     const row = rows.find((entry) => entry.guildId === guildId && entry.id === ticketId);
     if (row?.status === "closed" && !row.feedback) {
       row.feedback = { rating, comment: null };
+      row.feedbackAt = new Date().toISOString();
+      row.feedbackStaffId = row.claimedBy;
       found = true;
     }
     return rows;
