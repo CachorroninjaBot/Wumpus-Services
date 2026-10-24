@@ -553,7 +553,7 @@ function StaffPage() {
             </Badge>
           ) : null}
         </div>
-        <Card className="mt-3 overflow-x-auto p-0">
+        <Card className="mt-3 hidden overflow-x-auto p-0 md:block">
           <table className="w-full min-w-[1280px] text-left text-sm">
             <thead className="text-xs text-muted-foreground">
               <tr>
@@ -727,6 +727,65 @@ function StaffPage() {
             </tbody>
           </table>
         </Card>
+        <div className="mt-3 space-y-2 md:hidden">
+          {loading ? (
+            <Card className="py-8 text-center text-sm text-muted-foreground" role="status">
+              Carregando membros da equipe…
+            </Card>
+          ) : error ? (
+            <Card className="py-8 text-center text-sm text-muted-foreground" role="alert">
+              Não foi possível carregar a equipe deste servidor.
+            </Card>
+          ) : monitoring?.rosterStatus === "unconfigured" ? (
+            <Card className="py-8 text-center text-sm text-muted-foreground">
+              Configure pelo menos um cargo da equipe para listar as pessoas.
+            </Card>
+          ) : monitoring?.rosterStatus === "refreshing" && !monitoring.staff.length ? (
+            <Card className="py-8 text-center text-sm text-muted-foreground" role="status">
+              Sincronizando os membros da equipe…
+            </Card>
+          ) : monitoring?.rosterStatus === "error" && !monitoring.staff.length ? (
+            <Card className="py-8 text-center text-sm text-muted-foreground" role="alert">
+              A lista de membros não pôde ser carregada. Verifique o Server Members Intent e tente
+              atualizar novamente.
+            </Card>
+          ) : monitoring?.staff.length ? (
+            monitoring.staff.map((person) => {
+              const roleNames = roles
+                .filter((role) => person.roleIds.includes(role.id))
+                .map((role) => role.name);
+              return (
+                <Card key={person.id} className="flex items-center justify-between gap-3 p-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <MemberAvatar name={person.displayName} hue={176} size={44} />
+                    <div className="min-w-0">
+                      <p className="m-0 truncate text-sm font-semibold">{person.displayName}</p>
+                      <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">
+                        {roleNames.join(" · ") || person.username}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 shrink-0 px-3"
+                    onClick={() => setActiveStaffId(person.id)}
+                    aria-label={`Abrir perfil de ${person.displayName}`}
+                  >
+                    Abrir perfil
+                  </Button>
+                </Card>
+              );
+            })
+          ) : monitoring?.rosterStatus === "ready" ? (
+            <Card className="py-8 text-center">
+              <p className="m-0 font-medium">Nenhum membro encontrado nesses cargos</p>
+              <p className="mb-0 mt-1 text-sm text-muted-foreground">
+                Confirme se os cargos selecionados ainda existem e se há membros com eles.
+              </p>
+            </Card>
+          ) : null}
+        </div>
         <p className="mb-0 mt-2 text-xs text-muted-foreground">
           A cobertura segue a retenção dos registros do bot. A 1ª resposta e as avaliações só são
           atribuídas individualmente quando o bot registra quem respondeu ou quem estava responsável
