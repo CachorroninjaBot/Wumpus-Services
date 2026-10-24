@@ -31,6 +31,18 @@ const faqs = [
   },
 ];
 
+function TrustItem({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="flex gap-3">
+      <span aria-hidden="true" className="mt-1 grid size-5 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">✓</span>
+      <div>
+        <p className="m-0 text-sm font-semibold">{title}</p>
+        <p className="m-0 mt-0.5 text-xs leading-5 text-muted-foreground">{body}</p>
+      </div>
+    </div>
+  );
+}
+
 function Home() {
   const billing = useBilling();
   const [health, setHealth] = useState<PublicBotHealth | null>(null);
@@ -255,18 +267,6 @@ function Home() {
           </Link>
         </div>
       </footer>
-    </div>
-  );
-}
-
-function TrustItem({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="flex gap-3">
-      <span aria-hidden="true" className="mt-1 grid size-5 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">✓</span>
-      <div>
-        <p className="m-0 text-sm font-semibold">{title}</p>
-        <p className="m-0 mt-0.5 text-xs leading-5 text-muted-foreground">{body}</p>
-      </div>
     </div>
   );
 }
