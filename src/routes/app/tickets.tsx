@@ -634,6 +634,16 @@ function TicketsPage() {
                   </pre>
                 </details>
               ) : null}
+              {ticket.transcriptUrl && /^https:\/\/haiz-transcript\.shardweb\.app\/transcript\/\d{17,20}$/.test(ticket.transcriptUrl) ? (
+                <a
+                  className="inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline"
+                  href={ticket.transcriptUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Abrir transcrição completa
+                </a>
+              ) : null}
               {ticket.feedback ? (
                 <p className="m-0 text-sm">
                   Feedback: {ticket.feedback.rating}/5 — {ticket.feedback.comment}
@@ -915,7 +925,7 @@ function TicketsPage() {
                 </div>
                 <Field label="Apagar mensagens após (dias; 0 mantém sem prazo)">
                   <Input key={String(tcfg.config.ticketMessageRetentionDays ?? 0)} type="number" min={0} max={3650} defaultValue={Number(tcfg.config.ticketMessageRetentionDays ?? 0)} onBlur={(e) => updateConfig("tickets", { ticketMessageRetentionDays: Math.max(0, Math.min(3650, Number(e.target.value) || 0)) })} />
-                  <p className="m-0 text-xs text-muted-foreground">Remove mensagens e transcripts rastreados de tickets encerrados. O resumo permanece para estatísticas; arquivos antigos sem referência não podem ser apagados automaticamente.</p>
+                  <p className="m-0 text-xs text-muted-foreground">Remove mensagens e anexos locais após o prazo. Tickets novos com retenção configurada usam apenas a exportação local; transcripts externos já gerados não podem ser apagados pelo bot. O resumo permanece para estatísticas.</p>
                 </Field>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Notificar a equipe</Label><p className="m-0 text-xs text-muted-foreground">Menciona os cargos ao abrir.</p></div><Switch checked={Boolean(tcfg.config.pingStaffOnOpen)} onCheckedChange={(value) => updateConfig("tickets", { pingStaffOnOpen: value })} /></div>

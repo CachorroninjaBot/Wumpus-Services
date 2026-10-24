@@ -88,6 +88,7 @@ export type Ticket = {
   messages: TicketMessage[];
   feedback: { rating: number; comment: string | null } | null;
   transcript: string | null;
+  transcriptUrl?: string | null;
 };
 
 export type FormQuestion = { id: string; label: string; required: boolean };

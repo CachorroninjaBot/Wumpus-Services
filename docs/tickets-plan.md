@@ -23,8 +23,8 @@ SLA, transcript e feedback.
 | Prioridade | ✅ botão por nível no canal (`setTicketPriority`), validada contra os 4 níveis da dashboard |
 | SLA | ✅ `slaState` (pureza em `tickets-sla.ts`); o alerta NUNCA muda o ticket; reagendado a 24h; `breach` pinga `escalationRoleId` dentro do canal |
 | Auto-close | ✅ `closeAfterHours` (vencimento) e `autoCloseInactiveHours` (inatividade) rodam no ciclo de 5 min junto do SLA |
-| Transcript | ✅ `buildTranscript`: cabeçalho (quem abriu/assumiu/encerrou, motivo) + mensagens reais como `.txt` anexado; teto de 500 mensagens, mantendo as últimas |
-| Reabrir | ✅ botão na DM de feedback (`reopenEnabled`); cria canal novo com o transcript do anterior anexado; o original fica fechado (métricas intactas) |
+| Transcript | ✅ Com retenção ilimitada, envia o `channel_id` à API externa `haiz-transcript.shardweb.app`, que gera um link e lê o canal no momento do fechamento; o bot publica o link no canal configurado. Se a API falhar, exporta `buildTranscript` local como `.txt`. Com retenção configurada, usa somente o `.txt` local. Não foi informado endpoint para apagar páginas externas já geradas. |
+| Reabrir | ✅ botão na DM de feedback (`reopenEnabled`); cria canal novo com link do transcript externo ou anexo local do atendimento anterior; o original fica fechado (métricas intactas) |
 | Métricas por staff | ✅ `tickets-metrics.ts`: 1ª resposta (`firstResponseAt` = 1ª mensagem do atendente), resolução, CSAT, carga — no `/performance`, no plantão do `/stats` e no digest semanal |
 | Tickets na dashboard | ✅ lê tickets persistidos pelo bot; claim, resposta, prioridade e encerramento atravessam a outbox; a tela consulta o estado atualizado |
 | Canal de saída (painel → bot) | ✅ construído e processado a cada 20s |

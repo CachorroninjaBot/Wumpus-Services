@@ -434,6 +434,7 @@ export const getGuildTickets = createServerFn({ method: "POST" })
         closedAt: ticket.closedAt ? Date.parse(ticket.closedAt) || null : null,
         feedback: ticket.feedback,
         transcript: null as string | null,
+        transcriptUrl: ticket.transcriptUrl ?? null,
         messages: [] as { id: string; authorId: string; authorName: string; content: string; at: number; kind: "user" | "staff" }[],
       }));
   });

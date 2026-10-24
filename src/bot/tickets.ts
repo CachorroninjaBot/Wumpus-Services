@@ -29,6 +29,7 @@ import { buildPanelPayload, defaultButtons } from "./panels.ts";
 import { resolveChannel, resolveRole, resolveRoles } from "./resolve.ts";
 import { bump } from "./statistics.ts";
 import { mutate, nextId, read } from "./store.ts";
+import { generateTranscriptUrl } from "./transcript-api.ts";
 import { autoCloseCandidate, buildTranscript, slaState, slaNotice } from "./tickets-sla.ts";
 
 export type TicketStatus = "open" | "claimed" | "closed";
@@ -60,6 +61,8 @@ export type Ticket = {
   /** Referência da cópia de transcript para aplicar a política de retenção. */
   transcriptChannelId?: string | null;
   transcriptMessageId?: string | null;
+  /** URL hospedada pela API externa de transcripts, quando a retenção é ilimitada. */
+  transcriptUrl?: string | null;
 };
 
 export type TicketMessage = {
@@ -502,7 +505,7 @@ export async function closeTicket(
   actorId: string,
   log: Logger,
   reason: string | null = null
-): Promise<{ ok: boolean; transcriptChannelId?: string }> {
+): Promise<{ ok: boolean; transcriptChannelId?: string; transcriptUrl?: string }> {
   const ticket = await getTicket(guild.id, ticketId);
   if (!ticket) return { ok: false };
   if (ticket.status === "closed") return { ok: false };
@@ -531,30 +534,56 @@ export async function closeTicket(
   });
 
   const plan = await guildPlan(guild.id);
-  const transcriptChannel = plan && planAllows(plan, "transcripts")
+  const canExportTranscript = Boolean(plan && planAllows(plan, "transcripts"));
+  const transcriptChannel = canExportTranscript
     ? resolveChannel(guild, str(config, "transcriptChannelId"))
     : null;
   let transcriptChannelId: string | undefined;
+  let transcriptUrl: string | undefined;
 
-  if (transcriptChannel && transcriptChannel.isTextBased()) {
+  if (canExportTranscript && num(config, "ticketMessageRetentionDays", 0) <= 0) {
     try {
-      const transcriptMessage = await transcriptChannel.send({
-        content: `Transcricao do atendimento **#${ticketId}** (${messages.length} mensagem(ns))`,
-        files: [
-          {
-            attachment: Buffer.from(transcript, "utf8"),
-            name: `atendimento-${ticketId}.txt`
-          }
-        ]
+      transcriptUrl = await generateTranscriptUrl(ticket.channelId);
+      await mutate<Ticket>("tickets", (rows) => {
+        const row = rows.find((entry) => entry.guildId === guild.id && entry.id === ticketId);
+        if (row) row.transcriptUrl = transcriptUrl;
+        return rows;
       });
+      log.info("transcript externo gerado", { guildId: guild.id, ticketId, channelId: ticket.channelId });
+    } catch (error) {
+      log.warn("falha ao gerar transcript externo; usando exportacao local", {
+        guildId: guild.id,
+        ticketId,
+        error: String(error).slice(0, 250)
+      });
+    }
+  } else if (canExportTranscript && num(config, "ticketMessageRetentionDays", 0) > 0) {
+    log.info("transcript externo ignorado para respeitar a retencao configurada", {
+      guildId: guild.id,
+      ticketId,
+      retentionDays: num(config, "ticketMessageRetentionDays", 0)
+    });
+  }
+
+  if (canExportTranscript && transcriptChannel?.isTextBased()) {
+    try {
+      const transcriptMessage = await transcriptChannel.send(transcriptUrl
+        ? { content: `Transcrição do atendimento **#${ticketId}**: ${transcriptUrl}` }
+        : {
+            content: `Transcricao local do atendimento **#${ticketId}** (${messages.length} mensagem(ns))`,
+            files: [{ attachment: Buffer.from(transcript, "utf8"), name: `atendimento-${ticketId}.txt` }]
+          });
       transcriptChannelId = transcriptChannel.id;
       await mutate<Ticket>("tickets", (rows) => {
         const row = rows.find((entry) => entry.guildId === guild.id && entry.id === ticketId);
-        if (row) { row.transcriptChannelId = transcriptChannel.id; row.transcriptMessageId = transcriptMessage.id; }
+        if (row) {
+          row.transcriptChannelId = transcriptChannel.id;
+          row.transcriptMessageId = transcriptMessage.id;
+        }
         return rows;
       });
     } catch (error) {
-      log.warn("falha ao publicar transcricao", { guildId: guild.id, ticketId, error: String(error) });
+      log.warn("falha ao publicar transcript", { guildId: guild.id, ticketId, error: String(error).slice(0, 250) });
     }
   }
 
@@ -624,7 +653,10 @@ export async function closeTicket(
       accentColor: "#28655b",
       fields: [
         { name: "Mensagens", value: String(messages.length) },
-        { name: "Transcricao", value: transcriptChannelId ? `<#${transcriptChannelId}>` : "nao configurada" },
+        {
+          name: "Transcricao",
+          value: transcriptUrl ?? (transcriptChannelId ? `<#${transcriptChannelId}>` : "nao configurada")
+        },
         { name: "Atendente", value: ticket.claimedBy ? `<@${ticket.claimedBy}>` : "ninguem assumiu" },
         ...(reason ? [{ name: "Motivo", value: reason.slice(0, 1000) }] : [])
       ]
@@ -645,7 +677,7 @@ export async function closeTicket(
     messages: messages.length,
     reason: reason ?? "sem motivo"
   });
-  return { ok: true, transcriptChannelId };
+  return { ok: true, transcriptChannelId, transcriptUrl };
 }
 
 /** Remove conteúdo de atendimentos encerrados conforme a retenção definida pelo servidor.
@@ -993,12 +1025,12 @@ export async function reopenClosedTicket(
 
   const channel = guild.channels.cache.get(opened.channelId);
   if (includeTranscript && channel && channel.isTextBased()) {
-    await (channel as TextChannel)
-      .send({
-        content: `**Reaberto do atendimento #${ticketId}** — historico em anexo.`,
-        files: [{ attachment: Buffer.from(transcript, "utf8"), name: `atendimento-${ticketId}.txt` }]
-      })
-      .catch(() => undefined);
+    await (channel as TextChannel).send(previous.transcriptUrl
+      ? { content: `**Histórico do atendimento #${ticketId}:** ${previous.transcriptUrl}` }
+      : {
+          content: `**Reaberto do atendimento #${ticketId}** — historico em anexo.`,
+          files: [{ attachment: Buffer.from(transcript, "utf8"), name: `atendimento-${ticketId}.txt` }]
+        }).catch(() => undefined);
   }
 
   log.info("atendimento reaberto", { guildId: guild.id, from: ticketId, to: opened.ticket.id, actorId });

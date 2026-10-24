@@ -111,6 +111,7 @@ export type BotTicketRecord = {
   feedback: { rating: number; comment: string | null } | null;
   transcriptChannelId?: string | null;
   transcriptMessageId?: string | null;
+  transcriptUrl?: string | null;
 };
 
 export type BotTicketMessage = {
