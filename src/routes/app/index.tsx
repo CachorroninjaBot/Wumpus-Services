@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, AlertTriangle, Clock3, ClipboardCheck, Ticket, Shield } from "lucide-react";
+import { Activity, ArrowRight, AlertTriangle, CheckCircle2, Clock3, ClipboardCheck, Ticket, Shield } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -81,7 +81,7 @@ function Overview() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-5">
-      <header className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-border bg-card p-5 shadow-border sm:p-6">
+      <header className="relative isolate overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-border sm:p-6"><div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-20 -z-10 size-56 rounded-full bg-primary/10 blur-3xl" /><div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="m-0 text-xs font-semibold uppercase tracking-[0.14em] text-primary">Visão geral</p>
           <h1 className="m-0 mt-1 text-2xl font-semibold tracking-tight">O que precisa de atenção?</h1>
@@ -90,6 +90,7 @@ function Overview() {
         <div className="flex flex-wrap items-center gap-2">
           {lockdown ? <Badge tone="danger">Lockdown ativo</Badge> : null}
           <Link to="/app/tickets"><Button size="sm">Abrir fila <ArrowRight className="size-4" /></Button></Link>
+        </div>
         </div>
       </header>
 
@@ -120,13 +121,11 @@ function Overview() {
         </span>
       </div>
 
-      {/* #1 — KPIs acima da tabela de tickets */}
-      <dl className="grid grid-cols-2 gap-y-3 rounded-xl border border-border bg-card px-4 py-3 lg:grid-cols-4 lg:divide-x lg:divide-border">
-        <Summary label="Tickets abertos" value={String(open.length)} hint="sem encerrar" />
-        <Summary label="SLA em atraso" value={String(breaches.length)} hint="sem primeira resposta" warn={breaches.length > 0} />
-        <Summary label="Formulários" value={String(submissions)} hint="aguardando revisão" />
-        {/* #6 — Hint orientado à ação quando não há avaliações */}
-        <Summary label="Satisfação" value={avg} hint={csat.length > 0 ? `${csat.length} avaliações` : "Solicite feedback nos tickets"} />
+      <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Summary icon={<Ticket className="size-4" />} label="Tickets abertos" value={String(open.length)} hint="sem encerrar" />
+        <Summary icon={<AlertTriangle className="size-4" />} label="SLA em atraso" value={String(breaches.length)} hint="sem primeira resposta" warn={breaches.length > 0} />
+        <Summary icon={<ClipboardCheck className="size-4" />} label="Formulários" value={String(submissions)} hint="aguardando revisão" />
+        <Summary icon={<CheckCircle2 className="size-4" />} label="Satisfação" value={avg} hint={csat.length > 0 ? `${csat.length} avaliações` : "Solicite feedback nos tickets"} />
       </dl>
 
       {breaches.length > 0 ? (
@@ -229,12 +228,16 @@ function Overview() {
   );
 }
 
-function Summary({ label, value, hint, warn }: { label: string; value: string; hint: string; warn?: boolean }) {
+function Summary({ icon, label, value, hint, warn }: { icon: React.ReactNode; label: string; value: string; hint: string; warn?: boolean }) {
   return (
-    <div className="min-w-0 px-2 first:pl-0 lg:px-4">
-      <dt className="truncate text-xs text-muted-foreground">{label}</dt>
-      {/* #5 — text-[11px] → text-xs no hint */}
-      <dd className={`m-0 mt-0.5 inline-flex items-baseline gap-2 font-mono-num text-lg font-semibold ${warn ? "text-destructive" : ""}`}>{value}<span className="font-sans text-xs font-normal text-muted-foreground">{hint}</span></dd>
+    <div className="rounded-2xl border border-border bg-card p-4 shadow-border transition-transform hover:-translate-y-0.5">
+      <div className="flex items-center justify-between gap-3">
+        <dt className="truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</dt>
+        <span className={warn ? "text-destructive" : "text-primary"} aria-hidden="true">{icon}</span>
+      </div>
+      <dd className={`m-0 mt-3 flex items-baseline gap-2 font-mono-num text-2xl font-semibold tracking-tight ${warn ? "text-destructive" : ""}`}>
+        {value}<span className="font-sans text-xs font-normal text-muted-foreground">{hint}</span>
+      </dd>
     </div>
   );
 }
