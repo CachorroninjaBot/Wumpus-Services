@@ -16,6 +16,7 @@ import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wum
 import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
 import { getGuildTicketMessages, getGuildTickets, getTicketActionStatus, requestTicketAction } from "@/lib/wumpus/runtime-store";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
+import { ExclusiveButton } from "@/components/exclusive-button";
 import type { Ticket, TicketDepartmentConfig, TicketPriority } from "@/lib/wumpus/types";
 import { cn, formatRelative, formatTime } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -434,10 +435,16 @@ function TicketsPage() {
         </p>
       ) : null}
       {!planAllows(guild.plan, "ai") ? (
-        <p className="m-0 text-sm text-muted-foreground">Plano Essencial não inclui IA. O Pro libera a análise para a equipe.</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="m-0 text-sm text-muted-foreground">A análise com IA é exclusiva dos planos Pro, Escala e Vitalício.</p>
+          <ExclusiveButton />
+        </div>
       ) : null}
       {!planAllows(guild.plan, "transcripts") ? (
-        <p className="m-0 text-sm text-muted-foreground">Transcrição no encerramento entra no Pro.</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="m-0 text-sm text-muted-foreground">A exportação de transcrições é exclusiva dos planos Pro, Escala e Vitalício.</p>
+          <ExclusiveButton />
+        </div>
       ) : null}
 
       <div className="flex flex-wrap gap-1.5">
@@ -695,7 +702,7 @@ function TicketsPage() {
               </Button>
             </div>
             {templateNotice ? <p role="status" className="m-0 text-sm text-ok">{templateNotice}</p> : null}
-            {!canUseDepartments ? <p className="m-0 text-xs text-muted-foreground">Seu plano permite um tipo de atendimento. Os modelos serão aplicados com uma categoria; os demais recursos continuam editáveis.</p> : null}
+            {!canUseDepartments ? <div className="flex flex-wrap items-center justify-between gap-3"><p className="m-0 text-xs text-muted-foreground">Seu plano permite um tipo de atendimento. Os modelos serão aplicados com uma categoria; departamentos extras são exclusivos dos planos Escala e Vitalício.</p><ExclusiveButton /></div> : null}
           </section>
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(300px,.82fr)]">
           <div className="min-w-0 space-y-4">

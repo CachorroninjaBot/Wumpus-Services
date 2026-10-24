@@ -59,9 +59,9 @@ function SettingsPage() {
             {guild.name} · {guild.memberCount.toLocaleString("pt-BR")} membros · {guild.region}
         </p>
       </div>
-      <Card className="space-y-3">
+      <Card id="assinatura" className="space-y-3 scroll-mt-24">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="m-0 text-base font-semibold">Licença WumPlus</h2>
+          <h2 className="m-0 text-base font-semibold">Assinatura WumPlus</h2>
           <Badge tone="primary">{current.name}</Badge>
         </div>
         <p className="m-0 text-sm text-muted-foreground">

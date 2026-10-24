@@ -70,11 +70,11 @@ function Home() {
           <BrandMark size={28} />
           <span className="font-semibold tracking-tight">Wumpus</span>
           <nav className="ml-auto hidden items-center gap-6 text-sm text-muted-foreground sm:flex">
+            <a href="#assinatura" className="hover:text-foreground">
+              Assinatura
+            </a>
             <a href="#modulos" className="hover:text-foreground">
               Módulos
-            </a>
-            <a href="#planos" className="hover:text-foreground">
-              Planos
             </a>
             <a href="#faq" className="hover:text-foreground">
               FAQ
@@ -154,9 +154,9 @@ function Home() {
         </div>
       </section>
 
-      <section id="planos" className="border-t border-border">
+      <section id="assinatura" className="border-t border-border">
         <div className="mx-auto max-w-6xl px-4 py-16">
-          <h2 className="mt-0 mb-2 text-3xl font-semibold tracking-tight">WumPlus, cobrado na ShardPay</h2>
+          <h2 className="mt-0 mb-2 text-3xl font-semibold tracking-tight">Assinatura WumPlus</h2>
           <p className="mb-8 max-w-2xl text-sm text-muted-foreground">
             Loja {billing.data?.storeName ?? SHARD_STORE.name}. Nos planos mensais,{" "}
             {discounts.map((d) => `${d.label} −${d.discount}%`).join(", ")}.

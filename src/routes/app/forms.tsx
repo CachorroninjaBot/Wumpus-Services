@@ -33,6 +33,7 @@ import type { FormSubmission } from "@/lib/wumpus/types";
 import { getFormReviewStatus, getGuildFormSubmissions, requestFormReview } from "@/lib/wumpus/runtime-store";
 import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
+import { ExclusiveButton } from "@/components/exclusive-button";
 
 export const Route = createFileRoute("/app/forms")({ component: FormsPage });
 
@@ -337,12 +338,15 @@ function FormsPage() {
           <h1 className="m-0 text-2xl font-semibold tracking-[-0.03em]">Formulários</h1>
           <p className="mb-0 mt-1 text-sm text-muted-foreground">Crie perguntas claras para a comunidade e acompanhe cada resposta da equipe.</p>
         </div>
-        <Button onClick={() => setTab("builder")}><FilePlus2 className="size-4" /> Criar formulário</Button>
+        {formsAllowed
+          ? <Button onClick={() => setTab("builder")}><FilePlus2 className="size-4" /> Criar formulário</Button>
+          : <ExclusiveButton />}
       </div>
 
       {!formsAllowed ? (
-        <div role="note" className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-          O plano atual não inclui formulários. Atualize o plano para publicar um formulário neste servidor.
+        <div role="note" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+          <span>O plano atual não inclui formulários. Consulte as opções de assinatura para publicar neste servidor.</span>
+          <ExclusiveButton />
         </div>
       ) : null}
 
@@ -611,12 +615,17 @@ function FormsPage() {
                   <div className="space-y-1.5"><Label htmlFor="form-limit">Envios por pessoa</Label><Input id="form-limit" type="number" min={1} max={100} value={Number(fcfg.config.maxSubmissionsPerUser ?? 3)} onChange={(event) => updateConfig("forms", { maxSubmissionsPerUser: Math.max(1, Number(event.target.value) || 1) })} /></div>
                   <div className="space-y-1.5"><Label htmlFor="form-account-age">Idade mínima da conta (dias)</Label><Input id="form-account-age" type="number" min={0} max={3650} value={Number(fcfg.config.minAccountAgeDays ?? 0)} onChange={(event) => updateConfig("forms", { minAccountAgeDays: Math.max(0, Number(event.target.value) || 0) })} /></div>
                   <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="form-reviewers">Cargos que revisam</Label><DiscordMultiSelect value={Array.isArray(fcfg.config.reviewerRoleIds) ? fcfg.config.reviewerRoleIds as string[] : []} onChange={(reviewerRoleIds) => updateConfig("forms", { reviewerRoleIds })} /></div>
-                  <label className="flex min-h-10 items-center justify-between gap-4 text-sm"><span>Pré-análise com IA</span><Switch checked={Boolean(fcfg.config.useAiPreReview)} onCheckedChange={(value) => updateConfig("forms", { useAiPreReview: value })} disabled={!planAllows(guild.plan, "ai")} /></label>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex min-h-10 flex-1 items-center justify-between gap-4 text-sm"><span>Pré-análise com IA</span><Switch checked={Boolean(fcfg.config.useAiPreReview)} onCheckedChange={(value) => updateConfig("forms", { useAiPreReview: value })} disabled={!planAllows(guild.plan, "ai")} /></label>
+                    {!planAllows(guild.plan, "ai") ? <ExclusiveButton /> : null}
+                  </div>
                 </div>
               </section>
 
               <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
-                <Button onClick={() => void publishFormPanel()} disabled={publishBusy || !formsAllowed}><Send className="size-4" />{publishBusy ? "Aguardando o bot…" : "Publicar painel no Discord"}</Button>
+                {formsAllowed
+                  ? <Button onClick={() => void publishFormPanel()} disabled={publishBusy}><Send className="size-4" />{publishBusy ? "Aguardando o bot…" : "Publicar painel no Discord"}</Button>
+                  : <ExclusiveButton />}
                 {publishNotice ? <p role="status" className="m-0 text-sm text-muted-foreground">{publishNotice}</p> : null}
               </div>
             </section>

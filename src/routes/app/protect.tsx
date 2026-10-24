@@ -28,6 +28,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { asList, asString, evaluateNuke, planAllows, scanMessage } from "@/lib/wumpus/engine";
 import { presets, type PresetId } from "@/lib/wumpus/defaults";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
+import { ExclusiveButton } from "@/components/exclusive-button";
 import {
   acknowledgeGuildSecurityIncident,
   getGuildProtectionReadiness,
@@ -1024,23 +1025,26 @@ function ProtectPage() {
         </TabsContent>
 
         <TabsContent value="ocr" className="mt-5 space-y-5">
-          <SectionHeading
-            title="Leitura de texto em imagens"
-            description="O OCR analisa imagens enviadas no servidor e procura os termos bloqueados configurados em Mensagens."
-            enabled={ocr.enabled && planAllows(guild.plan, "ocr")}
-            onEnabledChange={(value) => setModuleEnabled("ocr", value)}
-            disabled={!planAllows(guild.plan, "ocr")}
-            statusLabel={
-              !planAllows(guild.plan, "ocr")
-                ? "Não incluído no plano"
-                : ocr.enabled
-                  ? "Ligado"
-                  : "Pausado"
-            }
-          />
+          {!planAllows(guild.plan, "ocr") ? (
+            <header className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h2 className="m-0 text-xl font-semibold">Leitura de texto em imagens</h2>
+                <p className="m-0 mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">O OCR analisa imagens enviadas no servidor e procura os termos bloqueados configurados em Mensagens.</p>
+              </div>
+              <ExclusiveButton />
+            </header>
+          ) : (
+            <SectionHeading
+              title="Leitura de texto em imagens"
+              description="O OCR analisa imagens enviadas no servidor e procura os termos bloqueados configurados em Mensagens."
+              enabled={ocr.enabled}
+              onEnabledChange={(value) => setModuleEnabled("ocr", value)}
+              statusLabel={ocr.enabled ? "Ligado" : "Pausado"}
+            />
+          )}
           {!planAllows(guild.plan, "ocr") ? (
             <div className="rounded-lg bg-warn/10 px-3 py-2.5 text-sm" role="status">
-              O OCR está incluído nos planos Pro, Escala e Vitalício. O estado desta configuração não ativa o
+              O OCR é exclusivo dos planos Pro, Escala e Vitalício. O estado desta configuração não ativa o
               serviço sem um plano compatível.
             </div>
           ) : null}
@@ -1613,9 +1617,10 @@ function ProtectPage() {
                   </p>
                 ) : null}
                 {!planAllows(guild.plan, "antiNuke") ? (
-                  <p className="m-0 rounded-lg bg-warn/10 px-3 py-2 text-sm text-muted-foreground">
-                    O plano atual registra o alerta; não aplica contenção automática anti-nuke.
-                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-warn/10 px-3 py-2 text-sm text-muted-foreground">
+                    <p className="m-0">A contenção automática anti-nuke é exclusiva dos planos Escala e Vitalício. O plano atual registra o alerta.</p>
+                    <ExclusiveButton />
+                  </div>
                 ) : null}
               </Card>
             </div>
