@@ -73,6 +73,7 @@ test("atendimento humano sincroniza mensagens do tópico e mantém reivindicaç�
 
     await setSupportChatThread(chat.id, "forum-guild-test", "thread-test");
     assert.equal((await findSupportChatByThread("thread-test"))?.status, "open");
+    assert.equal((await findSupportChatByThread("thread-test"))?.messages.length, 0);
     assert.equal(await claimSupportChat(chat.id, "staff-one", "staff_one"), "claimed");
     assert.equal(await claimSupportChat(chat.id, "staff-two", "staff_two"), "already_claimed");
     assert.deepEqual(await Promise.all([
@@ -86,7 +87,7 @@ test("atendimento humano sincroniza mensagens do tópico e mantém reivindicaç�
     assert.equal(updated?.messages.at(-1)?.role, "staff");
     assert.equal(updated?.messages.filter((message) => message.role === "staff").length, 2);
     assert.equal(updated?.messages.find((message) => message.role === "system")?.content, "staff_one está atendendo você agora.");
-    assert.match(updated?.messages.find((message) => message.role === "assistant")?.content ?? "", /Em breve/);
+    assert.equal(updated?.messages.filter((message) => message.role === "system").length, 1);
 
     const persisted = await readBotCollection<SupportChatRecord>("support-chats");
     assert.equal(persisted[0]?.claimedBy, "staff-one");

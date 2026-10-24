@@ -79,12 +79,6 @@ export async function setSupportChatThread(chatId: string, forumGuildId: string,
     forumGuildId,
     threadId,
     status: "open",
-    messages: [...chat.messages, {
-      id: `system_${Date.now().toString(36)}`,
-      role: "assistant",
-      content: "Em breve uma pessoa da equipe entrará em contato por aqui. Você pode continuar conversando neste chat do site.",
-      at: Date.now(),
-    }],
     updatedAt: Date.now(),
   }));
 }

@@ -1,10 +1,13 @@
 import { useRouterState } from "@tanstack/react-router";
-import { ChevronLeft, Headset, LoaderCircle, MessageCircle, Plus, Send, Sparkles, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { ChevronLeft, Headset, LoaderCircle, MessageCircle, Plus, Send, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDesc, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownContent } from "@/components/markdown-content";
 import {
   askWumpusAssistant,
+  deleteAssistantChat,
+  deleteHumanSupportChat,
   getHumanSupportStatus,
   listAssistantChats,
   listHumanSupportChats,
@@ -28,6 +31,7 @@ type HandoffState = {
   detail?: string;
   rating?: number | null;
 };
+type HistoryContextMenu = { chat: PastChat; x: number; y: number };
 const moduleContext: Record<string, ModuleKey[]> = {
   tickets: ["tickets"], forms: ["forms"], staff: ["staff", "tickets"], moderation: ["moderation"],
   protect: ["security", "automod"], knowledge: ["knowledge"], stats: ["statistics"], logs: ["logs"],
@@ -84,6 +88,10 @@ export function ModuleAssistant() {
   const [pastChats, setPastChats] = useState<PastChat[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyContextMenu, setHistoryContextMenu] = useState<HistoryContextMenu | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PastChat | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [error, setError] = useState("");
   const [handoff, setHandoff] = useState<HandoffState>({ status: "idle" });
   const endRef = useRef<HTMLDivElement>(null);
@@ -113,6 +121,19 @@ export function ModuleAssistant() {
   }, [pathname, guildId]);
   useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [messages, busy, handoff]);
+  useEffect(() => {
+    if (!historyContextMenu) return;
+    const closeMenu = () => setHistoryContextMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closeMenu(); };
+    window.addEventListener("pointerdown", closeMenu);
+    window.addEventListener("blur", closeMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeMenu);
+      window.removeEventListener("blur", closeMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [historyContextMenu]);
 
   useEffect(() => {
     if (!guildId) return;
@@ -346,6 +367,49 @@ export function ModuleAssistant() {
     }
   };
 
+  const openHistoryContextMenu = (event: ReactMouseEvent<HTMLDivElement>, entry: PastChat) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setHistoryContextMenu({
+      chat: entry,
+      x: Math.min(event.clientX, window.innerWidth - 220),
+      y: Math.min(event.clientY, window.innerHeight - 112),
+    });
+  };
+
+  const deleteChat = async () => {
+    const token = getStoredSessionToken();
+    if (!token || !guildId || !deleteTarget || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    setError("");
+    try {
+      const target = deleteTarget;
+      if (target.kind === "assistant") {
+        await deleteAssistantChat({ data: { token, guildId, chatId: target.id } });
+      } else {
+        await deleteHumanSupportChat({ data: { token, guildId, chatId: target.id } });
+      }
+      setPastChats((items) => items.filter((item) => item.id !== target.id || item.kind !== target.kind));
+      setDeleteTarget(null);
+      setHistoryContextMenu(null);
+      if ((target.kind === "assistant" && chatId === target.id) || (target.kind === "support" && handoff.jobId === target.id)) {
+        setMessages([]);
+        setChatId(undefined);
+        setChatPage(undefined);
+        setChatContext(undefined);
+        if (target.kind === "support") {
+          window.localStorage.removeItem(`wumpus-human-support:${guildId}`);
+          setHandoff({ status: "idle" });
+        }
+      }
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : "Não foi possível excluir a conversa.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   const submitRating = async (rating: number) => {
     const token = getStoredSessionToken();
     if (!token || !guildId || !handoff.jobId || handoff.status !== "closed" || handoff.rating) return;
@@ -381,13 +445,33 @@ export function ModuleAssistant() {
           <h3 className="mb-3 mt-0 text-sm font-semibold">Conversas anteriores</h3>
           {historyBusy ? <p className="text-sm text-muted-foreground">Carregando conversas…</p> : null}
           {!pastChats.length && !historyBusy ? <p className="text-sm text-muted-foreground">Suas conversas anteriores aparecerão aqui.</p> : null}
-          {pastChats.map((entry) => <button key={`${entry.kind}:${entry.id}`} type="button" onClick={() => void openPastChat(entry)} className="w-full rounded-lg border border-border px-3 py-2 text-left transition-colors hover:bg-muted">
-            <span className="block truncate text-sm font-medium">{entry.title}</span>
-            <span className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{entry.kind === "support" ? "Atendimento humano" : entry.page}</span>
-              <span>{new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(entry.updatedAt)}</span>
-            </span>
-          </button>)}
+          {pastChats.map((entry) => {
+            const canDelete = entry.kind === "assistant" || entry.status === "closed" || entry.status === "failed";
+            return <div
+              key={`${entry.kind}:${entry.id}`}
+              data-chat-history-entry
+              onContextMenu={(event) => openHistoryContextMenu(event, entry)}
+              className="relative rounded-lg border border-border transition-colors hover:bg-muted"
+            >
+              <button type="button" onClick={() => void openPastChat(entry)} className="w-full rounded-lg py-2 pl-3 pr-11 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <span className="block truncate text-sm font-medium">{entry.title}</span>
+                <span className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{entry.kind === "support" ? "Atendimento humano" : entry.page}</span>
+                  <span>{new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(entry.updatedAt)}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label={canDelete ? `Excluir conversa: ${entry.title}` : "Encerre o atendimento antes de excluí-lo"}
+                title={canDelete ? "Excluir conversa" : "Encerre o atendimento antes de excluí-lo"}
+                disabled={!canDelete}
+                onClick={() => { setDeleteError(""); setDeleteTarget(entry); }}
+                className="absolute right-1.5 top-1.5 grid size-8 place-items-center rounded-md text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:text-muted-foreground"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </div>;
+          })}
         </div> : !messages.length ? <div className="space-y-3">
           <p className="m-0 text-sm leading-6">Posso explicar esta tela e ajudar com as configurações de <strong>{page.label.toLocaleLowerCase("pt-BR")}</strong>. Já tenho o contexto do servidor e desta seção.</p>
           <div className="flex flex-wrap gap-2">{["O que devo configurar primeiro?", "Explique essas opções", "Como resolvo um problema aqui?"].map((suggestion) => <button key={suggestion} type="button" onClick={() => setQuestion(suggestion)} className="rounded-xl border border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">{suggestion}</button>)}</div>
@@ -457,6 +541,57 @@ export function ModuleAssistant() {
         <p className="mb-0 mt-2 text-[11px] text-muted-foreground">{handoff.status === "open" ? "Sua mensagem será enviada à equipe pelo tópico do fórum." : "A IA orienta usando a seção e as configurações atuais. Ela não altera nada."}</p>
       </form> : null}
     </section> : null}
+    {historyContextMenu ? <div
+      role="menu"
+      aria-label="Ações da conversa"
+      onPointerDown={(event) => event.stopPropagation()}
+      style={{ left: Math.max(8, historyContextMenu.x), top: Math.max(8, historyContextMenu.y) }}
+      className="fixed z-[60] w-52 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          const target = historyContextMenu.chat;
+          setHistoryContextMenu(null);
+          void openPastChat(target);
+        }}
+        className="flex min-h-9 w-full items-center rounded-md px-3 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        Abrir conversa
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={historyContextMenu.chat.kind === "support" && historyContextMenu.chat.status !== "closed" && historyContextMenu.chat.status !== "failed"}
+        onClick={() => {
+          setDeleteError("");
+          setDeleteTarget(historyContextMenu.chat);
+          setHistoryContextMenu(null);
+        }}
+        className="flex min-h-9 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:text-muted-foreground disabled:hover:bg-transparent"
+      >
+        <Trash2 className="size-4" />Excluir conversa
+      </button>
+    </div> : null}
+    <Dialog open={deleteTarget !== null} onOpenChange={(nextOpen) => { if (!nextOpen && !deleteBusy) setDeleteTarget(null); }}>
+      <DialogContent>
+        <DialogTitle>Excluir conversa?</DialogTitle>
+        <DialogDesc>
+          {deleteTarget?.kind === "support"
+            ? "O histórico deste atendimento será removido da dashboard. O tópico e as mensagens no Discord não serão apagados."
+            : "O histórico desta conversa será removido da dashboard e não poderá ser recuperado."}
+        </DialogDesc>
+        {deleteError ? <p role="alert" className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{deleteError}</p> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>Cancelar</Button>
+          <Button type="button" variant="destructive" onClick={() => void deleteChat()} disabled={deleteBusy}>
+            {deleteBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+            {deleteBusy ? "Excluindo…" : "Excluir"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
     <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "Fechar ajuda do Wumpus" : "Pedir ajuda à IA"} title="Pedir ajuda à IA" className="fixed bottom-4 right-4 z-40 flex h-12 items-center gap-2 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-[0_8px_28px_-10px_rgb(0_0_0/0.65)] transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:bottom-6 sm:right-6">
       {open ? <X className="size-4" /> : <MessageCircle className="size-4" />}<span>{open ? "Fechar" : "Ajuda com IA"}</span>
     </button>

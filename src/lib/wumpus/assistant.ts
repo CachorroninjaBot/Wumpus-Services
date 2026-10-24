@@ -7,6 +7,7 @@ import { enforceRequestLimit } from "./request-limits.server";
 import { enqueueOutbox, readBotCollection, readRuntime, updateBotCollection, type AssistantChatRecord, type OutboxJob, type SupportChatRecord } from "./runtime.server";
 
 const ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+const LEGACY_SUPPORT_WAITING_NOTICE = "Em breve uma pessoa da equipe entrará em contato por aqui. Você pode continuar conversando neste chat do site.";
 const ASSISTANT_SYSTEM_PROMPT = [
   "Você é o Wumpus, um assistente de suporte da dashboard Wumpus. Sua personalidade é acolhedora, paciente, prática e confiante sem ser arrogante; fale como uma pessoa experiente ajudando um administrador, não como um manual ou formulário.",
   "Responda sempre em português do Brasil. Comece respondendo diretamente ao que a pessoa perguntou. Demonstre empatia quando ela relatar um problema, sem repetir a pergunta nem usar frases genéricas de atendimento.",
@@ -133,6 +134,24 @@ export const loadAssistantChat = createServerFn({ method: "POST" })
       entry.id === data.chatId && entry.guildId === data.guildId && entry.userId === session.userId);
     if (!chat) throw new Error("Essa conversa não foi encontrada.");
     return chat;
+  });
+
+export const deleteAssistantChat = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    chatId: z.string().min(1).max(100),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    let deleted = false;
+    await updateBotCollection<AssistantChatRecord>("assistant-chats", (chats) => chats.filter((chat) => {
+      const ownedChat = chat.id === data.chatId && chat.guildId === data.guildId && chat.userId === session.userId;
+      if (ownedChat) deleted = true;
+      return !ownedChat;
+    }));
+    if (!deleted) throw new Error("Essa conversa não foi encontrada.");
+    return { ok: true as const };
   });
 
 export const saveAssistantChat = createServerFn({ method: "POST" })
@@ -267,7 +286,7 @@ export const getHumanSupportStatus = createServerFn({ method: "POST" })
           detail: job?.detail ?? null,
           channelId: chat.threadId ?? job?.channelId ?? null,
           channelGuildId: chat.forumGuildId ?? data.guildId,
-          messages: chat.messages,
+          messages: chat.messages.filter((message) => message.content !== LEGACY_SUPPORT_WAITING_NOTICE),
           claimedBy: chat.claimedBy ?? null,
           rating: chat.rating ?? null,
         }
@@ -294,6 +313,31 @@ export const listHumanSupportChats = createServerFn({ method: "POST" })
           updatedAt: chat.updatedAt,
           title: chat.messages.find((message) => message.role === "user")?.content.slice(0, 90) ?? "Atendimento humano",
         }));
+  });
+
+export const deleteHumanSupportChat = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    chatId: z.string().min(1).max(100),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    let deleted = false;
+    let active = false;
+    await updateBotCollection<SupportChatRecord>("support-chats", (chats) => chats.filter((chat) => {
+      const ownedChat = chat.id === data.chatId && chat.guildId === data.guildId && chat.requesterId === session.userId;
+      if (!ownedChat) return true;
+      if (chat.status === "open" || chat.status === "queued") {
+        active = true;
+        return true;
+      }
+      deleted = true;
+      return false;
+    }));
+    if (active) throw new Error("Encerre o atendimento humano antes de removê-lo do histórico.");
+    if (!deleted) throw new Error("Esse atendimento não foi encontrado.");
+    return { ok: true as const };
   });
 
 export const sendHumanSupportMessage = createServerFn({ method: "POST" })

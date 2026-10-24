@@ -353,7 +353,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app-shell flex min-h-dvh bg-background text-foreground">
+    <div
+      className="app-shell flex min-h-dvh bg-background text-foreground"
+      onContextMenu={(event) => event.preventDefault()}
+    >
       <ServerRail />
       <aside className="app-sidebar hidden w-[17rem] shrink-0 flex-col border-r border-border bg-card lg:flex">
         <Link to="/" aria-label="Wumpus, início" className="flex h-[4.5rem] items-center gap-3 border-b border-border px-5">
