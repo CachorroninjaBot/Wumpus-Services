@@ -44,6 +44,31 @@ function redact(value: unknown): unknown {
   ]));
 }
 
+function getVisiblePageControls(): string {
+  const root = document.querySelector("main") ?? document.body;
+  const selectors = "h1,h2,h3,[role=tab],button,[role=button],label,input,select,textarea,[role=status],[role=alert]";
+  const entries = Array.from(root.querySelectorAll<HTMLElement>(selectors))
+    .filter((element) => element.getClientRects().length > 0)
+    .map((element) => {
+      const role = element.getAttribute("role");
+      const text = element.innerText?.trim().replace(/\s+/g, " ");
+      if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) {
+        const label = element.getAttribute("aria-label")
+          || element.labels?.[0]?.innerText?.trim()
+          || element.getAttribute("placeholder")
+          || element.getAttribute("name");
+        return label ? `Campo${element.disabled ? " desabilitado" : ""}: ${label}` : "";
+      }
+      if (!text) return "";
+      if (role === "tab") return `Aba${element.getAttribute("aria-selected") === "true" ? " selecionada" : ""}: ${text}`;
+      if (element.matches("button,[role=button]")) return `Botão${element instanceof HTMLButtonElement && element.disabled ? " desabilitado" : ""}: ${text}`;
+      if (role === "status" || role === "alert") return `Estado visível: ${text}`;
+      return `Seção: ${text}`;
+    })
+    .filter(Boolean);
+  return [...new Set(entries)].join("\n").slice(0, 4200);
+}
+
 export function ModuleAssistant() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const guild = useWumpus((state) => state.guilds.find((item) => item.id === state.activeGuildId));
@@ -68,8 +93,14 @@ export function ModuleAssistant() {
   handoffRef.current = handoff;
   const context = useMemo(() => {
     const relevant = Object.fromEntries((moduleContext[page.id] ?? []).flatMap((key) => modules?.[key] ? [[key, redact(modules[key])]] : []));
-    return `Seção: ${page.label}. ${page.hint}\nConfiguração ativa (JSON): ${JSON.stringify(relevant).slice(0, 5600) || "Ainda sem configuração publicada."}`;
-  }, [modules, page]);
+    const sections = navItems.map((item) => `${item.label}: ${item.hint}`).join("\n");
+    return [
+      `Seção atual: ${page.label}. ${page.hint}`,
+      `Servidor atualmente selecionado: ${guild?.name ?? "não identificado"}`,
+      `Seções disponíveis na dashboard:\n${sections}`,
+      `Configuração ativa desta seção (JSON): ${JSON.stringify(relevant).slice(0, 5200) || "Ainda sem configuração publicada."}`,
+    ].join("\n\n");
+  }, [guild?.name, modules, page]);
 
   useEffect(() => {
     if (handoffRef.current.guildId === guildId && ["queued", "open", "closed"].includes(handoffRef.current.status)) return;
@@ -192,10 +223,34 @@ export function ModuleAssistant() {
       const pendingMessages = [...messages, userMessage].slice(-40);
       setMessages(pendingMessages);
       const activePage = chatPage ?? page.label;
-      const activeContext = chatContext ?? context;
-      const conversation = messages.slice(-8).map((message) => `${message.role === "user" ? "Pessoa" : "Wumpus"}: ${message.content}`).join("\n");
-      const contextualHistory = conversation ? `\n\nConversa de ajuda anterior:\n${conversation}` : "";
-      const answer = await askWumpusAssistant({ data: { token, guildId, page: activePage, question: text, context: `${activeContext}${contextualHistory}`.slice(0, 7000) } });
+      const activeContext = chatContext
+        ? `Contexto salvo da conversa iniciada em ${chatPage ?? page.label}:\n${chatContext}\n\nEstado atual da página aberta (${page.label}):\n${context}`
+        : context;
+      const pageControls = getVisiblePageControls();
+      const assistantControls = [
+        showHistory
+          ? "O chat está mostrando a lista de conversas anteriores; os botões disponíveis são “Voltar para a conversa” e “Fechar ajuda”."
+          : `O chat tem os botões “Ver conversas anteriores” e “Fechar ajuda”${messages.length || handoff.status === "closed" ? ", além de “Iniciar nova conversa”" : ""}.`,
+        messages.some((message) => message.role === "assistant") && ["idle", "failed", "requesting"].includes(handoff.status)
+          ? "O botão “Não resolveu? Falar com humano” está disponível após a resposta da IA." : "",
+        handoff.status === "open" ? "O atendimento humano está aberto: mensagens enviadas aqui são encaminhadas à equipe pelo tópico do fórum." : "",
+        handoff.status === "closed" ? "O atendimento humano foi encerrado: o usuário pode avaliá-lo ou iniciar uma nova conversa." : "",
+        `Campo de mensagem: ${handoff.status === "open" ? "escrever para a equipe" : "perguntar à IA"}; Enter envia e Shift+Enter quebra linha.`,
+      ].filter(Boolean).join("\n");
+      const answer = await askWumpusAssistant({
+        data: {
+          token,
+          guildId,
+          page: activePage,
+          question: text,
+          context: [
+            activeContext,
+            `Interface atualmente aberta (${page.label}):\n${pageControls || "Não foi possível ler os controles visíveis."}`,
+            `Controles e estado deste chat:\n${assistantControls}`,
+          ].join("\n\n").slice(0, 16000),
+          history: messages.slice(-39).map(({ role, content }) => ({ role, content })),
+        },
+      });
       const nextMessages = [...pendingMessages, { role: "assistant" as const, content: answer.ok ? answer.text : answer.error }].slice(-40);
       setMessages(nextMessages);
       const saved = await saveAssistantChat({
@@ -204,13 +259,13 @@ export function ModuleAssistant() {
           guildId,
           chatId,
           page: activePage,
-          context: activeContext,
+          context: chatContext ?? context,
           messages: nextMessages.map(({ role, content }) => ({ role, content })),
         },
       });
       setChatId(saved.chatId);
       setChatPage(activePage);
-      setChatContext(activeContext);
+      setChatContext(chatContext ?? context);
       setPastChats((items) => [
         { id: saved.chatId, page: activePage, title: nextMessages.find((message) => message.role === "user")?.content.slice(0, 90) ?? "Conversa sem título", updatedAt: Date.now(), kind: "assistant" as const },
         ...items.filter((item) => item.id !== saved.chatId),
