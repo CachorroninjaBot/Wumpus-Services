@@ -5,7 +5,7 @@ import { BrandMark } from "@/components/brand";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { forceGuildResync, getAdminOverview, grantAdminAccess, manageAdminUser, revokeAdminGrant } from "@/lib/wumpus/admin";
+import { addAdminUser, forceGuildResync, getAdminOverview, grantAdminAccess, manageAdminUser, revokeAdminGrant } from "@/lib/wumpus/admin";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { useWumpus } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
@@ -54,9 +54,14 @@ function AdminPage() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  const [grantPlan, setGrantPlan] = useState<"essencial" | "pro" | "escala">("essencial");
+  const [grantPlan, setGrantPlan] = useState<"essencial" | "pro" | "escala" | "vitalicio">("essencial");
   const [grantDays, setGrantDays] = useState("30");
   const [grantReason, setGrantReason] = useState("");
+  const [newUserId, setNewUserId] = useState("");
+  const [newUsername, setNewUsername] = useState("");
+  const [newUserPlan, setNewUserPlan] = useState<"essencial" | "pro" | "escala" | "vitalicio">("essencial");
+  const [newUserDays, setNewUserDays] = useState("30");
+  const [newUserReason, setNewUserReason] = useState("");
 
   useEffect(() => { hydrate(); }, [hydrate]);
 
@@ -80,9 +85,12 @@ function AdminPage() {
     return (overview?.members ?? []).filter((member) => member.username.toLowerCase().includes(query) || member.id.includes(query));
   }, [overview?.members, search]);
 
-  async function manage(member: Member, action: "suspend" | "restore" | "revoke-sessions" | "save-notes") {
-    const label = action === "suspend" ? "suspend" : action === "restore" ? "restaurar" : action === "revoke-sessions" ? "encerrar as sessões de" : "atualizar os dados de";
-    if (action !== "save-notes" && !window.confirm(`Deseja ${label} ${member.username}?`)) return;
+  async function manage(member: Member, action: "suspend" | "restore" | "revoke-sessions" | "save-notes" | "remove") {
+    const label = action === "suspend" ? "suspender" : action === "restore" ? "restaurar" : action === "revoke-sessions" ? "encerrar as sessões de" : action === "remove" ? "remover o cadastro de" : "atualizar os dados de";
+    const confirmation = action === "remove"
+      ? `Remover ${member.username} do cadastro administrativo?\n\nAs sessões serão encerradas, concessões manuais serão revogadas e o histórico de auditoria será preservado. Uma assinatura ativa da ShardPay não será cancelada; se a pessoa entrar novamente, o acesso pago continuará válido e o cadastro será recriado.`
+      : `Deseja ${label} ${member.username}?`;
+    if (action !== "save-notes" && !window.confirm(confirmation)) return;
     setBusy(`${action}:${member.id}`);
     setNotice(null);
     try {
@@ -91,7 +99,8 @@ function AdminPage() {
         ...(action === "save-notes" ? { notes } : {}),
         ...(action === "suspend" ? { reason: "Acesso suspenso pelo administrador." } : {}),
       } });
-      setNotice(action === "suspend" ? "Conta suspensa e sessões encerradas." : action === "restore" ? "Acesso restaurado." : action === "revoke-sessions" ? "Sessões encerradas." : "Nota salva.");
+      setNotice(action === "suspend" ? "Conta suspensa e sessões encerradas." : action === "restore" ? "Acesso restaurado." : action === "revoke-sessions" ? "Sessões encerradas." : action === "remove" ? "Cadastro removido; sessões encerradas e concessões manuais revogadas. O histórico de auditoria foi preservado." : "Nota salva.");
+      if (action === "remove") setSelectedId(null);
       await refresh();
     } catch (cause) { setNotice(errorMessage(cause)); }
     finally { setBusy(null); }
@@ -112,10 +121,30 @@ function AdminPage() {
     try {
       const result = await grantAdminAccess({ data: {
         token: getStoredSessionToken(), userId: member.id, username: member.username,
-        planId: grantPlan, durationDays: Number(grantDays), reason: grantReason,
+        planId: grantPlan, durationDays: grantPlan === "vitalicio" ? null : Number(grantDays), reason: grantReason,
       } });
-      setNotice(`Acesso ${grantPlan} concedido até ${dateTime(result.expiresAt)}.`);
+      setNotice(`Acesso ${grantPlan} concedido${result.expiresAt ? ` até ${dateTime(result.expiresAt)}` : " sem expiração"}.`);
       setGrantReason("");
+      await refresh();
+    } catch (cause) { setNotice(errorMessage(cause)); }
+    finally { setBusy(null); }
+  }
+
+  async function addUser() {
+    setBusy("add-user"); setNotice(null);
+    try {
+      const result = await addAdminUser({ data: {
+        token: getStoredSessionToken(),
+        userId: newUserId.trim(),
+        username: newUsername.trim(),
+        planId: newUserPlan,
+        durationDays: newUserPlan === "vitalicio" ? null : Number(newUserDays),
+        reason: newUserReason.trim(),
+      } });
+      setNotice(`Usuário cadastrado com plano ${newUserPlan}${result.expiresAt ? ` até ${dateTime(result.expiresAt)}` : " sem expiração"}.`);
+      setNewUserId("");
+      setNewUsername("");
+      setNewUserReason("");
       await refresh();
     } catch (cause) { setNotice(errorMessage(cause)); }
     finally { setBusy(null); }
@@ -176,28 +205,39 @@ function AdminPage() {
         </section> : null}
 
         {tab === "users" ? <section id="admin-panel-users" aria-labelledby="admin-tab-users" role="tabpanel" className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <Card className="lg:col-span-2">
+            <div><h2 className="m-0 text-base font-semibold">Adicionar usuário e plano</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">Cadastre pelo ID do Discord e conceda um plano manual sem cobrança. O plano Vitalício não expira.</p></div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <label className="block text-sm font-medium">ID do usuário no Discord<input value={newUserId} onChange={(event) => setNewUserId(event.target.value.replace(/\D/g, ""))} inputMode="numeric" autoComplete="off" maxLength={20} placeholder="Ex.: 123456789012345678" className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm" /></label>
+              <label className="block text-sm font-medium">Nome de usuário<input value={newUsername} onChange={(event) => setNewUsername(event.target.value)} maxLength={100} autoComplete="off" placeholder="Nome atual no Discord" className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label>
+              <label className="block text-sm font-medium">Plano<select value={newUserPlan} onChange={(event) => setNewUserPlan(event.target.value as typeof newUserPlan)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option value="essencial">Essencial</option><option value="pro">Pro</option><option value="escala">Escala</option><option value="vitalicio">Vitalício</option></select></label>
+              {newUserPlan !== "vitalicio" ? <label className="block text-sm font-medium">Duração em dias<input type="number" min={1} max={3650} value={newUserDays} onChange={(event) => setNewUserDays(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label> : <p className="m-0 self-end rounded-lg bg-muted/50 px-3 py-2.5 text-sm text-muted-foreground">Acesso permanente, sem expiração.</p>}
+              <label className="block text-sm font-medium sm:col-span-2">Motivo obrigatório<input value={newUserReason} onChange={(event) => setNewUserReason(event.target.value)} maxLength={500} placeholder="Ex.: cortesia aprovada" className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label>
+            </div>
+            <Button className="mt-4" disabled={Boolean(busy) || !/^\d{17,20}$/.test(newUserId) || !newUsername.trim() || (newUserPlan !== "vitalicio" && (Number(newUserDays) < 1 || Number(newUserDays) > 3650)) || newUserReason.trim().length < 3} onClick={() => void addUser()}>{busy === "add-user" ? "Cadastrando…" : "Adicionar usuário e conceder plano"}</Button>
+          </Card>
           <Card className="min-w-0"><div className="flex flex-wrap items-center gap-3"><div className="min-w-0 flex-1"><h2 className="m-0 text-base font-semibold">Contas Discord</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">{overview.members.length} contas · primeira e última atividade registradas.</p></div><label className="relative w-full sm:w-64"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><span className="sr-only">Buscar por nome ou ID</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nome ou ID Discord" className="min-h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" /></label></div>
-            {filteredMembers.length ? <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[600px] text-left text-sm"><thead className="text-xs text-muted-foreground"><tr><th className="pb-2 font-medium">Usuário</th><th className="pb-2 font-medium">Acessos</th><th className="pb-2 font-medium">Última atividade</th><th className="pb-2 font-medium">Estado</th></tr></thead><tbody>{filteredMembers.map((member) => <tr key={member.id} onClick={() => setSelectedId(member.id)} className={`cursor-pointer border-t border-border ${selectedId === member.id ? "bg-muted/60" : "hover:bg-muted/30"}`}><td className="py-3"><span className="block font-medium">{member.username}</span><code className="text-xs text-muted-foreground">{member.id}</code></td><td className="py-3">{member.loginCount}</td><td className="py-3 text-muted-foreground">{formatRelative(member.lastSeenAt)}</td><td className="py-3"><Badge tone={member.suspended ? "warn" : "ok"}>{member.suspended ? "Suspensa" : "Liberada"}</Badge></td></tr>)}</tbody></table></div> : <Empty>Nenhuma conta corresponde à busca.</Empty>}
+            {filteredMembers.length ? <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[600px] text-left text-sm"><thead className="text-xs text-muted-foreground"><tr><th className="pb-2 font-medium">Usuário</th><th className="pb-2 font-medium">Acessos</th><th className="pb-2 font-medium">Última atividade</th><th className="pb-2 font-medium">Estado</th></tr></thead><tbody>{filteredMembers.map((member) => <tr key={member.id} onClick={() => setSelectedId(member.id)} className={`cursor-pointer border-t border-border ${selectedId === member.id ? "bg-muted/60" : "hover:bg-muted/30"}`}><td className="py-3"><span className="block font-medium">{member.username}</span><code className="text-xs text-muted-foreground">{member.id}</code></td><td className="py-3">{member.loginCount}</td><td className="py-3 text-muted-foreground">{member.loginCount ? formatRelative(member.lastSeenAt) : "Nunca acessou"}</td><td className="py-3"><Badge tone={member.suspended ? "warn" : "ok"}>{member.suspended ? "Suspensa" : "Liberada"}</Badge></td></tr>)}</tbody></table></div> : <Empty>Nenhuma conta corresponde à busca.</Empty>}
           </Card>
           <Card className="h-fit"><h2 className="m-0 text-base font-semibold">{selectedMember?.username ?? "Detalhes da conta"}</h2>{selectedMember ? <>
             <code className="mt-1 block text-xs text-muted-foreground">{selectedMember.id}</code>
-            <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-sm"><dt className="text-muted-foreground">Primeiro acesso</dt><dd className="m-0 text-right">{dateTime(selectedMember.firstSeenAt)}</dd><dt className="text-muted-foreground">Última atividade</dt><dd className="m-0 text-right">{dateTime(selectedMember.lastSeenAt)}</dd><dt className="text-muted-foreground">Total de logins</dt><dd className="m-0 text-right">{selectedMember.loginCount}</dd></dl>
+            <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-sm"><dt className="text-muted-foreground">{selectedMember.loginCount ? "Primeiro acesso" : "Cadastro manual"}</dt><dd className="m-0 text-right">{dateTime(selectedMember.firstSeenAt)}</dd><dt className="text-muted-foreground">Última atividade</dt><dd className="m-0 text-right">{selectedMember.loginCount ? dateTime(selectedMember.lastSeenAt) : "Nunca acessou"}</dd><dt className="text-muted-foreground">Total de logins</dt><dd className="m-0 text-right">{selectedMember.loginCount}</dd></dl>
             {selectedMember.suspensionReason ? <p className="mt-3 rounded-lg bg-warn/10 p-3 text-sm">{selectedMember.suspensionReason}</p> : null}
             <label className="mt-4 block text-sm font-medium">Nota interna<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={2000} rows={4} placeholder="Contexto para futuras ações administrativas" className="mt-2 w-full rounded-lg border border-input bg-background p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" /></label>
             <Button className="mt-2 w-full" variant="outline" disabled={busy === `save-notes:${selectedMember.id}`} onClick={() => void manage(selectedMember, "save-notes")}>{busy === `save-notes:${selectedMember.id}` ? "Salvando…" : "Salvar nota"}</Button>
-            <div className="mt-5 border-t border-border pt-4"><h3 className="m-0 text-sm font-semibold">Conceder acesso temporário</h3><p className="mb-0 mt-1 text-xs text-muted-foreground">Acesso manual sem cobrança; expira automaticamente.</p>
-              <label className="mt-3 block text-xs font-medium">Plano<select value={grantPlan} onChange={(event) => setGrantPlan(event.target.value as typeof grantPlan)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option value="essencial">Essencial</option><option value="pro">Pro</option><option value="escala">Escala</option></select></label>
-              <label className="mt-3 block text-xs font-medium">Duração em dias<input type="number" min={1} max={3650} value={grantDays} onChange={(event) => setGrantDays(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label>
+            <div className="mt-5 border-t border-border pt-4"><h3 className="m-0 text-sm font-semibold">Atribuir plano manualmente</h3><p className="mb-0 mt-1 text-xs text-muted-foreground">Concessão sem cobrança; Vitalício não expira.</p>
+              <label className="mt-3 block text-xs font-medium">Plano<select value={grantPlan} onChange={(event) => setGrantPlan(event.target.value as typeof grantPlan)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option value="essencial">Essencial</option><option value="pro">Pro</option><option value="escala">Escala</option><option value="vitalicio">Vitalício</option></select></label>
+              {grantPlan !== "vitalicio" ? <label className="mt-3 block text-xs font-medium">Duração em dias<input type="number" min={1} max={3650} value={grantDays} onChange={(event) => setGrantDays(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label> : <p className="mb-0 mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">Acesso permanente, sem expiração.</p>}
               <label className="mt-3 block text-xs font-medium">Motivo obrigatório<input value={grantReason} onChange={(event) => setGrantReason(event.target.value)} maxLength={500} placeholder="Ex.: cortesia aprovada" className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label>
-              <Button className="mt-3 w-full" disabled={Boolean(busy) || Number(grantDays) < 1 || Number(grantDays) > 3650 || grantReason.trim().length < 3} onClick={() => void grantAccess(selectedMember)}>{busy === `grant:${selectedMember.id}` ? "Concedendo…" : "Conceder plano"}</Button>
+              <Button className="mt-3 w-full" disabled={Boolean(busy) || (grantPlan !== "vitalicio" && (Number(grantDays) < 1 || Number(grantDays) > 3650)) || grantReason.trim().length < 3} onClick={() => void grantAccess(selectedMember)}>{busy === `grant:${selectedMember.id}` ? "Concedendo…" : "Conceder plano"}</Button>
             </div>
-            <div className="mt-4 grid gap-2"><Button variant={selectedMember.suspended ? "default" : "outline"} disabled={Boolean(busy)} onClick={() => void manage(selectedMember, selectedMember.suspended ? "restore" : "suspend")}>{selectedMember.suspended ? "Restaurar acesso" : "Suspender conta"}</Button><Button variant="outline" disabled={Boolean(busy)} onClick={() => void manage(selectedMember, "revoke-sessions")}>Encerrar todas as sessões</Button></div>
+            <div className="mt-4 grid gap-2"><Button variant={selectedMember.suspended ? "default" : "outline"} disabled={Boolean(busy)} onClick={() => void manage(selectedMember, selectedMember.suspended ? "restore" : "suspend")}>{selectedMember.suspended ? "Restaurar acesso" : "Suspender conta"}</Button><Button variant="outline" disabled={Boolean(busy)} onClick={() => void manage(selectedMember, "revoke-sessions")}>Encerrar todas as sessões</Button><Button variant="destructive" disabled={Boolean(busy)} onClick={() => void manage(selectedMember, "remove")}>Remover usuário</Button></div>
           </> : <p className="mb-0 mt-2 text-sm text-muted-foreground">Selecione uma conta para ver os acessos, adicionar uma nota ou gerenciar o acesso.</p>}</Card>
         </section> : null}
 
         {tab === "subscriptions" ? <section id="admin-panel-subscriptions" aria-labelledby="admin-tab-subscriptions" role="tabpanel" className="grid gap-4"><Card><div className="flex flex-wrap items-start gap-3"><div className="min-w-0 flex-1"><h2 className="m-0 text-base font-semibold">Assinaturas ShardPay</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">Estado, plano, valor e período que o provedor informa.</p></div>{overview.billingStoreUrl ? <a href={overview.billingStoreUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-primary underline underline-offset-4">Abrir painel ShardPay</a> : null}</div>
             {!overview.billingAvailable ? <p role="status" className="mt-4 rounded-lg bg-warn/10 p-3 text-sm">{overview.billingError}</p> : null}
-            {overview.subscriptions.length ? <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="text-xs text-muted-foreground"><tr><th className="pb-2 font-medium">Assinante</th><th className="pb-2 font-medium">Plano</th><th className="pb-2 font-medium">Estado</th><th className="pb-2 font-medium">Valor</th><th className="pb-2 font-medium">Início</th><th className="pb-2 font-medium">Fim / próxima cobrança</th><th className="pb-2 font-medium">Ação</th></tr></thead><tbody>{overview.subscriptions.map((sub) => <tr key={sub.id} className="border-t border-border"><td className="py-3"><span className="block font-medium">{sub.username}</span><code className="text-xs text-muted-foreground">{sub.discordUserId ?? "ID não vinculado"}</code></td><td className="py-3">{sub.productName}<span className="block text-xs text-muted-foreground">{sub.billingCycle || "ciclo não informado"}</span>{sub.manual && sub.reason ? <span className="block max-w-48 text-xs text-muted-foreground">{sub.reason}</span> : null}</td><td className="py-3"><Badge tone={["active", "trialing", "paid", "authorized", "succeeded"].includes(sub.status.toLowerCase()) ? "ok" : "warn"}>{sub.status}</Badge></td><td className="py-3">{sub.manual ? "cortesia" : (sub.priceCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="py-3">{dateTime(sub.startedAt)}</td><td className="py-3">{dateTime(sub.manual ? sub.periodEndsAt : (sub.periodEndsAt ?? sub.nextBillingDate))}</td><td className="py-3">{sub.manual && sub.status === "active" ? <Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => void revokeGrant(sub.id)}>{busy === `grant-revoke:${sub.id}` ? "Revogando…" : "Revogar"}</Button> : sub.manual ? "—" : <a href={overview.billingStoreUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary underline underline-offset-4">Gerenciar na ShardPay</a>}</td></tr>)}</tbody></table></div> : <Empty>Nenhuma assinatura ou concessão foi registrada.</Empty>}
+            {overview.subscriptions.length ? <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="text-xs text-muted-foreground"><tr><th className="pb-2 font-medium">Assinante</th><th className="pb-2 font-medium">Plano</th><th className="pb-2 font-medium">Estado</th><th className="pb-2 font-medium">Valor</th><th className="pb-2 font-medium">Início</th><th className="pb-2 font-medium">Fim / próxima cobrança</th><th className="pb-2 font-medium">Ação</th></tr></thead><tbody>{overview.subscriptions.map((sub) => <tr key={sub.id} className="border-t border-border"><td className="py-3"><span className="block font-medium">{sub.username}</span><code className="text-xs text-muted-foreground">{sub.discordUserId ?? "ID não vinculado"}</code></td><td className="py-3">{sub.productName}<span className="block text-xs text-muted-foreground">{sub.billingCycle || "ciclo não informado"}</span>{sub.manual && sub.reason ? <span className="block max-w-48 text-xs text-muted-foreground">{sub.reason}</span> : null}</td><td className="py-3"><Badge tone={["active", "trialing", "paid", "authorized", "succeeded"].includes(sub.status.toLowerCase()) ? "ok" : "warn"}>{sub.status}</Badge></td><td className="py-3">{sub.manual ? "cortesia" : (sub.priceCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td><td className="py-3">{dateTime(sub.startedAt)}</td><td className="py-3">{sub.manual && sub.periodEndsAt === null && sub.status === "active" ? "Sem expiração" : dateTime(sub.manual ? sub.periodEndsAt : (sub.periodEndsAt ?? sub.nextBillingDate))}</td><td className="py-3">{sub.manual && sub.status === "active" ? <Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => void revokeGrant(sub.id)}>{busy === `grant-revoke:${sub.id}` ? "Revogando…" : "Revogar"}</Button> : sub.manual ? "—" : <a href={overview.billingStoreUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary underline underline-offset-4">Gerenciar na ShardPay</a>}</td></tr>)}</tbody></table></div> : <Empty>Nenhuma assinatura ou concessão foi registrada.</Empty>}
             <p className="mb-0 mt-4 text-xs text-muted-foreground">Alterações de cobrança e cancelamentos devem ser feitos no painel do provedor para manter o estado financeiro sincronizado.</p>
           </Card></section> : null}
 

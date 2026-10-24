@@ -69,7 +69,7 @@ async function loadSubscriptions(): Promise<Subscription[] | null> {
   if (!Array.isArray(payload?.subscriptions)) return null;
   const rows = payload.subscriptions;
   const manualGrants = (await listDashboardGrants())
-    .filter((grant) => !grant.revokedAt && grant.expiresAt > Date.now())
+    .filter((grant) => !grant.revokedAt && (grant.expiresAt === null || grant.expiresAt > Date.now()))
     .map((grant) => ({
       status: "active",
       planId: grant.planId,

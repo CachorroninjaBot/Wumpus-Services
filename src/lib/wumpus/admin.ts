@@ -7,6 +7,7 @@ import { loadBotGuildIds } from "./bot-guilds";
 import { readRuntime, enqueueOutbox } from "./runtime.server";
 import {
   getDashboardAdminState,
+  addDashboardUserWithGrant,
   grantDashboardAccess,
   manageDashboardUser,
   revokeDashboardGrant,
@@ -25,7 +26,7 @@ const resyncSchema = z.object({
 const userActionSchema = z.object({
   token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
   userId: z.string().regex(/^\d{17,20}$/),
-  action: z.enum(["suspend", "restore", "revoke-sessions", "save-notes"]),
+  action: z.enum(["suspend", "restore", "revoke-sessions", "save-notes", "remove"]),
   reason: z.string().trim().max(300).optional(),
   notes: z.string().max(2000).optional(),
 }).strict();
@@ -33,10 +34,14 @@ const grantSchema = z.object({
   token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
   userId: z.string().regex(/^\d{17,20}$/),
   username: z.string().trim().min(1).max(100),
-  planId: z.enum(["essencial", "pro", "escala"]),
-  durationDays: z.number().int().min(1).max(3650),
+  planId: z.enum(["essencial", "pro", "escala", "vitalicio"]),
+  durationDays: z.number().int().min(1).max(3650).nullable(),
   reason: z.string().trim().min(3).max(500),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if ((value.planId === "vitalicio") !== (value.durationDays === null)) {
+    context.addIssue({ code: "custom", message: "O plano Vitalício não expira; os demais planos exigem duração." });
+  }
+});
 const revokeGrantSchema = z.object({
   token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
   grantId: z.string().uuid(),
@@ -98,11 +103,13 @@ export const getAdminOverview = createServerFn({ method: "POST" })
           username: grant.username,
           discordUserId: grant.userId,
           productName: `Concessão manual · ${grant.planId}`,
-          status: grant.revokedAt ? "revoked" : grant.expiresAt <= Date.now() ? "expired" : "active",
-          billingCycle: `${Math.ceil(Math.max(0, grant.expiresAt - grant.createdAt) / 86_400_000)} dias concedidos`,
+          status: grant.revokedAt ? "revoked" : grant.expiresAt !== null && grant.expiresAt <= Date.now() ? "expired" : "active",
+          billingCycle: grant.expiresAt === null
+            ? "sem expiração"
+            : `${Math.ceil(Math.max(0, grant.expiresAt - grant.createdAt) / 86_400_000)} dias concedidos`,
           nextBillingDate: "",
           startedAt: new Date(grant.createdAt).toISOString(),
-          periodEndsAt: new Date(grant.expiresAt).toISOString(),
+          periodEndsAt: grant.expiresAt === null ? null : new Date(grant.expiresAt).toISOString(),
           canceledAt: grant.revokedAt ? new Date(grant.revokedAt).toISOString() : null,
           priceCents: 0,
           manual: true,
@@ -132,6 +139,23 @@ export const grantAdminAccess = createServerFn({ method: "POST" })
     enforceRequestLimit("admin-grant-access", 20, 60_000);
     const actor = await requireAdminSession(data.token);
     const grant = await grantDashboardAccess({
+      actorId: actor.userId,
+      userId: data.userId,
+      username: data.username,
+      planId: data.planId,
+      durationDays: data.durationDays,
+      reason: data.reason,
+    });
+    privateResponse();
+    return { ok: true as const, expiresAt: grant.expiresAt };
+  });
+
+export const addAdminUser = createServerFn({ method: "POST" })
+  .validator((input: unknown) => grantSchema.parse(input))
+  .handler(async ({ data }) => {
+    enforceRequestLimit("admin-add-user", 20, 60_000);
+    const actor = await requireAdminSession(data.token);
+    const grant = await addDashboardUserWithGrant({
       actorId: actor.userId,
       userId: data.userId,
       username: data.username,

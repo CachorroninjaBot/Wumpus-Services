@@ -36,18 +36,18 @@ export const getMyBilling = createServerFn({ method: "POST" })
     // for exposing private billing information. Only trust the Discord snowflake.
     const subscriptions = snapshot.subscriptions.filter((subscription) => subscription.discordUserId === user.userId);
     subscriptions.push(...grants
-      .filter((grant) => grant.userId === user.userId && !grant.revokedAt && grant.expiresAt > Date.now())
+      .filter((grant) => grant.userId === user.userId && !grant.revokedAt && (grant.expiresAt === null || grant.expiresAt > Date.now()))
       .map((grant) => ({
         id: grant.id,
         status: "active",
-        productName: `Acesso temporário · ${grant.planId}`,
+        productName: `Acesso administrativo · ${grant.planId}`,
         planId: grant.planId,
         discordUsername: grant.username,
         discordUserId: grant.userId,
-        billingCycle: "concessão administrativa",
+        billingCycle: grant.expiresAt === null ? "sem expiração" : "concessão administrativa",
         nextBillingDate: "",
         startedAt: new Date(grant.createdAt).toISOString(),
-        periodEndsAt: new Date(grant.expiresAt).toISOString(),
+        ...(grant.expiresAt !== null ? { periodEndsAt: new Date(grant.expiresAt).toISOString() } : {}),
         priceCents: 0,
       })));
     if (configuredLifetimeSubscriptions().some((row) => row.discordUserId === user.userId)) {

@@ -115,7 +115,7 @@ function SettingsPage() {
             <ul className="mt-2 m-0 space-y-1 p-0 text-sm">
               {billing.data.subscriptions.map((sub) => (
                 <li key={sub.id}>
-                  {sub.productName} · {sub.status}
+                  {sub.productName} · {sub.status}{sub.billingCycle ? ` · ${sub.billingCycle}` : ""}
                   {sub.discordUsername ? ` · ${sub.discordUsername}` : ""}
                 </li>
               ))}

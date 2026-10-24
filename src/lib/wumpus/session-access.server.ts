@@ -45,7 +45,7 @@ function subscriptionsFor(billing: Awaited<ReturnType<typeof loadBilling>>): Sub
 export async function loadManualSubscriptionRows(): Promise<SubscriptionLite[]> {
   const now = Date.now();
   return (await listDashboardGrants())
-    .filter((grant) => !grant.revokedAt && grant.expiresAt > now)
+    .filter((grant) => !grant.revokedAt && (grant.expiresAt === null || grant.expiresAt > now))
     .map((grant) => ({
       status: "active",
       planId: grant.planId,

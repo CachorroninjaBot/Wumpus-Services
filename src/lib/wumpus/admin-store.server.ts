@@ -42,7 +42,7 @@ export type DashboardManualGrant = {
   username: string;
   planId: PlanId;
   createdAt: number;
-  expiresAt: number;
+  expiresAt: number | null;
   createdBy: string;
   reason: string;
   revokedAt: number | null;
@@ -96,7 +96,7 @@ const grantSchema = z.object({
   username: z.string().min(1).max(100),
   planId: z.enum(["essencial", "pro", "escala", "vitalicio"]),
   createdAt: z.number().finite(),
-  expiresAt: z.number().finite(),
+  expiresAt: z.number().finite().nullable(),
   createdBy: z.string().regex(/^\d{17,20}$/),
   reason: z.string().min(1).max(500),
   revokedAt: z.number().finite().nullable(),
@@ -287,14 +287,14 @@ export async function getDashboardAdminState(): Promise<DashboardAdminState> {
 export async function manageDashboardUser(input: {
   actorId: string;
   userId: string;
-  action: "suspend" | "restore" | "revoke-sessions" | "save-notes";
+  action: "suspend" | "restore" | "revoke-sessions" | "save-notes" | "remove";
   reason?: string;
   notes?: string;
 }): Promise<void> {
   const data = z.object({
     actorId: z.string().regex(/^\d{17,20}$/),
     userId: z.string().regex(/^\d{17,20}$/),
-    action: z.enum(["suspend", "restore", "revoke-sessions", "save-notes"]),
+    action: z.enum(["suspend", "restore", "revoke-sessions", "save-notes", "remove"]),
     reason: z.string().trim().max(300).optional(),
     notes: z.string().max(2000).optional(),
   }).strict().parse(input);
@@ -328,9 +328,32 @@ export async function manageDashboardUser(input: {
         }
       }
       addEvent(state, data.actorId, data.action, data.userId, "Sessões ativas revogadas.");
-    } else {
+    } else if (data.action === "save-notes") {
       member.notes = data.notes ?? "";
       addEvent(state, data.actorId, data.action, data.userId, "Nota administrativa atualizada.");
+    } else {
+      for (const session of state.sessions) {
+        if (session.userId === data.userId && !session.endedAt) {
+          session.endedAt = now;
+          session.revokedAt = now;
+          session.guilds = [];
+        }
+      }
+      let revokedGrants = 0;
+      for (const grant of state.grants) {
+        if (grant.userId === data.userId && !grant.revokedAt) {
+          grant.revokedAt = now;
+          revokedGrants += 1;
+        }
+      }
+      state.members = state.members.filter((row) => row.id !== data.userId);
+      addEvent(
+        state,
+        data.actorId,
+        "remove-user",
+        data.userId,
+        `Cadastro de ${member.username} removido; sessões encerradas, ${revokedGrants} concessão(ões) manual(is) revogada(s). Histórico de auditoria preservado.`,
+      );
     }
   });
 }
@@ -350,22 +373,26 @@ export async function grantDashboardAccess(input: {
   userId: string;
   username: string;
   planId: PlanId;
-  durationDays: number;
+  durationDays: number | null;
   reason: string;
 }): Promise<DashboardManualGrant> {
   const data = z.object({
     actorId: z.string().regex(/^\d{17,20}$/),
     userId: z.string().regex(/^\d{17,20}$/),
     username: z.string().trim().min(1).max(100),
-    planId: z.enum(["essencial", "pro", "escala"]),
-    durationDays: z.number().int().min(1).max(3650),
+    planId: z.enum(["essencial", "pro", "escala", "vitalicio"]),
+    durationDays: z.number().int().min(1).max(3650).nullable(),
     reason: z.string().trim().min(3).max(500),
-  }).strict().parse(input);
+  }).strict().superRefine((value, context) => {
+    if ((value.planId === "vitalicio") !== (value.durationDays === null)) {
+      context.addIssue({ code: "custom", message: "O plano Vitalício não expira; os demais planos exigem duração." });
+    }
+  }).parse(input);
   if (data.actorId === data.userId) throw new Error("A administração não pode alterar a própria conta por esta ação.");
 
   return mutateState((state) => {
     const now = Date.now();
-    const current = state.grants.find((grant) => grant.userId === data.userId && !grant.revokedAt && grant.expiresAt > now);
+    const current = state.grants.find((grant) => grant.userId === data.userId && !grant.revokedAt && (grant.expiresAt === null || grant.expiresAt > now));
     if (current) {
       current.revokedAt = now;
       addEvent(state, data.actorId, "grant-replaced", data.userId, `Concessão anterior encerrada para substituir o acesso manual.`);
@@ -378,14 +405,73 @@ export async function grantDashboardAccess(input: {
       username: member?.username ?? data.username,
       planId: data.planId,
       createdAt: now,
-      expiresAt: now + data.durationDays * 24 * 60 * 60_000,
+      expiresAt: data.durationDays === null ? null : now + data.durationDays * 24 * 60 * 60_000,
       createdBy: data.actorId,
       reason: data.reason,
       revokedAt: null,
     };
     state.grants.unshift(grant);
     state.grants.length = Math.min(state.grants.length, 2000);
-    addEvent(state, data.actorId, "grant-access", data.userId, `Acesso manual ${data.planId} concedido por ${data.durationDays} dia(s). Motivo: ${data.reason.slice(0, 350)}`);
+    addEvent(state, data.actorId, "grant-access", data.userId, `Acesso manual ${data.planId} concedido${data.durationDays === null ? " sem expiração" : ` por ${data.durationDays} dia(s)`}. Motivo: ${data.reason.slice(0, 350)}`);
+    return grant;
+  });
+}
+
+export async function addDashboardUserWithGrant(input: {
+  actorId: string;
+  userId: string;
+  username: string;
+  planId: PlanId;
+  durationDays: number | null;
+  reason: string;
+}): Promise<DashboardManualGrant> {
+  const data = z.object({
+    actorId: z.string().regex(/^\d{17,20}$/),
+    userId: z.string().regex(/^\d{17,20}$/),
+    username: z.string().trim().min(1).max(100),
+    planId: z.enum(["essencial", "pro", "escala", "vitalicio"]),
+    durationDays: z.number().int().min(1).max(3650).nullable(),
+    reason: z.string().trim().min(3).max(500),
+  }).strict().superRefine((value, context) => {
+    if ((value.planId === "vitalicio") !== (value.durationDays === null)) {
+      context.addIssue({ code: "custom", message: "O plano Vitalício não expira; os demais planos exigem duração." });
+    }
+  }).parse(input);
+  if (data.actorId === data.userId) throw new Error("A administração não pode cadastrar a própria conta por esta ação.");
+
+  return mutateState((state) => {
+    if (state.members.some((member) => member.id === data.userId)) {
+      throw new Error("Esta conta já está cadastrada. Selecione-a na lista para atribuir um plano.");
+    }
+    if (state.grants.some((grant) => grant.userId === data.userId && !grant.revokedAt && (grant.expiresAt === null || grant.expiresAt > Date.now()))) {
+      throw new Error("Esta conta já possui uma concessão manual ativa.");
+    }
+
+    const now = Date.now();
+    const grant: DashboardManualGrant = {
+      id: randomUUID(),
+      userId: data.userId,
+      username: data.username,
+      planId: data.planId,
+      createdAt: now,
+      expiresAt: data.durationDays === null ? null : now + data.durationDays * 24 * 60 * 60_000,
+      createdBy: data.actorId,
+      reason: data.reason,
+      revokedAt: null,
+    };
+    state.members.unshift({
+      id: data.userId,
+      username: data.username,
+      firstSeenAt: now,
+      lastSeenAt: now,
+      loginCount: 0,
+      suspended: false,
+      suspensionReason: null,
+      notes: "",
+    });
+    state.grants.unshift(grant);
+    state.grants.length = Math.min(state.grants.length, 2000);
+    addEvent(state, data.actorId, "add-user-with-plan", data.userId, `${data.username} cadastrado com plano manual ${data.planId}${data.durationDays === null ? " sem expiração" : ` por ${data.durationDays} dia(s)`}. Motivo: ${data.reason.slice(0, 350)}`);
     return grant;
   });
 }
