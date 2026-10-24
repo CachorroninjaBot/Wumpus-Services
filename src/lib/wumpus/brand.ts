@@ -3,7 +3,7 @@ export const brand = {
   tagline: "Atendimento claro para sua comunidade.",
   description:
     "Configure tickets, formulários e rotas da equipe em português simples. O Wumpus faz as alterações chegarem ao seu Discord.",
-  legal: "HubOrder",
+  legal: "Haiz Team",
   invite:
     "https://discord.com/oauth2/authorize?client_id=1187601667559002225&permissions=8&scope=bot%20applications.commands",
   version: "2.0.0",

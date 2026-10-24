@@ -238,7 +238,11 @@ function Home() {
           <span>
             {brand.name} · {brand.legal}
           </span>
-          <Link to="/entrar" className="sm:ml-auto text-foreground">
+          <nav aria-label="Documentos legais" className="flex flex-wrap gap-x-4 gap-y-2 sm:ml-auto">
+            <Link to="/privacidade" className="hover:text-foreground">Política de Privacidade</Link>
+            <Link to="/termos" className="hover:text-foreground">Termos de Uso</Link>
+          </nav>
+          <Link to="/entrar" className="text-foreground">
             Entrar com Discord
           </Link>
         </div>
