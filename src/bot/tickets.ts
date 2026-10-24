@@ -65,6 +65,8 @@ export type Ticket = {
   /** Referência da cópia de transcript para aplicar a política de retenção. */
   transcriptChannelId?: string | null;
   transcriptMessageId?: string | null;
+  /** Transcrição de texto persistida antes da exclusão do canal de atendimento. */
+  transcript?: string | null;
   /** URL hospedada pela API externa de transcripts, quando a retenção é ilimitada. */
   transcriptUrl?: string | null;
 };
@@ -599,6 +601,22 @@ export async function recordInternalTicketNote(
   return { ok: true };
 }
 
+export async function saveTicketTranscript(
+  guildId: string,
+  ticketId: number,
+  transcript: string,
+): Promise<boolean> {
+  let saved = false;
+  await mutate<Ticket>("tickets", (rows) => {
+    const ticket = rows.find((row) => row.guildId === guildId && row.id === ticketId);
+    if (!ticket) return rows;
+    ticket.transcript = transcript;
+    saved = true;
+    return rows;
+  });
+  return saved;
+}
+
 /** Transfere o responsável para outro membro que tenha um cargo da equipe. */
 export async function transferTicket(
   guild: Guild,
@@ -680,6 +698,7 @@ export async function closeTicket(
     ticket.claimedBy && ticket.claimedBy !== actorId
       ? await displayName(guild, ticket.claimedBy)
       : await displayName(guild, actorId);
+  const closedAt = new Date().toISOString();
 
   const transcript = buildTranscript({
     ticket: {
@@ -688,10 +707,20 @@ export async function closeTicket(
       department: ticket.department,
       claimedBy: ticket.claimedBy ? await displayName(guild, ticket.claimedBy) : null,
       closedBy: closerName,
-      closedAt: new Date().toISOString()
+      closedAt
     },
     guildName: guild.name,
     messages
+  });
+
+  if (!(await saveTicketTranscript(guild.id, ticketId, transcript))) {
+    log.error("transcricao do atendimento nao foi persistida; canal preservado", { guildId: guild.id, ticketId });
+    return { ok: false };
+  }
+  log.info("transcricao local persistida antes da exclusao do canal", {
+    guildId: guild.id,
+    ticketId,
+    characters: transcript.length,
   });
 
   const plan = await guildPlan(guild.id);
@@ -748,8 +777,6 @@ export async function closeTicket(
     }
   }
 
-  const closedAt = new Date().toISOString();
-
   await mutate<Ticket>("tickets", (rows) => {
     const row = rows.find((entry) => entry.guildId === guild.id && entry.id === ticketId);
     if (row) {
@@ -757,6 +784,7 @@ export async function closeTicket(
       row.closedAt = closedAt;
       row.closedBy = actorId;
       row.closeReason = reason;
+      row.transcript = transcript;
       if (ticket.firstResponseAt) row.firstResponseAt = ticket.firstResponseAt;
       row.lastActivityAt = ticket.lastActivityAt || closedAt;
     }
@@ -816,7 +844,7 @@ export async function closeTicket(
         { name: "Mensagens", value: String(messages.length) },
         {
           name: "Transcricao",
-          value: transcriptUrl ?? (transcriptChannelId ? `<#${transcriptChannelId}>` : "nao configurada")
+          value: transcriptUrl ?? (transcriptChannelId ? `<#${transcriptChannelId}>` : "cópia local salva no histórico do ticket")
         },
         { name: "Atendente", value: ticket.claimedBy ? `<@${ticket.claimedBy}>` : "ninguem assumiu" },
         ...(reason ? [{ name: "Motivo", value: reason.slice(0, 1000) }] : [])
@@ -844,7 +872,7 @@ export async function closeTicket(
 
 /** Remove conteúdo de atendimentos encerrados conforme a retenção definida pelo servidor.
  * Metadados do ticket são mantidos para estatísticas; cópias de transcript conhecidas
- * também são apagadas do Discord antes de remover as mensagens persistidas.
+ * também são apagadas do Discord antes de remover as mensagens e a cópia local persistidas.
  */
 export async function pruneTicketContent(guild: Guild, log: Logger): Promise<number> {
   const config = await moduleConfig(guild.id, "tickets");
@@ -883,7 +911,7 @@ export async function pruneTicketContent(guild: Guild, log: Logger): Promise<num
   const remove = new Set(ticketIds);
   await mutate<TicketMessage>("ticket_messages", (rows) => rows.filter((message) => !remove.has(message.ticketId)));
   await mutate<Ticket>("tickets", (rows) => rows.map((ticket) => remove.has(ticket.id) && ticket.guildId === guild.id
-    ? { ...ticket, transcriptMessageId: null, transcriptChannelId: null }
+    ? { ...ticket, transcript: null, transcriptMessageId: null, transcriptChannelId: null }
     : ticket));
   log.info("conteúdo antigo de tickets removido", { guildId: guild.id, count: ticketIds.length, retentionDays });
   return ticketIds.length;

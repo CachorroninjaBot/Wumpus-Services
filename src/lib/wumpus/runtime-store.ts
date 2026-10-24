@@ -413,7 +413,8 @@ export const getGuildTickets = createServerFn({ method: "POST" })
     guildId: z.string().regex(/^\d{17,20}$/),
   }).strict().parse(input))
   .handler(async ({ data }) => {
-    await requireGuildAccess(data.token, data.guildId);
+    const session = await requireGuildAccess(data.token, data.guildId);
+    const canReadTranscript = Boolean(session.entitlements.plan && planAllows(session.entitlements.plan, "transcripts"));
     const tickets = await readBotCollection<BotTicketRecord>("tickets");
     return tickets
       .filter((ticket) => ticket.guildId === data.guildId)
@@ -436,7 +437,7 @@ export const getGuildTickets = createServerFn({ method: "POST" })
         firstResponseAt: ticket.firstResponseAt ? Date.parse(ticket.firstResponseAt) || null : null,
         closedAt: ticket.closedAt ? Date.parse(ticket.closedAt) || null : null,
         feedback: ticket.feedback,
-        transcript: null as string | null,
+        transcript: canReadTranscript ? ticket.transcript ?? null : null,
         transcriptUrl: ticket.transcriptUrl ?? null,
         messages: [] as { id: string; authorId: string; authorName: string; content: string; at: number; kind: "user" | "staff" }[],
       }));

@@ -165,6 +165,7 @@ export type BotTicketRecord = {
   feedbackStaffId?: string | null;
   transcriptChannelId?: string | null;
   transcriptMessageId?: string | null;
+  transcript?: string | null;
   transcriptUrl?: string | null;
 };
 
