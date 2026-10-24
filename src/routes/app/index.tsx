@@ -81,9 +81,16 @@ function Overview() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <h1 className="m-0 text-2xl font-semibold tracking-tight">O que precisa de atenção?</h1>
-        {lockdown ? <Badge tone="danger">Lockdown ativo</Badge> : null}
+      <header className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-border bg-card p-5 shadow-border sm:p-6">
+        <div>
+          <p className="m-0 text-xs font-semibold uppercase tracking-[0.14em] text-primary">Visão geral</p>
+          <h1 className="m-0 mt-1 text-2xl font-semibold tracking-tight">O que precisa de atenção?</h1>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">Acompanhe a operação do seu servidor sem procurar em vários lugares.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {lockdown ? <Badge tone="danger">Lockdown ativo</Badge> : null}
+          <Link to="/app/tickets"><Button size="sm">Abrir fila <ArrowRight className="size-4" /></Button></Link>
+        </div>
       </header>
 
       {/* Barra de status do bot */}
