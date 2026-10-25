@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
-import { SectionHeading, SectionTitle, ToggleRow, Field, NumberField, ListField, ModuleStatusRow, ReadinessRow, BotConnectionStatus, PermissionStatus, PermissionCheckInline, CheckLine, PausedNotice, SecurityEventList, getPresetChanges, formatConfigValue, severityLabel } from "@/components/protect/helpers";
   Activity,
   ArrowRight,
   BadgeCheck,
@@ -18,6 +17,7 @@ import { SectionHeading, SectionTitle, ToggleRow, Field, NumberField, ListField,
   ShieldCheck,
   Siren,
 } from "lucide-react";
+import { SectionHeading, SectionTitle, ToggleRow, Field, NumberField, ListField, ModuleStatusRow, ReadinessRow, BotConnectionStatus, PermissionStatus, PermissionCheckInline, CheckLine, PausedNotice, SecurityEventList, getPresetChanges, formatConfigValue, severityLabel } from "@/components/protect/helpers";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

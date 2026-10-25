@@ -1304,7 +1304,3 @@ function CharCounter({ current, max }: { current: number; max: number }) {
   return <p className={cn("m-0 mt-1 text-[10px]", over ? "text-destructive" : "text-muted-foreground")}>{current}/{max}</p>;
 }
 
-function CharCounter({ current, max }: { current: number; max: number }) {
-  const over = current > max;
-  return <p className={cn("m-0 mt-1 text-[10px]", over ? "text-destructive" : "text-muted-foreground")}>{current}/{max}</p>;
-}
