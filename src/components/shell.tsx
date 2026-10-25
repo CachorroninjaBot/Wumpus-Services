@@ -102,6 +102,7 @@ function ServerRail() {
   const userId = useWumpus((state) => state.sessionUser.id);
   const [orderedIds, setOrderedIds] = useState<string[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const orderKey = `wumpus-server-order-v1:${userId}`;
 
   useEffect(() => {
@@ -139,14 +140,16 @@ function ServerRail() {
   };
 
   return (
-    <aside aria-label="Servidores" className="hidden w-[4.5rem] shrink-0 flex-col items-center gap-3 border-r border-border bg-muted/35 py-3 lg:flex">
+    <aside aria-label="Servidores" className="flex w-[4.5rem] shrink-0 flex-col items-center gap-2 border-r border-border bg-muted/35 py-2 lg:py-3">
       <Link to="/app" aria-label="Início do Wumpus" className="grid size-12 place-items-center rounded-2xl transition-colors hover:bg-background">
         <BrandMark size={38} />
       </Link>
       <span aria-hidden="true" className="h-px w-8 bg-border" />
-      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto px-2">
+      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1.5 overflow-y-auto px-1.5">
         {orderedGuilds.map((guild, index) => {
           const active = guild.id === activeGuildId;
+          const isDragging = draggingId === guild.id;
+          const isDropTarget = dropTargetId === guild.id && draggingId && draggingId !== guild.id;
           return (
             <button
               key={guild.id}
@@ -162,15 +165,18 @@ function ServerRail() {
                 event.dataTransfer.effectAllowed = "move";
                 setDraggingId(guild.id);
               }}
-              onDragEnd={() => setDraggingId(null)}
+              onDragEnd={() => { setDraggingId(null); setDropTargetId(null); }}
               onDragOver={(event) => {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
+                if (draggingId && draggingId !== guild.id) setDropTargetId(guild.id);
               }}
+              onDragLeave={() => { if (dropTargetId === guild.id) setDropTargetId(null); }}
               onDrop={(event) => {
                 event.preventDefault();
                 reorder(event.dataTransfer.getData("text/plain"), guild.id);
                 setDraggingId(null);
+                setDropTargetId(null);
               }}
               onKeyDown={(event) => {
                 if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
@@ -179,13 +185,17 @@ function ServerRail() {
                 if (target) reorder(guild.id, target.id);
               }}
               className={cn(
-                "relative grid size-12 shrink-0 place-items-center rounded-[18px] cursor-grab transition-[border-radius,background,opacity,transform] duration-150 hover:rounded-[14px] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:cursor-grabbing",
-                active && "rounded-[14px] bg-background shadow-border",
-                draggingId === guild.id && "opacity-40 scale-95",
+                "group relative grid size-11 shrink-0 place-items-center rounded-[16px] cursor-grab transition-all duration-150 hover:rounded-[12px] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:cursor-grabbing lg:size-12 lg:rounded-[18px]",
+                active && "rounded-[12px] bg-background shadow-border lg:rounded-[14px]",
+                isDragging && "opacity-40 scale-95",
+                isDropTarget && "ring-2 ring-primary/60 ring-offset-1 ring-offset-background",
               )}
             >
-              <span aria-hidden="true" className={cn("absolute -left-2 w-1 rounded-r-full bg-primary transition-all", active ? "h-8" : "h-2 opacity-0")} />
-              <GuildBadge tag={guild.tag ?? guild.name.slice(0, 2)} iconUrl={guild.iconUrl} size={38} />
+              <span aria-hidden="true" className={cn("absolute -left-1.5 w-1 rounded-r-full bg-primary transition-all", active ? "h-7 lg:h-8" : "h-2 opacity-0")} />
+              <GuildBadge tag={guild.tag ?? guild.name.slice(0, 2)} iconUrl={guild.iconUrl} size={34} />
+              <span aria-hidden="true" className="pointer-events-none absolute inset-0 grid place-items-center rounded-[inherit] bg-black/20 opacity-0 transition-opacity group-hover:opacity-100">
+                <span className="text-[10px] text-white">⋮⋮</span>
+              </span>
             </button>
           );
         })}
@@ -201,14 +211,14 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const active = useActiveNav();
   const groups: Array<ModuleGroupId | "home"> = ["home", "attend", "protect", "team", "intel"];
   return (
-    <nav aria-label="Navegação principal" className="flex flex-col gap-6 pb-6">
+    <nav aria-label="Navegação principal" className="flex flex-col gap-5 pb-4">
       {groups.map((group) => {
         const items = navItems.filter((item) => item.group === group);
         if (!items.length) return null;
         return (
           <section key={group}>
             {group !== "home" ? (
-              <p className="mb-2 px-3 text-[11px] font-semibold text-muted-foreground">{groupLabels[group]}</p>
+              <p className="mb-1.5 px-3 text-[10px] font-semibold tracking-wide text-muted-foreground">{groupLabels[group]}</p>
             ) : null}
             <div className="flex flex-col gap-1">
               {items.map((item) => {
