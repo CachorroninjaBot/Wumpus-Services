@@ -2,7 +2,6 @@ import { PageHeader } from "@/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
-import { EmptyState } from "@/components/empty-state";
   ArrowDown,
   ArrowUp,
   Check,
@@ -19,6 +18,7 @@ import { EmptyState } from "@/components/empty-state";
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { DiscordFormPreview } from "@/components/discord-panel";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +33,7 @@ import { formatRelative, uid } from "@/lib/utils";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus, type FormFieldConfig } from "@/lib/wumpus/store";
 import type { FormSubmission } from "@/lib/wumpus/types";
 import { getFormReviewStatus, getGuildFormSubmissions, requestFormReview } from "@/lib/wumpus/runtime-store";
-import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
+import { usePublishPanel } from "@/lib/wumpus/use-publish-panel";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { ExclusiveButton } from "@/components/exclusive-button";
 
@@ -321,16 +321,9 @@ function FormsPage() {
   async function publishFormPanel() {
     const channelRef = asString(fcfg.config.panelChannelId).trim();
     if (!channelRef) { setPublishNotice("Escolha o canal onde o painel deve aparecer."); return; }
-    setPublishBusy(true);
     setPublishNotice(null);
-    try {
-      const result = await publishPanelAndWait({ guildId: gid, target: "forms", channelRef });
-      setPublishNotice(publishResultMessage(result));
-    } catch (error) {
-      setPublishNotice(error instanceof Error ? error.message : "Não foi possível pedir a publicação ao bot.");
-    } finally {
-      setPublishBusy(false);
-    }
+    const result = await publishPanel("forms", channelRef);
+    if (result) setPublishNotice(result.status === "done" ? "Publicado." : "Pedido enviado.");
   }
 
   return (

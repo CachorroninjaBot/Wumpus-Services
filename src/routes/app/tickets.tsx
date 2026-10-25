@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { analyzeWithGrok } from "@/lib/wumpus/analyze";
 import { asList, asString, planAllows, searchArticles, shouldAutoClose, ticketSla, type SlaState } from "@/lib/wumpus/engine";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
-import { publishPanelAndWait, publishResultMessage } from "@/lib/wumpus/publish-panel";
+import { usePublishPanel } from "@/lib/wumpus/use-publish-panel";
 import { getGuildTicketMessages, getGuildTickets, getTicketActionStatus, requestTicketAction } from "@/lib/wumpus/runtime-store";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { ExclusiveButton } from "@/components/exclusive-button";
@@ -131,6 +131,7 @@ const ticketTemplates: Record<string, { label: string; description: string; conf
 
 function TicketsPage() {
   const gid = useWumpus((s) => s.activeGuildId);
+  const { busy: pubBusyHook, publish: publishPanel } = usePublishPanel(gid);
   const guild = useActiveGuild();
   const user = useWumpus((s) => s.sessionUser);
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -1209,22 +1210,11 @@ function TicketsPage() {
             {!asString(tcfg.config.panelChannelId).trim() ? <p className="m-0 text-sm text-warn">Escolha o canal do painel acima para continuar.</p> : null}
             {!validDepartmentSettings ? <p role="alert" className="m-0 text-sm text-destructive">Revise os tipos: os nomes devem ser únicos, e cada pergunta precisa ter até 45 caracteres (máximo de 5 por tipo).</p> : null}
                 <Button
-                  disabled={pubBusy || !asString(tcfg.config.panelChannelId).trim() || !validDepartmentSettings}
+                  disabled={pubBusyHook || !asString(tcfg.config.panelChannelId).trim() || !validDepartmentSettings}
                   onClick={async () => {
-                    setPubBusy(true);
                     setNotice(null);
-                    try {
-                      const result = await publishPanelAndWait({
-                        guildId: gid,
-                        target: "tickets",
-                        channelRef: asString(tcfg.config.panelChannelId).trim(),
-                      });
-                      announce(publishResultMessage(result)); setDirty(false);
-                    } catch (cause) {
-                      announce(cause instanceof Error ? cause.message : "Não foi possível pedir a publicação ao bot.", "error");
-                    } finally {
-                      setPubBusy(false);
-                    }
+                    const result = await publishPanel("tickets", asString(tcfg.config.panelChannelId));
+                    if (result) { announce(result.status === "done" ? "Publicado." : "Pedido enviado."); setDirty(false); }
                   }}
                 >
                   {pubBusy ? "Aguardando confirmação do bot…" : "Publicar painel no Discord"}
@@ -1261,14 +1251,9 @@ function TicketsPage() {
           </div>
         
             <div className="fixed bottom-0 left-0 right-0 z-20 border-t bg-background/95 p-3 backdrop-blur sm:hidden">
-              <Button className="w-full" disabled={pubBusy || !validDepartmentSettings} onClick={async () => {
-                setPubBusy(true);
-                try {
-                  const result = await publishPanelAndWait({ data: { token: getStoredSessionToken()!, guildId: gid } });
-                  announce(publishResultMessage(result)); setDirty(false);
-                } catch (e) {
-                  announce(e instanceof Error ? e.message : "Falha ao publicar", "error");
-                } finally { setPubBusy(false); }
+              <Button className="w-full" disabled={pubBusyHook || !validDepartmentSettings} onClick={async () => {
+                const result = await publishPanel("tickets", asString(tcfg.config.panelChannelId));
+                if (result) { announce(result.status === "done" ? "Publicado." : "Pedido enviado."); setDirty(false); }
               }}>
                 {pubBusy ? "Publicando…" : dirty ? "Publicar alterações" : "Publicar painel"}
               </Button>

@@ -1,30 +1,30 @@
 import { useState } from "react";
 import { publishPanelAndWait, publishResultMessage } from "./publish-panel";
-import { getStoredSessionToken } from "./session-token";
 
 export function usePublishPanel(guildId: string) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [tone, setTone] = useState<"neutral" | "success" | "error">("neutral");
 
-  async function publish(target: "tickets" | "forms" = "tickets", channelRef?: string) {
-    const token = getStoredSessionToken();
-    if (!token) {
-      setMessage("Entre novamente com Discord para publicar.");
+  async function publish(target: "tickets" | "forms", channelRef: string) {
+    if (!channelRef.trim()) {
+      setMessage("Escolha o canal do painel.");
       setTone("error");
-      return;
+      return null;
     }
     setBusy(true);
     setMessage(null);
     try {
-      const result = await publishPanelAndWait({
-        data: { token, guildId, ...(target === "forms" ? { target, channelRef } : {}) },
-      });
-      setMessage(publishResultMessage(result));
-      setTone("success");
+      const result = await publishPanelAndWait({ guildId, target, channelRef: channelRef.trim() });
+      const msg = publishResultMessage(result);
+      setMessage(msg);
+      setTone(result?.status === "done" ? "success" : "neutral");
+      return result;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Falha ao publicar o painel.");
+      const msg = error instanceof Error ? error.message : "Falha ao publicar o painel.";
+      setMessage(msg);
       setTone("error");
+      return null;
     } finally {
       setBusy(false);
     }
