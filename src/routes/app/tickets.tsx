@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemberAvatar } from "@/components/brand";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { ArrowDown, ArrowUp, Check, Plus, Search, Trash2, WandSparkles } from "lucide-react";
-import { DiscordPanel } from "@/components/discord-panel";
+import { DiscordPanel, DiscordModalPreview } from "@/components/discord-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -229,6 +229,8 @@ function TicketsPage() {
   const [transferStaffInput, setTransferStaffInput] = useState("");
   const [closeReason, setCloseReason] = useState("");
   const [activeView, setActiveView] = useState<"queue" | "panel">("queue");
+  const [previewMode, setPreviewMode] = useState<"panel" | "modal">("panel");
+  const [dirty, setDirty] = useState(false);
   const [ai, setAi] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
@@ -833,7 +835,7 @@ function TicketsPage() {
 
         </TabsContent>
         <TabsContent value="panel" className="mt-4 space-y-5">
-          <div><h2 className="m-0 text-xl font-semibold tracking-tight">Monte seu sistema de tickets</h2><p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Comece com um modelo e personalize categorias, equipe, canais e regras. As alterações só chegam ao Discord quando você publica o painel.</p></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="m-0 text-xl font-semibold tracking-tight">Monte seu sistema de tickets</h2><p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Comece com um modelo e personalize categorias, equipe, canais e regras. As alterações só chegam ao Discord quando você publica o painel.</p></div>{dirty ? <Badge tone="warn">Alterações não publicadas</Badge> : null}</div>
           <section className="space-y-3 rounded-2xl border border-border bg-card p-4" aria-labelledby="ticket-template-heading">
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-56 flex-1">
@@ -867,8 +869,20 @@ function TicketsPage() {
           </div>
           <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
             <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">2</span><div><h3 className="m-0 text-base font-semibold">Dê contexto ao painel</h3><p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p></div></div>
-            <Field label="Título do painel"><Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => updateConfig("tickets", { panelTitle: e.target.value })} /></Field>
-            <Field label="Descrição do painel"><Textarea maxLength={4000} value={asString(tcfg.config.panelDescription)} onChange={(e) => updateConfig("tickets", { panelDescription: e.target.value })} /></Field>
+            <Field label="Título do painel">
+              <Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => { updateConfig("tickets", { panelTitle: e.target.value }); setDirty(true); }} />
+              <CharCounter current={asString(tcfg.config.panelTitle).length} max={100} />
+            </Field>
+            <Field label="Descrição do painel">
+              <Textarea maxLength={4000} value={asString(tcfg.config.panelDescription)} onChange={(e) => { updateConfig("tickets", { panelDescription: e.target.value }); setDirty(true); }} />
+              <CharCounter current={asString(tcfg.config.panelDescription).length} max={4000} />
+            </Field>
+            <Field label="Cor de destaque">
+              <div className="flex gap-2">
+                <input type="color" value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => { updateConfig("tickets", { panelAccentColor: e.target.value }); setDirty(true); }} className="h-9 w-12 cursor-pointer rounded border border-border bg-background" />
+                <Input value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => { updateConfig("tickets", { panelAccentColor: e.target.value }); setDirty(true); }} placeholder="#28655b" />
+              </div>
+            </Field>
             <Field label="Como mostrar as opções de atendimento?">
               <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Formato das opções de atendimento">
                 <button type="button" aria-pressed={departmentDisplayMode === "select"} onClick={() => updateConfig("tickets", { departmentDisplayMode: "select" })} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", departmentDisplayMode === "select" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
@@ -911,7 +925,8 @@ function TicketsPage() {
               </>
             )}
             <Field label="Texto complementar no rodapé (opcional)">
-              <Textarea rows={2} maxLength={300} value={asString(tcfg.config.panelFooter)} onChange={(event) => updateConfig("tickets", { panelFooter: event.target.value })} placeholder="Ex.: Horário de atendimento: 9h às 18h" />
+              <Textarea rows={2} maxLength={300} value={asString(tcfg.config.panelFooter)} onChange={(event) => { updateConfig("tickets", { panelFooter: event.target.value }); setDirty(true); }} placeholder="Ex.: Horário de atendimento: 9h às 18h" />
+              <CharCounter current={asString(tcfg.config.panelFooter).length} max={300} />
               <p className="m-0 text-xs text-muted-foreground">Aparece em texto discreto abaixo do painel.</p>
             </Field>
           </div>
@@ -1220,7 +1235,7 @@ function TicketsPage() {
                         target: "tickets",
                         channelRef: asString(tcfg.config.panelChannelId).trim(),
                       });
-                      announce(publishResultMessage(result));
+                      announce(publishResultMessage(result)); setDirty(false);
                     } catch (cause) {
                       announce(cause instanceof Error ? cause.message : "Não foi possível pedir a publicação ao bot.", "error");
                     } finally {
@@ -1234,7 +1249,16 @@ function TicketsPage() {
           </div>
           </div>
           <aside className="min-w-0 space-y-2 xl:sticky xl:top-24 xl:self-start">
-            <div><p className="m-0 text-sm font-semibold">Prévia do painel</p><p className="m-0 mt-1 text-xs text-muted-foreground">Amostra das configurações atuais. A confirmação real depende do bot.</p></div>
+            <div className="flex items-center justify-between">
+              <p className="m-0 text-sm font-semibold">Prévia</p>
+              <div className="flex gap-1 rounded-lg border p-0.5 text-xs">
+                <button type="button" className={cn("rounded px-2 py-1", previewMode === "panel" && "bg-primary text-primary-foreground")} onClick={() => setPreviewMode("panel")}>Painel</button>
+                <button type="button" className={cn("rounded px-2 py-1", previewMode === "modal" && "bg-primary text-primary-foreground")} onClick={() => setPreviewMode("modal")}>Modal</button>
+              </div>
+            </div>
+            {previewMode === "modal" ? (
+              <DiscordModalPreview title={departmentSettings[0]?.name || "Abrir atendimento"} questions={departmentSettings[0]?.intakeQuestions || ["Como podemos ajudar?"]} />
+            ) : (
             <DiscordPanel
               channel={asString(tcfg.config.panelChannelId, "abrir-ticket").replace(/^#/, "") || "abrir-ticket"}
               title={asString(tcfg.config.panelTitle, "Precisa de ajuda?")}
@@ -1248,6 +1272,7 @@ function TicketsPage() {
               menuPlaceholder={asString(tcfg.config.departmentMenuPlaceholder, "Escolha o departamento")}
               footer={asString(tcfg.config.panelFooter)}
             />
+            )}
           </aside>
           </div>
         </TabsContent>
@@ -1289,4 +1314,9 @@ function ToggleRow({ label, description, checked, onChange }: { label: string; d
       <Switch checked={checked} onCheckedChange={onChange} />
     </div>
   );
+}
+
+function CharCounter({ current, max }: { current: number; max: number }) {
+  const over = current > max;
+  return <p className={cn("m-0 mt-1 text-[10px]", over ? "text-destructive" : "text-muted-foreground")}>{current}/{max}</p>;
 }
