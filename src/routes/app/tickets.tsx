@@ -939,10 +939,6 @@ function TicketsPage() {
             <p className="mb-4 mt-2 text-sm text-muted-foreground">Prazos, automações, registros e aparência. Você pode voltar a elas quando quiser.</p>
             <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
-              <p className="m-0 self-center text-xs text-muted-foreground">O painel usa os componentes modernos do Discord.</p>
-              <Field label="Cor de destaque"><Input type="color" className="h-11 p-1" value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => updateConfig("tickets", { panelAccentColor: e.target.value })} /></Field>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Máximo de tickets abertos por pessoa">
                 <Input key={String(tcfg.config.maxOpenPerUser ?? 1)} type="number" min={1} max={25} defaultValue={Number(tcfg.config.maxOpenPerUser ?? 1)} onBlur={(e) => updateConfig("tickets", { maxOpenPerUser: Math.max(1, Math.min(25, Number(e.target.value) || 1)) })} />
               </Field>
