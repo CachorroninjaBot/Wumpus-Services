@@ -21,6 +21,7 @@ import type { Ticket, TicketDepartmentConfig, TicketPriority } from "@/lib/wumpu
 import { cn, formatRelative, formatTime } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MarkdownContent } from "@/components/markdown-content";
+import { PageHeader } from "@/components/page-header";
 
 export const Route = createFileRoute("/app/tickets")({ component: TicketsPage });
 
@@ -462,12 +463,10 @@ function TicketsPage() {
 
   return (
       <div key={gid} className="mx-auto flex max-w-7xl flex-col gap-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="mr-auto">
-          <h1 className="m-0 text-2xl font-semibold tracking-tight">Atendimento</h1>
-          <p className="m-0 mt-1 text-sm text-muted-foreground">Configure o painel e acompanhe cada conversa com sua equipe.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Atendimento"
+        description="Configure o painel e acompanhe cada conversa com sua equipe."
+      />
 
       <Tabs value={activeView} onValueChange={(value) => setActiveView(value as "queue" | "panel")}>
         <TabsList aria-label="Área de atendimento">
@@ -587,7 +586,7 @@ function TicketsPage() {
                     ? "Não foi possível carregar a fila"
                     : tickets.length === 0
                     ? "Sua fila começa aqui"
-                    : "Nenhum atendimento encontrado"}
+                    : "Nenhum atendimento encontrado. Crie um painel para começar a receber tickets."}
                 </h2>
                 <p className="mt-1 mb-0 text-sm text-muted-foreground">
                   {!ticketsLoaded
@@ -854,7 +853,7 @@ function TicketsPage() {
           </section>
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(300px,.82fr)]">
           <div className="min-w-0 space-y-4">
-          <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
+          <div className="space-y-3 rounded-2xl border border-border bg-card p-3.5">
             <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">1</span><div><h3 className="m-0 text-base font-semibold">Onde a pessoa encontra ajuda?</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Escolha o canal público e a categoria para os canais privados.</p></div></div>
             <Field label="Canal do painel de atendimento">
               <DiscordSelect kind="text" value={asString(tcfg.config.panelChannelId)} onChange={(panelChannelId) => updateConfig("tickets", { panelChannelId })} placeholder="Selecione um canal" />
@@ -867,7 +866,7 @@ function TicketsPage() {
               <Switch checked={tcfg.enabled} onCheckedChange={(v) => setEnabled("tickets", v)} />
             </div>
           </div>
-          <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
+          <div className="space-y-3 rounded-2xl border border-border bg-card p-3.5">
             <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">2</span><div><h3 className="m-0 text-base font-semibold">Dê contexto ao painel</h3><p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p></div></div>
             <Field label="Título do painel">
               <Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => { updateConfig("tickets", { panelTitle: e.target.value }); setDirty(true); }} />
@@ -930,11 +929,11 @@ function TicketsPage() {
               <p className="m-0 text-xs text-muted-foreground">Aparece em texto discreto abaixo do painel.</p>
             </Field>
           </div>
-          <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
+          <div className="space-y-3 rounded-2xl border border-border bg-card p-3.5">
             <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">3</span><div><h3 className="m-0 text-base font-semibold">Escolha quem responde</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Cargos selecionados poderão acessar os canais privados.</p></div></div>
             <Field label="Cargos da equipe"><DiscordMultiSelect value={asList(tcfg.config.staffRoleIds)} onChange={(staffRoleIds) => updateConfig("tickets", { staffRoleIds })} /></Field>
           </div>
-          <details className="rounded-2xl border border-border bg-card p-4">
+          <details className="rounded-2xl border border-border bg-card p-3.5">
             <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Mais configurações de atendimento</summary>
             <p className="mb-4 mt-2 text-sm text-muted-foreground">Prazos, automações, registros e aparência. Você pode voltar a elas quando quiser.</p>
             <div className="space-y-4">

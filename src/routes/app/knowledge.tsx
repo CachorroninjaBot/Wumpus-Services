@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { BookOpenCheck, Check, Clock3, FilePlus2, History, RotateCcw, Search, Send, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -204,7 +205,7 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="mb-1 mt-0 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary"><BookOpenCheck className="size-4" />Analisar</p>
-          <h1 className="m-0 text-2xl font-semibold tracking-tight">Base de conhecimento</h1>
+          <PageHeader title="Base de conhecimento" description="Artigos que a IA e a equipe usam para responder." />
           <p className="mb-0 mt-1 max-w-2xl text-sm text-muted-foreground">Respostas confiáveis para apoiar a equipe e a IA nos atendimentos.</p>
         </div>
         <Button onClick={startNew} disabled={editorOpen}><FilePlus2 className="size-4" />{editorOpen ? "Editor aberto" : "Novo artigo"}</Button>

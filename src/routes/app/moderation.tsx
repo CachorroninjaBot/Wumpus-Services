@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { MemberAvatar } from "@/components/brand";
@@ -52,7 +53,7 @@ function ModerationPage() {
   return (
     <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
       <div className="space-y-4">
-        <h1 className="m-0 text-xl font-semibold tracking-tight">Moderação</h1>
+        <PageHeader title="Moderação" description="Avisos, timeouts e ações de moderação." />
         <Card>
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-40 flex-1">

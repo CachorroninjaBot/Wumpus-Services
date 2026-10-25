@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
@@ -64,7 +65,7 @@ function LogsPage() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <div>
-        <h1 className="m-0 text-xl font-semibold tracking-tight">Auditoria</h1>
+        <PageHeader title="Auditoria" description="Eventos e ações registradas pelo bot." />
         <p className="mb-0 mt-1 text-sm text-muted-foreground">Eventos persistidos pelo bot. Atualiza a cada 30 segundos.</p>
       </div>
       <Card className="p-0">

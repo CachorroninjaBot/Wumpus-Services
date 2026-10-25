@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { Activity, ArrowDownRight, ArrowUpRight, ClipboardList, Clock3, MessageSquareText, RefreshCw, TicketCheck, Tickets, UsersRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -80,7 +81,7 @@ function StatsPage() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="mb-1 mt-0 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary"><Activity className="size-4" />Analisar</p>
-          <h1 className="m-0 text-2xl font-semibold tracking-tight">Estatísticas</h1>
+          <PageHeader title="Estatísticas" description="Métricas de atendimento e atividade do servidor." />
           <p className="mb-0 mt-1 text-sm text-muted-foreground">Entenda o ritmo do atendimento e encontre o que precisa de atenção.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

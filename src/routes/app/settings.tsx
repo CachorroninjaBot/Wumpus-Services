@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
@@ -55,7 +56,7 @@ function SettingsPage() {
   return (
     <div key={gid} className="mx-auto flex max-w-6xl flex-col gap-6">
       <div>
-        <h1 className="m-0 text-2xl font-semibold tracking-tight">Configurações do servidor</h1>
+        <PageHeader title="Configurações do servidor" description="Plano, assinatura e dados do servidor." />
         <p className="mt-1 text-sm text-muted-foreground">
             {guild.name} · {guild.memberCount.toLocaleString("pt-BR")} membros · {guild.region}
         </p>

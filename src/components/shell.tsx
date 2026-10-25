@@ -185,7 +185,7 @@ function ServerRail() {
                 if (target) reorder(guild.id, target.id);
               }}
               className={cn(
-                "group relative grid size-11 shrink-0 place-items-center rounded-[16px] cursor-grab transition-all duration-150 hover:rounded-[12px] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:cursor-grabbing lg:size-12 lg:rounded-[18px]",
+                "server-rail-item group relative grid size-11 shrink-0 place-items-center rounded-[16px] cursor-grab transition-all duration-150 hover:rounded-[12px] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:cursor-grabbing lg:size-12 lg:rounded-[18px]",
                 active && "rounded-[12px] bg-background shadow-border lg:rounded-[14px]",
                 isDragging && "opacity-40 scale-95",
                 isDropTarget && "ring-2 ring-primary/60 ring-offset-1 ring-offset-background",
