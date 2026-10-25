@@ -1,8 +1,6 @@
 import { PageHeader } from "@/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ScrollText } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Input, Label } from "@/components/ui/input";
@@ -153,14 +151,7 @@ function LogsPage() {
                   </li>
                 ))}
               </ul>
-            ) : (
-              <EmptyState
-                icon={ScrollText}
-                title={error ? "A auditoria não foi carregada." : "Nenhum evento corresponde ao filtro."}
-                description={!error ? "Tente limpar os filtros ou aguarde novos eventos do bot." : undefined}
-                action={!error ? <Button type="button" size="sm" variant="outline" onClick={() => { setCat("all"); setQ(""); }}>Limpar filtros</Button> : undefined}
-              />
-            )}
+            ) : <EmptyState title={error ? "A auditoria não foi carregada." : "Nenhum evento corresponde ao filtro."} description={!error ? "Tente limpar os filtros ou aguarde novos eventos do bot." : undefined} />}
           </div>
         </div>
       </details>

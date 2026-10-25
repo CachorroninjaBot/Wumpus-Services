@@ -314,14 +314,13 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
               </li>;
             })}
           </ul> : <div className="rounded-2xl border border-dashed border-border px-5 py-10 text-center">
+            <BookOpenCheck className="mx-auto size-8 text-muted-foreground" />
             <EmptyState
-              icon={BookOpenCheck}
               title={articles.length ? "Nenhum artigo corresponde" : "Sua base começa aqui"}
-              description={articles.length ? "Mude a busca ou os filtros para encontrar outro artigo." : "Adicione respostas aprovadas para perguntas recorrentes, regras e procedimentos do servidor."}
-              action={!articles.length && !editorOpen ? (
-                <Button size="sm" onClick={startNew}><FilePlus2 className="size-4" />Criar primeiro artigo</Button>
-              ) : undefined}
+              action={!articles.length ? <Button size="sm">Adicionar primeiro artigo</Button> : undefined}
             />
+            <p className="mx-auto mb-4 mt-0 max-w-md text-sm text-muted-foreground">{articles.length ? "Mude a busca ou os filtros para encontrar outro artigo." : "Adicione respostas aprovadas para perguntas recorrentes, regras e procedimentos do servidor."}</p>
+            {!articles.length && !editorOpen ? <Button size="sm" onClick={startNew}><FilePlus2 className="size-4" />Criar primeiro artigo</Button> : null}
           </div>}
         </Card>
 
@@ -330,9 +329,7 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
             <div><p className="mb-1 mt-0 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary"><Sparkles className="size-3.5" />Teste antes de usar</p><h2 className="m-0 text-base font-semibold">Que resposta o bot encontraria?</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">A busca segue o filtro de aprovação e as regras atuais do servidor.</p></div>
             <Input aria-label="Pergunta de teste" value={testQuestion} onChange={(event) => setTestQuestion(event.target.value)} placeholder="Ex.: esqueci a senha, como entro?" />
             {testQuestion.trim().length < minQuestionLength ? <p className="m-0 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">Digite uma pergunta com pelo menos {minQuestionLength} caracteres, como um membro faria no Discord.</p> : testHits.length ? <ol className="m-0 space-y-2 p-0">{testHits.map((article, index) => <li key={article.id} className="list-none rounded-xl bg-muted/60 p-3"><div className="flex flex-wrap items-center gap-2"><Badge tone={index === 0 ? "primary" : "default"}>{index === 0 ? "Melhor resultado" : `Resultado ${index + 1}`}</Badge><Badge>{article.category || "Geral"}</Badge><span className="ml-auto text-xs text-muted-foreground">Correspondência {Math.round(scoreKnowledgeArticle(article, testQuestion) * 100)}%</span></div><p className="mb-1 mt-2 text-sm font-medium">{article.title}</p><p className="m-0 line-clamp-3 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">{article.body}</p></li>)}</ol> : <p className="m-0 rounded-xl bg-warn/10 px-3 py-2 text-sm text-muted-foreground">Nenhum artigo passou pelo limite de correspondência atual ({Math.round(similarityThreshold * 100)}%). Revise tags, perguntas relacionadas ou conteúdo.</p>}
-            <details className="border-t border-border pt-4">
-              <summary className="cursor-pointer text-sm font-semibold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Comportamento avançado do bot</summary>
-              <div className="mt-4 space-y-4">
+            <div className="space-y-4 border-t border-border pt-4">
               <h3 className="m-0 text-sm font-semibold">Como o bot responde</h3>
               <EditorField id="knowledge-channel" label="Canal de perguntas">
                 <DiscordSelect id="knowledge-channel" kind="text" value={String(kcfg.config.answerChannelId ?? "")} onChange={(answerChannelId) => updateConfig("knowledge", { answerChannelId })} placeholder="Selecione um canal" />
@@ -350,8 +347,7 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
               <EditorField id="max-articles" label="Artigos de contexto por resposta"><Input id="max-articles" type="number" min={1} max={10} defaultValue={maxArticlesPerSearch} onBlur={(event) => updateConfig("knowledge", { maxArticlesPerSearch: Math.max(1, Math.min(10, Number(event.target.value) || 1)) })} /></EditorField>
               <EditorField id="knowledge-cooldown" label="Intervalo entre respostas (segundos)"><Input id="knowledge-cooldown" type="number" min={0} max={3600} defaultValue={Number(kcfg.config.cooldownSeconds ?? 20)} onBlur={(event) => updateConfig("knowledge", { cooldownSeconds: Math.max(0, Math.min(3600, Number(event.target.value) || 0)) })} /></EditorField>
               <div className="flex items-start justify-between gap-3"><div><Label htmlFor="knowledge-logs">Registrar buscas na auditoria</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">Inclui o texto da pergunta e os artigos usados nos logs.</p></div><Switch id="knowledge-logs" checked={Boolean(kcfg.config.logSearches)} onCheckedChange={(value) => updateConfig("knowledge", { logSearches: value })} /></div>
-              </div>
-            </details>
+            </div>
           </Card>
         </div>
       </div>

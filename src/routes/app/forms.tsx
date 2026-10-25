@@ -120,7 +120,6 @@ function FormsPage() {
   const setFieldsInStore = useWumpus((state) => state.setFormFields);
   const formsAllowed = planAllows(guild.plan, "forms");
   const aiAllowed = planAllows(guild.plan, "ai") && Boolean(fcfg.config.useAiPreReview);
-  const { publish: publishPanel } = usePublishPanel(gid);
 
   const savedFields = Array.isArray(fcfg.config.fields) ? fcfg.config.fields as FormFieldConfig[] : [];
   const fields: FormFieldConfig[] = savedFields.length
@@ -400,14 +399,15 @@ function FormsPage() {
                   );
                 }) : (
                   <div className="px-5 py-10">
+                    <Inbox className="mb-3 size-5 text-primary" />
                     <EmptyState
-                      icon={Inbox}
                       title={submissions.length ? "Nenhuma resposta nesta lista" : "A caixa está pronta"}
-                      description={submissions.length ? "Mude o filtro ou a busca para encontrar outra resposta." : "Publique seu primeiro formulário e as respostas aparecerão aqui para revisão."}
-                      action={!submissions.length ? (
-                        <Button size="sm" onClick={() => setTab("builder")}>Criar primeiro formulário</Button>
-                      ) : undefined}
+                      action={!submissions.length ? <Button size="sm">Criar primeiro formulário</Button> : undefined}
                     />
+                    <p className="mb-4 mt-1 max-w-[34ch] text-sm leading-6 text-muted-foreground">
+                      {submissions.length ? "Mude o filtro ou a busca para encontrar outra resposta." : "Publique seu primeiro formulário e as respostas aparecerão aqui para revisão."}
+                    </p>
+                    {!submissions.length ? <Button variant="outline" size="sm" onClick={() => setTab("builder")}>Configurar formulário <ChevronRight className="size-4" /></Button> : null}
                   </div>
                 )}
               </div>
