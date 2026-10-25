@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
-function SectionHeading({
+export function SectionHeading({
   title,
   description,
   enabled,
@@ -42,11 +42,11 @@ function SectionHeading({
   );
 }
 
-function SectionTitle({ title }: { title: string }) {
+export function SectionTitle({ title }: { title: string }) {
   return <h3 className="m-0 text-base font-semibold">{title}</h3>;
 }
 
-function ToggleRow({
+export function ToggleRow({
   label,
   description,
   checked,
@@ -74,7 +74,7 @@ function ToggleRow({
   );
 }
 
-function Field({
+export function Field({
   id,
   label,
   children,
@@ -94,7 +94,7 @@ function Field({
   );
 }
 
-function NumberField({
+export function NumberField({
   id,
   label,
   value,
@@ -130,7 +130,7 @@ function NumberField({
   );
 }
 
-function ListField({
+export function ListField({
   id,
   label,
   hint,
@@ -224,7 +224,7 @@ function ListField({
   );
 }
 
-function ModuleStatusRow({
+export function ModuleStatusRow({
   label,
   detail,
   enabled,
@@ -254,7 +254,7 @@ function ModuleStatusRow({
   );
 }
 
-function ReadinessRow({
+export function ReadinessRow({
   label,
   detail,
   status,
@@ -290,7 +290,7 @@ function ReadinessRow({
   );
 }
 
-function BotConnectionStatus({
+export function BotConnectionStatus({
   readiness,
   error,
 }: {
@@ -323,7 +323,7 @@ function BotConnectionStatus({
   );
 }
 
-function PermissionStatus({
+export function PermissionStatus({
   label,
   value,
   botStatus,
@@ -347,7 +347,7 @@ function PermissionStatus({
   );
 }
 
-function PermissionCheckInline({
+export function PermissionCheckInline({
   label,
   value,
   botStatus,
@@ -374,7 +374,7 @@ function PermissionCheckInline({
   );
 }
 
-function CheckLine({ ok, label }: { ok: boolean; label: string }) {
+export function CheckLine({ ok, label }: { ok: boolean; label: string }) {
   return (
     <p
       className={`m-0 flex items-center gap-2 text-sm ${ok ? "text-ok" : "text-muted-foreground"}`}
@@ -389,7 +389,7 @@ function CheckLine({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-function PausedNotice({ name, onResume }: { name: string; onResume: () => void }) {
+export function PausedNotice({ name, onResume }: { name: string; onResume: () => void }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-warn/10 px-3 py-2.5">
       <p className="m-0 text-sm">
@@ -402,7 +402,7 @@ function PausedNotice({ name, onResume }: { name: string; onResume: () => void }
   );
 }
 
-function SecurityEventList({
+export function SecurityEventList({
   events,
   onReview,
   onOpen,
@@ -487,7 +487,7 @@ function SecurityEventList({
   );
 }
 
-function getPresetChanges(
+export function getPresetChanges(
   preset: PresetId,
   automodConfig: Record<string, unknown>,
   securityConfig: Record<string, unknown>,
@@ -514,7 +514,7 @@ function getPresetChanges(
   );
 }
 
-function formatConfigValue(value: unknown): string {
+export function formatConfigValue(value: unknown): string {
   if (typeof value === "boolean") return value ? "ligado" : "desligado";
   if (Array.isArray(value)) return value.length ? value.join(", ") : "lista limpa";
   if (typeof value === "number") return String(value);
@@ -526,7 +526,7 @@ function formatConfigValue(value: unknown): string {
   return String(value);
 }
 
-function severityLabel(severity: string) {
+export function severityLabel(severity: string) {
   return severity === "critical" ? "Crítico" : severity === "warning" ? "Aviso" : "Informativo";
 }
 function actionLabel(action?: string) {
@@ -549,4 +549,3 @@ function channelLabel(channels: Array<{ id: string; name: string }>, id: string)
     : "Canal não encontrado na lista sincronizada";
 }
 
-export default ProtectPage;
