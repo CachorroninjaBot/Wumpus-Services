@@ -4,6 +4,8 @@ import { Activity, ArrowRight, AlertTriangle, CheckCircle2, Clock3, ClipboardChe
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/page-header";
+import { Notice } from "@/components/ui/notice";
 import { ticketSla } from "@/lib/wumpus/engine";
 import { useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
@@ -81,18 +83,16 @@ function Overview() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-5">
-      <header className="relative isolate overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-border sm:p-6"><div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-20 -z-10 size-56 rounded-full bg-primary/10 blur-3xl" /><div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="m-0 text-xs font-semibold uppercase tracking-[0.14em] text-primary">Visão geral</p>
-          <h1 className="m-0 mt-1 text-2xl font-semibold tracking-tight">O que precisa de atenção?</h1>
-          <p className="m-0 mt-1 text-sm text-muted-foreground">Acompanhe a operação do seu servidor sem procurar em vários lugares.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+      <PageHeader
+        title="O que precisa de atenção?"
+        description="Acompanhe a operação do seu servidor sem procurar em vários lugares."
+        actions={
+          <>
           {lockdown ? <Badge tone="danger">Lockdown ativo</Badge> : null}
           <Link to="/app/tickets"><Button size="sm">Abrir fila <ArrowRight className="size-4" /></Button></Link>
-        </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {/* Barra de status do bot */}
       <div className="grid gap-2 rounded-xl border border-border bg-card px-3 py-3 text-sm sm:grid-cols-3" aria-label="Estado do bot e das publicações">
@@ -111,7 +111,7 @@ function Overview() {
 
       {/* #3 — Feedback de última atualização */}
       <div className="flex items-center justify-between">
-        {statusError ? <p className="m-0 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">Não foi possível atualizar o estado: {statusError}</p> : <span />}
+        {statusError ? <Notice tone="error" className="m-0">Não foi possível atualizar o estado: {statusError}</Notice> : <span />}
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
           {loading ? (
             <><span className="inline-block size-2 animate-pulse rounded-full bg-warn" />Atualizando…</>
@@ -129,10 +129,7 @@ function Overview() {
       </dl>
 
       {breaches.length > 0 ? (
-        <Card className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="grid size-10 place-items-center rounded-xl bg-destructive/15 text-destructive">
-            <AlertTriangle className="size-5" />
-          </div>
+        <Notice tone="warning" className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="flex-1">
             <p className="m-0 font-medium">Há atendimento fora do SLA de {String(tcfg.config.slaWarningMinutes)} min</p>
             <p className="m-0 text-sm text-muted-foreground">
@@ -145,16 +142,15 @@ function Overview() {
               <ArrowRight className="size-4" />
             </Button>
           </Link>
-        </Card>
+        </Notice>
       ) : null}
 
-      <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+      <section className="dashboard-ticket-queue max-h-[28rem] overflow-y-auto rounded-xl border border-border bg-card p-4 sm:p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div><h2 className="m-0 text-lg font-semibold">Próximos atendimentos</h2><p className="m-0 mt-1 text-sm text-muted-foreground">Acompanhe responsável, prioridade e prazo numa única leitura.</p></div>
           <Link to="/app/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-primary">Abrir fila completa <ArrowRight className="size-4" /></Link>
         </div>
-        {/* #5 — text-[11px] → text-xs (12px mínimo) */}
-        <div className="hidden grid-cols-[90px_minmax(180px,1fr)_130px_140px_100px_110px] gap-3 border-b border-border pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground lg:grid">
+        <div className="sticky top-0 z-10 hidden grid-cols-[90px_minmax(180px,1fr)_130px_140px_100px_110px] gap-3 border-b border-border bg-card pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground lg:grid">
           <span>Registro</span><span>Assunto</span><span>Departamento</span><span>Responsável</span><span>Prioridade</span><span>Prazo</span>
         </div>
         <ul className="m-0 divide-y divide-border p-0">
@@ -197,12 +193,9 @@ function Overview() {
         </ul>
       </Card>
 
-      <section aria-labelledby="next-actions-title" className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+      <section aria-labelledby="next-actions-title" className="rounded-xl border border-border bg-card p-4 sm:p-5">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <p className="m-0 text-xs font-semibold uppercase tracking-[0.12em] text-primary">Próximo passo</p>
-            <h2 id="next-actions-title" className="m-0 mt-1 text-lg font-semibold">Ações para manter a operação fluindo</h2>
-          </div>
+          <h2 id="next-actions-title" className="m-0 text-lg font-semibold">Ações para manter a operação fluindo</h2>
           <span className="text-xs text-muted-foreground">Atalhos para os módulos mais usados</span>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -230,7 +223,7 @@ function Overview() {
 
 function Summary({ icon, label, value, hint, warn }: { icon: React.ReactNode; label: string; value: string; hint: string; warn?: boolean }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 shadow-border transition-transform hover:-translate-y-0.5">
+    <div className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-3">
         <dt className="truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</dt>
         <span className={warn ? "text-destructive" : "text-primary"} aria-hidden="true">{icon}</span>

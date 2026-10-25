@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { PageHeader } from "@/components/page-header";
 import { useEffect, useState } from "react";
 import { MemberAvatar } from "@/components/brand";
 import { Card } from "@/components/ui/card";
@@ -6,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Label, NativeSelect } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Notice } from "@/components/ui/notice";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { getGuildStaffMonitoring } from "@/lib/wumpus/runtime-store";
 import type { StaffMonitoringResult } from "@/lib/wumpus/staff-monitoring";
@@ -110,9 +112,7 @@ function StaffProfile({
       </header>
 
       {error ? (
-        <p className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn" role="alert">
-          Não foi possível atualizar os dados. Exibindo a última sincronização disponível. {error}
-        </p>
+        <Notice tone="warning" className="m-0">Não foi possível atualizar os dados. Exibindo a última sincronização disponível. {error}</Notice>
       ) : loading ? (
         <p className="m-0 text-sm text-muted-foreground" role="status">
           Atualizando as estatísticas da equipe…
@@ -456,15 +456,11 @@ function StaffPage() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="m-0 text-xl font-semibold tracking-tight">Equipe</h1>
-          <p className="m-0 mt-1 max-w-3xl text-sm text-muted-foreground">
-            Acompanhe trabalho registrado pelo bot. Presença online e tempo em voz não são usados
-            como medida de produtividade.
-          </p>
-        </div>
-        <div className="flex items-end gap-2">
+      <PageHeader
+        title="Equipe"
+        description="Acompanhe trabalho registrado pelo bot. Presença online e tempo em voz não são usados como medida de produtividade."
+        actions={
+          <>
           <div>
             <Label htmlFor="staff-window">Período de atividade</Label>
             <NativeSelect
@@ -480,37 +476,34 @@ function StaffPage() {
           <Button variant="outline" size="sm" disabled={loading} onClick={refresh}>
             {loading ? "Atualizando…" : "Atualizar"}
           </Button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
-      {error ? (
-        <p className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Notice tone="warning" className="m-0">{error}</Notice> : null}
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Card className="p-4">
+      <section aria-label="Resumo da equipe" className="divide-y divide-border rounded-xl border border-border bg-card px-4 sm:grid sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <div className="py-3 sm:px-4">
           <p className="m-0 text-xs text-muted-foreground">Membros nos cargos da equipe</p>
           <p className="mt-1 mb-0 font-mono-num text-2xl font-semibold">
             {loading ? "—" : (monitoring?.summary.staffCount ?? 0)}
           </p>
-        </Card>
-        <Card className="p-4">
+        </div>
+        <div className="py-3 sm:px-4">
           <p className="m-0 text-xs text-muted-foreground">Atendimentos abertos</p>
           <p className="mt-1 mb-0 font-mono-num text-2xl font-semibold">
             {loading ? "—" : (monitoring?.summary.openTickets ?? 0)}
           </p>
-        </Card>
-        <Card className="p-4">
+        </div>
+        <div className="py-3 sm:px-4">
           <p className="m-0 text-xs text-muted-foreground">Sem responsável · fora do SLA</p>
           <p className="mt-1 mb-0 font-mono-num text-2xl font-semibold">
             {loading
               ? "—"
               : `${monitoring?.summary.unassignedTickets ?? 0} · ${monitoring?.summary.overdueTickets ?? 0}`}
           </p>
-        </Card>
-      </div>
+        </div>
+      </section>
 
       <section className="space-y-3 rounded-xl border border-border p-4">
         <div>

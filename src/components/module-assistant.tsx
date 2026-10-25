@@ -426,7 +426,7 @@ export function ModuleAssistant() {
   };
 
   return <>
-    {open ? <section aria-label="Ajuda do Wumpus" className="fixed bottom-[5.5rem] right-4 z-40 flex h-[min(70vh,36rem)] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_18px_60px_-18px_rgb(0_0_0/0.65)] sm:bottom-24 sm:right-6">
+    {open ? <section aria-label="Ajuda do Wumpus" className="fixed bottom-[calc(9rem+env(safe-area-inset-bottom))] right-4 z-40 flex h-[min(70vh,36rem)] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_18px_60px_-18px_rgb(0_0_0/0.65)] sm:bottom-24 sm:right-6">
       <header className="flex items-center gap-3 border-b border-border px-4 py-3">
         {showHistory ? (
           <button type="button" onClick={() => setShowHistory(false)} aria-label="Voltar para a conversa" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"><ChevronLeft className="size-4" /></button>
@@ -478,8 +478,8 @@ export function ModuleAssistant() {
         </div> : messages.map((message, index) => <div key={message.id ?? `${index}-${message.role}`} className={`max-w-[92%] rounded-2xl px-3 py-2.5 text-sm leading-6 ${message.role === "user" ? "ml-auto whitespace-pre-wrap rounded-br-md bg-primary text-primary-foreground" : message.role === "system" ? "mx-auto bg-muted/70 text-center text-xs text-muted-foreground" : message.role === "staff" ? "rounded-bl-md bg-secondary text-foreground" : "rounded-bl-md bg-muted text-foreground"}`}>
           {message.role === "staff" ? <p className="mb-1 mt-0 text-xs font-semibold text-primary">Equipe de atendimento</p> : null}
           {message.role === "assistant" || message.role === "staff" ? <MarkdownContent content={message.content} /> : message.content}
-          {message.delivery === "queued" ? <span className="mt-1 block text-[11px] opacity-70">Enviando para a equipe…</span> : null}
-          {message.delivery === "failed" ? <span className="mt-1 block text-[11px] text-destructive">Não foi possível enviar ao atendimento.</span> : null}
+          {message.delivery === "queued" ? <span className="mt-1 block text-xs opacity-70">Enviando para a equipe…</span> : null}
+          {message.delivery === "failed" ? <span className="mt-1 block text-xs text-destructive">Não foi possível enviar ao atendimento.</span> : null}
         </div>)}
         {busy ? <p className="m-0 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Entendendo o contexto…</p> : null}
         {error ? <p role="alert" className="m-0 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
@@ -507,10 +507,10 @@ export function ModuleAssistant() {
                     <div className="flex justify-between gap-1" role="group" aria-label="Avalie seu atendimento de uma a cinco estrelas">
                       {[1, 2, 3, 4, 5].map((rating) => <button key={rating} type="button" onClick={() => void submitRating(rating)} disabled={busy} aria-label={`${rating} estrelas — ${["", "Muito ruim", "Ruim", "Regular", "Bom", "Excelente"][rating]}`} className="group flex min-w-0 flex-1 flex-col items-center gap-1.5 rounded-lg border border-transparent px-1 py-2 text-muted-foreground transition-colors hover:border-amber-500/30 hover:bg-amber-500/10 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60">
                         <span aria-hidden="true" className="text-2xl leading-none text-amber-500 transition-transform group-hover:scale-110">★</span>
-                        <span className="text-[10px] font-medium leading-none text-muted-foreground group-hover:text-foreground">{rating}</span>
+                        <span className="text-xs font-medium leading-none text-muted-foreground group-hover:text-foreground">{rating}</span>
                       </button>)}
                     </div>
-                    <div className="flex justify-between px-1 text-[11px] text-muted-foreground">
+                    <div className="flex justify-between px-1 text-xs text-muted-foreground">
                       <span>Muito ruim</span><span>Excelente</span>
                     </div>
                     {busy ? <p role="status" className="m-0 text-xs text-muted-foreground">Enviando sua avaliação…</p> : null}
@@ -538,7 +538,7 @@ export function ModuleAssistant() {
           <textarea ref={inputRef} value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} rows={2} maxLength={2000} aria-label={handoff.status === "open" ? "Mensagem para o atendimento humano" : "Sua pergunta"} placeholder={handoff.status === "open" ? "Escreva para a equipe de atendimento…" : "Descreva o que você quer fazer…"} disabled={handoff.status === "queued" || handoff.status === "closed" || handoff.status === "requesting"} className="max-h-28 min-h-10 min-w-0 flex-1 resize-y bg-transparent px-1 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60" />
           <Button type="submit" size="icon" aria-label={handoff.status === "open" ? "Enviar mensagem ao atendimento" : "Enviar pergunta"} disabled={!question.trim() || busy || handoff.status === "queued" || handoff.status === "closed" || handoff.status === "requesting"}><Send className="size-4" /></Button>
         </div>
-        <p className="mb-0 mt-2 text-[11px] text-muted-foreground">{handoff.status === "open" ? "Sua mensagem será enviada à equipe pelo tópico do fórum." : "A IA orienta usando a seção e as configurações atuais. Ela não altera nada."}</p>
+        <p className="mb-0 mt-2 text-xs text-muted-foreground">{handoff.status === "open" ? "Sua mensagem será enviada à equipe pelo tópico do fórum." : "A IA orienta usando a seção e as configurações atuais. Ela não altera nada."}</p>
       </form> : null}
     </section> : null}
     {historyContextMenu ? <div
@@ -592,8 +592,8 @@ export function ModuleAssistant() {
         </div>
       </DialogContent>
     </Dialog>
-    <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "Fechar ajuda do Wumpus" : "Pedir ajuda à IA"} title="Pedir ajuda à IA" className="fixed bottom-4 right-4 z-40 flex h-12 items-center gap-2 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-[0_8px_28px_-10px_rgb(0_0_0/0.65)] transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:bottom-6 sm:right-6">
-      {open ? <X className="size-4" /> : <MessageCircle className="size-4" />}<span>{open ? "Fechar" : "Ajuda com IA"}</span>
+    <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "Fechar ajuda do Wumpus" : "Pedir ajuda à IA"} title={open ? "Fechar ajuda do Wumpus" : "Pedir ajuda à IA"} className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-4 z-50 flex size-12 items-center justify-center rounded-full bg-primary p-0 text-primary-foreground shadow-[0_8px_28px_-10px_rgb(0_0_0/0.65)] transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:bottom-6 sm:right-6">
+      {open ? <X className="size-5" /> : <MessageCircle className="size-5" />}
     </button>
   </>;
 }

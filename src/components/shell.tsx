@@ -139,6 +139,8 @@ function ServerRail() {
     }
   };
 
+  if (guilds.length < 2) return null;
+
   return (
     <aside aria-label="Servidores" className="hidden w-[4.5rem] shrink-0 flex-col items-center gap-2 border-r border-border bg-muted/35 py-2 lg:flex lg:py-3">
       <Link to="/app" aria-label="Início do Wumpus" className="grid size-12 place-items-center rounded-2xl transition-colors hover:bg-background">
@@ -185,8 +187,8 @@ function ServerRail() {
                 if (target) reorder(guild.id, target.id);
               }}
               className={cn(
-                "server-rail-item group relative grid size-11 shrink-0 place-items-center rounded-[16px] cursor-grab transition-all duration-150 hover:rounded-[12px] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:cursor-grabbing lg:size-12 lg:rounded-[18px]",
-                active && "rounded-[12px] bg-background shadow-border lg:rounded-[14px]",
+                "server-rail-item group relative grid size-11 shrink-0 place-items-center rounded-xl cursor-grab transition-colors duration-150 hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:cursor-grabbing lg:size-12",
+                active && "bg-background shadow-border",
                 isDragging && "opacity-40 scale-95",
                 isDropTarget && "ring-2 ring-primary/60 ring-offset-1 ring-offset-background",
               )}
@@ -194,7 +196,7 @@ function ServerRail() {
               <span aria-hidden="true" className={cn("absolute -left-1.5 w-1 rounded-r-full bg-primary transition-all", active ? "h-7 lg:h-8" : "h-2 opacity-0")} />
               <GuildBadge tag={guild.tag ?? guild.name.slice(0, 2)} iconUrl={guild.iconUrl} size={34} />
               <span aria-hidden="true" className="pointer-events-none absolute inset-0 grid place-items-center rounded-[inherit] bg-black/20 opacity-0 transition-opacity group-hover:opacity-100">
-                <span className="text-[10px] text-white">⋮⋮</span>
+                <span className="text-xs text-white">⋮⋮</span>
               </span>
             </button>
           );
@@ -218,7 +220,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
         return (
           <section key={group}>
             {group !== "home" ? (
-              <p className="mb-1.5 px-3 text-[10px] font-semibold tracking-wide text-muted-foreground">{groupLabels[group]}</p>
+              <p className="mb-1.5 px-3 text-xs font-semibold text-muted-foreground">{groupLabels[group]}</p>
             ) : null}
             <div className="flex flex-col gap-1">
               {items.map((item) => {
@@ -432,6 +434,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 <BrandMark size={34} /><strong className="text-[17px]">Wumpus</strong>
               </div>
               <div className="px-3 py-4"><GuildPicker id="guild-picker-menu" onChange={() => setMenuOpen(false)} /></div>
+              <a href={brand.invite} target="_blank" rel="noreferrer" className="mx-3 mb-4 flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:bg-muted lg:hidden">
+                <Plus className="size-4" /> Adicionar a outro servidor
+              </a>
               <div className="px-3"><NavList onNavigate={() => setMenuOpen(false)} /></div>
             </SheetContent>
           </Sheet>
@@ -448,9 +453,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <Button variant="ghost" size="icon" className="lg:size-9" aria-label={`Tema atual ${theme}; mudar para ${nextTheme}`} title={`Tema ${theme}`} onClick={() => setTheme(nextTheme)}>
             {theme === "dark" ? <Moon className="size-4" /> : theme === "light" ? <Sun className="size-4" /> : <Monitor className="size-4" />}
           </Button>
-          <a href={brand.invite} target="_blank" rel="noreferrer" className="hidden min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:bg-muted sm:inline-flex">
-            <Plus className="size-4" /> Adicionar a outro servidor
-          </a>
           <div className="order-last w-full pb-3 lg:hidden">
             <GuildPicker id="guild-picker-mobile-header" compact />
           </div>

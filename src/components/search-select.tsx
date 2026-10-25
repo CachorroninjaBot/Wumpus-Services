@@ -41,9 +41,9 @@ export function SearchSelect({
       className={cn("flex min-h-11 w-full items-center gap-3 rounded-xl border border-input bg-card px-3 text-left text-foreground outline-none transition-[border-color,box-shadow,background] hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50", open && "border-primary/60", className)}>
       {selected?.icon ? <span className="shrink-0">{selected.icon}</span> : null}
       <span className="min-w-0 flex-1">
-        {eyebrow ? <span className="block text-[11px] font-medium text-muted-foreground">{eyebrow}</span> : null}
+        {eyebrow ? <span className="block text-xs font-medium text-muted-foreground">{eyebrow}</span> : null}
         <span className={cn("block truncate text-sm font-semibold", !selected && "font-medium text-muted-foreground")}>{selected?.label ?? placeholder}</span>
-        {selected?.description ? <span className="block truncate text-[11px] text-muted-foreground">{selected.description}</span> : null}
+        {selected?.description ? <span className="block truncate text-xs text-muted-foreground">{selected.description}</span> : null}
       </span>
       <ChevronDown aria-hidden="true" className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
     </button>
@@ -73,7 +73,7 @@ export function SearchSelect({
           {option.id === value ? <Check aria-hidden="true" className="size-4 shrink-0 text-primary" /> : null}
         </button>) : <p className="m-0 px-3 py-5 text-center text-sm text-muted-foreground">Nenhum resultado para “{query}”.</p>}
       </div>
-      <p className="m-0 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">{filtered.length} {filtered.length === 1 ? "opção" : "opções"}</p>
+      <p className="m-0 border-t border-border px-3 py-2 text-xs text-muted-foreground">{filtered.length} {filtered.length === 1 ? "opção" : "opções"}</p>
     </div> : null}
   </div>;
 }

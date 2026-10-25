@@ -516,7 +516,7 @@ function ProtectPage() {
               <Icon className="mr-2 size-4" aria-hidden="true" />
               {label}
               {id === "incidents" && openEvents > 0 ? (
-                <span className="ml-2 rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive">
+                <span className="ml-2 rounded-full bg-destructive/15 px-1.5 py-0.5 text-xs text-destructive">
                   {openEvents}
                 </span>
               ) : null}

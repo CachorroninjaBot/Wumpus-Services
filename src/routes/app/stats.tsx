@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/input";
+import { Notice } from "@/components/ui/notice";
+import { Section } from "@/components/ui/section";
 import { getGuildActivity, getGuildTickets } from "@/lib/wumpus/runtime-store";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { useModule, useWumpus } from "@/lib/wumpus/store";
@@ -80,9 +82,7 @@ function StatsPage() {
     <div className="mx-auto flex max-w-7xl flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="mb-1 mt-0 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary"><Activity className="size-4" />Analisar</p>
           <PageHeader title="Estatísticas" description="Métricas de atendimento e atividade do servidor." />
-          <p className="mb-0 mt-1 text-sm text-muted-foreground">Entenda o ritmo do atendimento e encontre o que precisa de atenção.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <NativeSelect aria-label="Período das estatísticas" value={period} onChange={(event) => setPeriod(Number(event.target.value) as Period)} className="h-10 w-auto min-w-36">
@@ -98,8 +98,8 @@ function StatsPage() {
           {activity ? <><Badge tone={activity.bot.status === "online" ? "ok" : activity.bot.status === "offline" ? "warn" : "default"}>{activity.bot.status === "online" ? "Bot conectado" : activity.bot.status === "offline" ? "Bot sem sinal" : "Bot não localizado"}</Badge><span>{activity.bot.lastSeenAt ? `Último sinal ${formatRelative(activity.bot.lastSeenAt)}` : "Sem sinal recente"} · dados consultados {formatTime(activity.refreshedAt)}</span></> : loading ? "Buscando dados do bot…" : "Aguardando dados"}
         </span>
       </div>
-      {error ? <p role="alert" className="m-0 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}{activity ? " Os números exibidos são da última sincronização bem-sucedida." : ""}</p> : null}
-      {activity?.bot.status !== "online" && activity ? <p role="note" className="m-0 rounded-xl bg-warn/10 px-3 py-2 text-sm text-muted-foreground">O bot não está enviando atualizações agora. Os dados disponíveis podem estar desatualizados.</p> : null}
+      {error ? <Notice tone="error" className="m-0">{error}{activity ? " Os números exibidos são da última sincronização bem-sucedida." : ""}</Notice> : null}
+      {activity?.bot.status !== "online" && activity ? <Notice tone="warning" className="m-0">O bot não está enviando atualizações agora. Os dados disponíveis podem estar desatualizados.</Notice> : null}
 
       <section aria-label="Indicadores do período" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Kpi icon={<Tickets className="size-4" />} label="Tickets criados" value={range ? String(range.opened) : loading ? "…" : "—"} detail={range && previous ? relativeText(range.opened, previous.opened) : "No período selecionado"} />
@@ -140,10 +140,9 @@ function StatsPage() {
         <Card className="space-y-3 p-4 sm:p-5"><div className="flex items-center gap-2"><Activity className="size-4 text-primary" /><div><h2 className="m-0 text-base font-semibold">Comparação do período</h2><p className="m-0 mt-1 text-sm text-muted-foreground">{period} dias atuais contra os {period} anteriores.</p></div></div><Comparison label="Tickets criados" current={range?.opened ?? null} previous={previous?.opened ?? null} /><Comparison label="Tickets encerrados" current={range?.closed ?? null} previous={previous?.closed ?? null} /><Comparison label="Mediana da 1ª resposta" current={range?.medianResponseMinutes ?? null} previous={previous?.medianResponseMinutes ?? null} unit="min" /><Comparison label="CSAT médio" current={range?.csat ?? null} previous={previous?.csat ?? null} unit="/5" /><Comparison label="Respostas dentro do prazo" current={range?.slaMet ?? null} previous={previous?.slaMet ?? null} unit="%" /><Comparison label="Eventos AutoMod" current={range?.automod ?? null} previous={previous?.automod ?? null} /><Comparison label="Ações de moderação" current={range?.moderation ?? null} previous={previous?.moderation ?? null} /></Card>
       </div>
 
-      <Card className="space-y-3 p-4 sm:p-5">
-        <div><h2 className="m-0 text-base font-semibold">Atividade recente</h2><p className="m-0 mt-1 text-sm text-muted-foreground">Últimos registros importantes do servidor.</p></div>
+      <Section title="Atividade recente" description="Últimos registros importantes do servidor." className="space-y-3 rounded-xl border border-border bg-card p-4 sm:p-5">
         {activity?.recentEvents.length ? <ul className="m-0 divide-y divide-border p-0">{activity.recentEvents.map((event) => <li key={event.id} className="flex flex-wrap items-center gap-2 py-3 first:pt-0 last:pb-0"><Badge tone={event.severity === "critical" || event.severity === "error" ? "danger" : event.severity === "warning" ? "warn" : "default"}>{moduleLabel(event.module)}</Badge><span className="min-w-0 flex-1 text-sm">{eventLabel(event.eventType)}</span><span className="text-xs text-muted-foreground">{formatRelative(event.at)}</span></li>)}</ul> : <p className="m-0 rounded-xl bg-muted/50 p-3 text-sm text-muted-foreground">Ainda não há registros recentes para este servidor.</p>}
-      </Card>
+      </Section>
     </div>
   );
 }

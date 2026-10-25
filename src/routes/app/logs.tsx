@@ -10,6 +10,8 @@ import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { useModule, useWumpus } from "@/lib/wumpus/store";
 import { formatTime } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
+import { SettingRow } from "@/components/ui/setting-row";
+import { Notice } from "@/components/ui/notice";
 
 export const Route = createFileRoute("/app/logs")({ component: LogsPage });
 
@@ -66,40 +68,23 @@ function LogsPage() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <div>
-        <PageHeader title="Auditoria" description="Eventos e ações registradas pelo bot." />
-        <p className="mb-0 mt-1 text-sm text-muted-foreground">Eventos persistidos pelo bot. Atualiza a cada 30 segundos.</p>
+        <PageHeader title="Auditoria" description="Eventos registrados pelo bot. Atualiza a cada 30 segundos." />
       </div>
       <Card className="p-0">
         <h2 className="sr-only">Configurações de auditoria</h2>
-        <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="divide-y divide-border px-5">
           {categories.map(([field, label]) => (
-            <div key={field} className="flex items-center justify-between gap-2">
-              <Label>{label}</Label>
-              <Switch checked={Boolean(lcfg.config[field])} onCheckedChange={(value) => updateConfig("logs", { [field]: value })} />
-            </div>
+            <SettingRow key={field} label={label} control={<Switch aria-label={label} checked={Boolean(lcfg.config[field])} onCheckedChange={(value) => updateConfig("logs", { [field]: value })} />} />
           ))}
           {extendedCategories.map(([field, label]) => (
-            <div key={field} className="flex items-center justify-between gap-2">
-              <Label>{label}</Label>
-              <Switch checked={Boolean(lcfg.config[field])} onCheckedChange={(value) => updateConfig("logs", { [field]: value })} />
-            </div>
+            <SettingRow key={field} label={label} control={<Switch aria-label={label} checked={Boolean(lcfg.config[field])} onCheckedChange={(value) => updateConfig("logs", { [field]: value })} />} />
           ))}
-          <div className="flex items-center justify-between gap-2">
-            <Label>Ignorar mensagens de bots</Label>
-            <Switch checked={Boolean(lcfg.config.ignoreBotMessages)} onCheckedChange={(value) => updateConfig("logs", { ignoreBotMessages: value })} />
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <Label>Formato compacto</Label>
-            <Switch checked={Boolean(lcfg.config.compactMode)} onCheckedChange={(value) => updateConfig("logs", { compactMode: value })} />
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <Label>Mencionar equipe em eventos críticos</Label>
-            <Switch checked={Boolean(lcfg.config.mentionOnCritical)} onCheckedChange={(value) => updateConfig("logs", { mentionOnCritical: value })} />
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <Label>Incluir horário nos logs</Label>
-            <Switch checked={Boolean(lcfg.config.includeTimestamp)} onCheckedChange={(value) => updateConfig("logs", { includeTimestamp: value })} />
-          </div>
+          <SettingRow label="Ignorar mensagens de bots" control={<Switch aria-label="Ignorar mensagens de bots" checked={Boolean(lcfg.config.ignoreBotMessages)} onCheckedChange={(value) => updateConfig("logs", { ignoreBotMessages: value })} />} />
+          <SettingRow label="Formato compacto" control={<Switch aria-label="Formato compacto" checked={Boolean(lcfg.config.compactMode)} onCheckedChange={(value) => updateConfig("logs", { compactMode: value })} />} />
+          <SettingRow label="Mencionar equipe em eventos críticos" control={<Switch aria-label="Mencionar equipe em eventos críticos" checked={Boolean(lcfg.config.mentionOnCritical)} onCheckedChange={(value) => updateConfig("logs", { mentionOnCritical: value })} />} />
+          <SettingRow label="Incluir horário nos logs" control={<Switch aria-label="Incluir horário nos logs" checked={Boolean(lcfg.config.includeTimestamp)} onCheckedChange={(value) => updateConfig("logs", { includeTimestamp: value })} />} />
+        </div>
+        <div className="grid gap-4 border-t border-border p-5 sm:grid-cols-2 lg:grid-cols-3">
           <div className="sm:col-span-2">
             <Label htmlFor="logs-retention">Retenção da auditoria (dias)</Label>
             <Input id="logs-retention" type="number" min={7} max={3650} value={retentionDraft}
@@ -124,7 +109,7 @@ function LogsPage() {
           </span>
         </summary>
         <div className="space-y-3 border-t border-border p-4">
-          {error ? <p role="alert" className="m-0 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+          {error ? <Notice tone="error" className="m-0">{error}</Notice> : null}
           <div className="flex flex-wrap gap-2">
             {cats.map((category) => (
               <button key={category} type="button" onClick={() => setCat(category)}

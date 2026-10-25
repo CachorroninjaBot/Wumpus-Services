@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Check } from "lucide-react";
 import { BrandMark } from "@/components/brand";
-import { DiscordModalPreview, DiscordPanel } from "@/components/discord-panel";
+import { DiscordPanel } from "@/components/discord-panel";
 import { Button } from "@/components/ui/button";
 import { brand, plans as fallbackPlans } from "@/lib/wumpus/brand";
 import { SHARD_STORE } from "@/lib/wumpus/catalog";
@@ -99,13 +99,9 @@ function Home() {
       </header>
 
       <section className="relative overflow-hidden">
-        <div className="noise pointer-events-none absolute inset-0 opacity-60" />
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-14 lg:grid-cols-[1.05fr_0.95fr] lg:py-20">
           <div>
-            <p className="m-0 text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-              Discord · atendimento · proteção
-            </p>
-            <h1 className="mt-3 mb-4 max-w-xl text-4xl leading-[1.05] font-semibold tracking-tight sm:text-5xl">
+            <h1 className="mt-0 mb-4 max-w-xl text-4xl leading-[1.05] font-semibold tracking-tight sm:text-5xl">
               {brand.tagline}
             </h1>
             <p className="m-0 max-w-lg text-base leading-relaxed text-muted-foreground sm:text-lg">
@@ -143,33 +139,29 @@ function Home() {
 
       <section id="modulos" className="border-t border-border">
         <div className="mx-auto max-w-6xl px-4 py-16">
-          <p className="m-0 text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-            O que o Wumpus fecha
-          </p>
-          <h2 className="mt-2 mb-8 max-w-xl text-3xl font-semibold tracking-tight">
+          <h2 className="mt-0 mb-8 max-w-xl text-3xl font-semibold tracking-tight">
             Painel por resultado. Avançado fica escondido.
           </h2>
-          <div className="grid gap-x-8 lg:grid-cols-2">
+          <div className="grid gap-x-12 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
             <Feature
               title="Tickets de verdade"
               body="Departamentos, SLA, prioridade, transcrição no encerramento, feedback e métricas por atendente."
               preview={<DiscordPanel channel="abrir-atendimento" title="Central de atendimento" description="Escolha um departamento para falar com a equipe." buttons={["Suporte", "Compras", "Denúncias"]} />}
             />
-            <Feature
-              title="Candidaturas com modal"
-              body="Formulário no Discord, cooldown e aprovação ou recusa com um motivo visível."
-              preview={<DiscordModalPreview title="Candidatura à equipe" questions={["Nome ou apelido", "Por que quer entrar?", "Experiência relevante"]} />}
-            />
-            <Feature
-              title="Moderação com histórico"
-              body="Advertências, silenciamento, expulsão e banimento registrados para a equipe."
-              preview={<DiscordPanel channel="moderação" title="Ação registrada" description="O histórico acompanha o motivo, a evidência e as medidas anteriores." buttons={["Advertir", "Silenciar", "Revisar caso"]} />}
-            />
-            <Feature
-              title="Proteção configurável"
-              body="AutoMod e resposta a raids com níveis graduais; sem tomar ações destrutivas sem autorização."
-              preview={<DiscordPanel channel="segurança" title="Proteção da comunidade" description="Revise alertas e escolha a resposta adequada para o seu servidor." buttons={["Ver alertas", "Lockdown"]} />}
-            />
+            <ul className="m-0 divide-y divide-border border-t border-border p-0">
+              <li className="list-none py-5">
+                <h3 className="m-0 text-base font-semibold">Candidaturas com modal</h3>
+                <p className="m-0 mt-1 text-sm leading-relaxed text-muted-foreground">Formulário no Discord, cooldown e aprovação ou recusa com um motivo visível.</p>
+              </li>
+              <li className="list-none py-5">
+                <h3 className="m-0 text-base font-semibold">Moderação com histórico</h3>
+                <p className="m-0 mt-1 text-sm leading-relaxed text-muted-foreground">Advertências, silenciamento, expulsão e banimento registrados para a equipe.</p>
+              </li>
+              <li className="list-none py-5">
+                <h3 className="m-0 text-base font-semibold">Proteção configurável</h3>
+                <p className="m-0 mt-1 text-sm leading-relaxed text-muted-foreground">AutoMod e resposta a raids em níveis graduais, sem ações destrutivas sem autorização.</p>
+              </li>
+            </ul>
           </div>
         </div>
       </section>
@@ -216,27 +208,6 @@ function Home() {
         </div>
       </section>
 
-      <section aria-labelledby="bot-status-title" className="border-t border-border">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 sm:flex-row sm:items-center">
-          <div className={`size-2.5 shrink-0 rounded-full ${health?.status === "online" ? "bg-ok" : health?.status === "offline" ? "bg-destructive" : "bg-muted-foreground"}`} />
-          <div className="min-w-0 flex-1">
-            <h2 id="bot-status-title" className="m-0 text-base font-semibold">Status do Wumpus</h2>
-            <p className="m-0 text-sm text-muted-foreground">
-              {healthError
-                ? "Não foi possível consultar o monitor de saúde."
-                : health?.status === "online"
-                  ? `Online · ${health.guildCount ?? "—"} servidores conectados · atualizado ${health.lastSeenAt ? formatRelative(health.lastSeenAt) : "agora"}`
-                  : health?.status === "offline"
-                    ? `Sem heartbeat recente${health.lastSeenAt ? ` · visto ${formatRelative(health.lastSeenAt)}` : ""}`
-                    : "Status ainda não disponível."}
-            </p>
-          </div>
-          {health?.pingMs !== null && health?.pingMs !== undefined ? (
-            <span className="text-sm text-muted-foreground">latência {health.pingMs} ms</span>
-          ) : null}
-        </div>
-      </section>
-
       <section id="faq" className="border-t border-border">
         <div className="mx-auto max-w-3xl px-4 py-16">
           <h2 className="mt-0 mb-6 text-3xl font-semibold tracking-tight">Perguntas diretas</h2>
@@ -254,6 +225,22 @@ function Home() {
       </section>
 
       <footer className="border-t border-border">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 border-b border-border px-4 py-4 text-sm text-muted-foreground">
+          <span className={`size-2.5 shrink-0 rounded-full ${health?.status === "online" ? "bg-ok" : health?.status === "offline" ? "bg-destructive" : "bg-muted-foreground"}`} />
+          <span className="min-w-0 flex-1">
+            <strong className="font-medium text-foreground">Status do Wumpus:</strong>{" "}
+            {healthError
+              ? "não foi possível consultar o monitor."
+              : health?.status === "online"
+                ? `online · ${health.guildCount ?? "—"} servidores · atualizado ${health.lastSeenAt ? formatRelative(health.lastSeenAt) : "agora"}`
+                : health?.status === "offline"
+                  ? `sem heartbeat recente${health.lastSeenAt ? ` · visto ${formatRelative(health.lastSeenAt)}` : ""}`
+                  : "ainda não disponível."}
+          </span>
+          {health?.pingMs !== null && health?.pingMs !== undefined ? (
+            <span className="hidden shrink-0 sm:inline">latência {health.pingMs} ms</span>
+          ) : null}
+        </div>
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center">
           <span>
             {brand.name} · {brand.legal}

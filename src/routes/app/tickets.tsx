@@ -7,6 +7,7 @@ import { DiscordPanel, DiscordModalPreview } from "@/components/discord-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Notice } from "@/components/ui/notice";
 import { Dialog, DialogContent, DialogDesc, DialogTitle } from "@/components/ui/dialog";
 import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -23,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MarkdownContent } from "@/components/markdown-content";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
+import { NumberField } from "@/components/protect/helpers";
 
 export const Route = createFileRoute("/app/tickets")({ component: TicketsPage });
 
@@ -227,6 +229,7 @@ function TicketsPage() {
   const [quickFilter, setQuickFilter] = useState<"all" | "mine" | "unassigned" | "overdue" | "urgent">("all");
   const [selectedId, setSelectedId] = useState<string | null>(tickets[0]?.id ?? null);
   const [showTicketOnMobile, setShowTicketOnMobile] = useState(false);
+  const [compactQueue, setCompactQueue] = useState(false);
   const [reply, setReply] = useState("");
   const [internalNote, setInternalNote] = useState(false);
   const [transferStaffInput, setTransferStaffInput] = useState("");
@@ -477,13 +480,13 @@ function TicketsPage() {
         </TabsList>
         <TabsContent value="queue" className="mt-4 space-y-4">
 
-      <p role="note" className="m-0 rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
+      <Notice tone="info" className="m-0">
         O bot executa as ações no Discord e confirma quando conclui.
-      </p>
-      {ticketLoadError ? <p role="alert" className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn">{ticketLoadError}</p> : null}
+      </Notice>
+      {ticketLoadError ? <Notice tone="warning" className="m-0">{ticketLoadError}</Notice> : null}
 
       {!tcfg.enabled ? (
-        <p className="m-0 rounded-xl bg-warn/15 px-3 py-2 text-sm text-warn">Atendimento pausado neste servidor.</p>
+        <Notice tone="warning" className="m-0">Atendimento pausado neste servidor.</Notice>
       ) : null}
       {notice ? (
         <p
@@ -578,6 +581,17 @@ function TicketsPage() {
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
         <Card className={cn("max-h-[70vh] overflow-y-auto p-2", showTicketOnMobile && "hidden lg:block")}>
+          <div className="flex justify-end px-2 pb-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              aria-pressed={compactQueue}
+              onClick={() => setCompactQueue((value) => !value)}
+            >
+              {compactQueue ? "Modo confortável" : "Modo compacto"}
+            </Button>
+          </div>
           {list.length === 0 ? (
             <EmptyState
               title={!ticketsLoaded ? "Carregando atendimentos…" : ticketLoadError ? "Não foi possível carregar a fila" : tickets.length === 0 ? "Sua fila começa aqui" : "Nenhum atendimento encontrado"}
@@ -598,19 +612,22 @@ function TicketsPage() {
                     setAi(null);
                   }}
                   className={cn(
-                    "flex w-full flex-col gap-1 rounded-xl px-3 py-2.5 text-left",
+                    "flex w-full text-left",
+                    compactQueue
+                      ? "min-h-11 flex-row items-center gap-2 rounded-lg px-2 py-1.5"
+                      : "flex-col gap-1 rounded-xl px-3 py-2.5",
                     ticket?.id === t.id ? "bg-muted" : "hover:bg-muted/50",
                   )}
                 >
-                  <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                  <span className={cn("flex flex-wrap items-center gap-1.5 text-sm font-medium", compactQueue && "shrink-0")}>
                     #{t.number}
                     <Badge tone={priorityTone[t.priority]}>{priorityLabel[t.priority]}</Badge>
                     <Badge tone={slaTone[sla]}>{sla === "breach" ? "SLA vencido" : sla === "warning" ? "SLA atenção" : "SLA no prazo"}</Badge>
                     {t.waitingOn ? <Badge tone="warn">{t.waitingOn === "user" ? "Aguardando usuário" : "Aguardando equipe"}</Badge> : null}
                     {shouldAutoClose(t, tcfg.config) ? <Badge tone="warn">ocioso</Badge> : null}
                   </span>
-                  <span className="truncate text-[13px] text-muted-foreground">{t.subject}</span>
-                  <span className="flex min-w-0 justify-between gap-2 text-[11px] text-muted-foreground">
+                  <span className={cn("truncate text-[13px] text-muted-foreground", compactQueue && "min-w-0 flex-1 text-xs")}>{t.subject}</span>
+                  <span className={cn("flex min-w-0 justify-between gap-2 text-xs text-muted-foreground", compactQueue && "hidden sm:flex sm:w-36 sm:shrink-0")}>
                     <span className="truncate">{t.department} · {t.claimedBy ? memberById.get(t.claimedBy)?.displayName ?? "com responsável" : "sem responsável"}</span>
                     <span className="shrink-0">{formatRelative(t.createdAt)}</span>
                   </span>
@@ -714,7 +731,7 @@ function TicketsPage() {
                     >
                       {who ? <MemberAvatar name={who.displayName} hue={who.hue} size={28} /> : <span className="size-7" />}
                       <div className="min-w-0">
-                        <p className="m-0 text-[11px] text-muted-foreground">
+                        <p className="m-0 text-xs text-muted-foreground">
                           {m.kind === "internal" ? "Nota interna · " : ""}
                           {who?.displayName ?? m.authorName ?? "Sistema"} · {formatRelative(m.at)}
                         </p>
@@ -843,21 +860,24 @@ function TicketsPage() {
           </section>
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(300px,.82fr)]">
           <div className="min-w-0 space-y-4">
-          <div className="space-y-3 rounded-2xl border border-border bg-card p-3.5">
-            <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">1</span><div><h3 className="m-0 text-base font-semibold">Onde a pessoa encontra ajuda?</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Escolha o canal público e a categoria para os canais privados.</p></div></div>
+          <section className="space-y-3 border-b border-border pb-5" aria-labelledby="ticket-location-heading">
+            <header>
+              <h3 id="ticket-location-heading" className="m-0 text-base font-semibold">Onde a pessoa encontra ajuda?</h3>
+              <p className="m-0 mt-1 text-sm text-muted-foreground">Escolha o canal público e a categoria para os canais privados.</p>
+            </header>
             <Field label="Canal do painel de atendimento">
               <DiscordSelect kind="text" value={asString(tcfg.config.panelChannelId)} onChange={(panelChannelId) => updateConfig("tickets", { panelChannelId })} placeholder="Selecione um canal" />
             </Field>
             <Field label="Categoria onde os canais privados serão criados">
               <DiscordSelect kind="category" value={asString(tcfg.config.categoryId)} onChange={(categoryId) => updateConfig("tickets", { categoryId })} placeholder="Selecione uma categoria" />
             </Field>
-            <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/40 p-3">
-              <div><Label>Atendimento ligado</Label><p className="m-0 text-xs text-muted-foreground">Desligue para pausar a abertura de novos tickets.</p></div>
-              <Switch checked={tcfg.enabled} onCheckedChange={(v) => setEnabled("tickets", v)} />
-            </div>
-          </div>
-          <div className="space-y-3 rounded-2xl border border-border bg-card p-3.5">
-            <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">2</span><div><h3 className="m-0 text-base font-semibold">Dê contexto ao painel</h3><p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p></div></div>
+            <ToggleRow label="Atendimento ligado" description="Desligue para pausar a abertura de novos tickets." checked={tcfg.enabled} onChange={(value) => setEnabled("tickets", value)} />
+          </section>
+          <section className="space-y-3 border-b border-border pb-5" aria-labelledby="ticket-context-heading">
+            <header>
+              <h3 id="ticket-context-heading" className="m-0 text-base font-semibold">Dê contexto ao painel</h3>
+              <p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p>
+            </header>
             <Field label="Título do painel">
               <Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => { updateConfig("tickets", { panelTitle: e.target.value }); setDirty(true); }} />
               <CharCounter current={asString(tcfg.config.panelTitle).length} max={100} />
@@ -918,43 +938,26 @@ function TicketsPage() {
               <CharCounter current={asString(tcfg.config.panelFooter).length} max={300} />
               <p className="m-0 text-xs text-muted-foreground">Aparece em texto discreto abaixo do painel.</p>
             </Field>
-          </div>
-          <div className="space-y-3 rounded-2xl border border-border bg-card p-3.5">
-            <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">3</span><div><h3 className="m-0 text-base font-semibold">Escolha quem responde</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Cargos selecionados poderão acessar os canais privados.</p></div></div>
+          </section>
+          <section className="space-y-3 pb-2" aria-labelledby="ticket-staff-heading">
+            <header>
+              <h3 id="ticket-staff-heading" className="m-0 text-base font-semibold">Escolha quem responde</h3>
+              <p className="m-0 mt-1 text-sm text-muted-foreground">Cargos selecionados poderão acessar os canais privados.</p>
+            </header>
             <Field label="Cargos da equipe"><DiscordMultiSelect value={asList(tcfg.config.staffRoleIds)} onChange={(staffRoleIds) => updateConfig("tickets", { staffRoleIds })} /></Field>
-          </div>
+          </section>
           <details className="motion-disclosure rounded-2xl border border-border bg-card p-3.5">
             <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Mais configurações de atendimento</summary>
             <p className="mb-4 mt-2 text-sm text-muted-foreground">Prazos, automações, registros e aparência. Você pode voltar a elas quando quiser.</p>
             <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
-              <Field label="Máximo de tickets abertos por pessoa">
-                <Input key={String(tcfg.config.maxOpenPerUser ?? 1)} type="number" min={1} max={25} defaultValue={Number(tcfg.config.maxOpenPerUser ?? 1)} onBlur={(e) => updateConfig("tickets", { maxOpenPerUser: Math.max(1, Math.min(25, Number(e.target.value) || 1)) })} />
-              </Field>
+              <NumberField id="ticket-max-open" label="Máximo de tickets abertos por pessoa" min={1} max={25} value={Number(tcfg.config.maxOpenPerUser ?? 1)} onChange={(maxOpenPerUser) => updateConfig("tickets", { maxOpenPerUser })} />
               <Field label="Nome do canal · use {user}, {department} e {number}">
                 <Input key={asString(tcfg.config.namingPattern, "atendimento-{user}")} defaultValue={asString(tcfg.config.namingPattern, "atendimento-{user}")} onBlur={(e) => updateConfig("tickets", { namingPattern: e.target.value.trim() || "atendimento-{user}" })} />
               </Field>
             </div>
-            <Field label="Avisar a equipe depois de (minutos; 0 desliga)">
-              <Input
-                type="number"
-                min={0}
-                max={10080}
-                key={String(tcfg.config.slaWarningMinutes ?? 60)}
-                defaultValue={Number(tcfg.config.slaWarningMinutes ?? 60)}
-                onBlur={(e) => updateConfig("tickets", { slaWarningMinutes: Math.max(0, Number(e.target.value) || 0) })}
-              />
-            </Field>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <Label>Pedir avaliação ao encerrar</Label>
-                <p className="m-0 text-xs text-muted-foreground">Receba uma nota e um comentário do cliente.</p>
-              </div>
-              <Switch
-                checked={Boolean(tcfg.config.feedbackEnabled)}
-                onCheckedChange={(v) => updateConfig("tickets", { feedbackEnabled: v })}
-              />
-            </div>
+            <NumberField id="ticket-sla-warning" label="Avisar a equipe depois de (minutos; 0 desliga)" min={0} max={10080} value={Number(tcfg.config.slaWarningMinutes ?? 60)} onChange={(slaWarningMinutes) => updateConfig("tickets", { slaWarningMinutes })} />
+            <ToggleRow label="Pedir avaliação ao encerrar" description="Receba uma nota e um comentário do cliente." checked={Boolean(tcfg.config.feedbackEnabled)} onChange={(value) => updateConfig("tickets", { feedbackEnabled: value })} />
               <section className="space-y-3" aria-labelledby="ticket-departments-heading">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -1021,17 +1024,11 @@ function TicketsPage() {
                             saveDepartments(next);
                           }} placeholder="Usar categoria padrão" />
                         </Field>
-                        <div className="flex items-start justify-between gap-3 rounded-lg bg-muted/40 p-3">
-                          <div className="min-w-0">
-                            <Label htmlFor={`inherit-staff-${index}`}>Usar cargos da equipe padrão</Label>
-                            <p className="m-0 mt-0.5 text-xs text-muted-foreground">Desative para definir uma equipe exclusiva para esta categoria.</p>
-                          </div>
-                          <Switch id={`inherit-staff-${index}`} checked={department.inheritStaff} onCheckedChange={(inheritStaff) => {
+                        <ToggleRow label="Usar cargos da equipe padrão" description="Desative para definir uma equipe exclusiva para esta categoria." checked={department.inheritStaff} onChange={(inheritStaff) => {
                             const next = [...departmentSettings];
                             next[index] = { ...department, inheritStaff };
                             saveDepartments(next);
                           }} />
-                        </div>
                         {!department.inheritStaff ? (
                           <Field label="Cargos desta equipe">
                             <DiscordMultiSelect value={department.staffRoleIds} onChange={(staffRoleIds) => {
@@ -1118,24 +1115,24 @@ function TicketsPage() {
                     <DiscordSelect kind="text" value={asString(tcfg.config.logChannelId)} onChange={(logChannelId) => updateConfig("tickets", { logChannelId })} placeholder="Selecione um canal" />
                   </Field>
                 </div>
-                <Field label="Apagar mensagens após (dias; 0 mantém sem prazo)">
-                  <Input key={String(tcfg.config.ticketMessageRetentionDays ?? 0)} type="number" min={0} max={3650} defaultValue={Number(tcfg.config.ticketMessageRetentionDays ?? 0)} onBlur={(e) => updateConfig("tickets", { ticketMessageRetentionDays: Math.max(0, Math.min(3650, Number(e.target.value) || 0)) })} />
+                <div>
+                  <NumberField id="ticket-message-retention" label="Apagar mensagens após (dias; 0 mantém sem prazo)" min={0} max={3650} value={Number(tcfg.config.ticketMessageRetentionDays ?? 0)} onChange={(ticketMessageRetentionDays) => updateConfig("tickets", { ticketMessageRetentionDays })} />
                   <p className="m-0 text-xs text-muted-foreground">Remove mensagens e anexos locais após o prazo. Tickets novos com retenção configurada usam apenas a exportação local; transcripts externos já gerados não podem ser apagados pelo bot. O resumo permanece para estatísticas.</p>
-                </Field>
-                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Notificar a equipe</Label><p className="m-0 text-xs text-muted-foreground">Menciona os cargos ao abrir.</p></div><Switch checked={Boolean(tcfg.config.pingStaffOnOpen)} onCheckedChange={(value) => updateConfig("tickets", { pingStaffOnOpen: value })} /></div>
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Permitir reabertura</Label><p className="m-0 text-xs text-muted-foreground">A pessoa pode voltar ao canal.</p></div><Switch checked={Boolean(tcfg.config.reopenEnabled)} onCheckedChange={(value) => updateConfig("tickets", { reopenEnabled: value })} /></div>
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Prioridade</Label><p className="m-0 text-xs text-muted-foreground">A equipe classifica urgência.</p></div><Switch checked={Boolean(tcfg.config.priorityEnabled)} onCheckedChange={(value) => updateConfig("tickets", { priorityEnabled: value })} /></div>
-                  <Field label="Prazo para fechar automaticamente (horas; 0 desliga)"><Input key={String(tcfg.config.closeAfterHours ?? 48)} type="number" min={0} max={8760} defaultValue={Number(tcfg.config.closeAfterHours ?? 48)} onBlur={(e) => updateConfig("tickets", { closeAfterHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
-                  <Field label="Prazo de inatividade (horas; 0 desliga)"><Input key={String(tcfg.config.autoCloseInactiveHours ?? 24)} type="number" min={0} max={8760} defaultValue={Number(tcfg.config.autoCloseInactiveHours ?? 24)} onBlur={(e) => updateConfig("tickets", { autoCloseInactiveHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
+                </div>
+                <div className="space-y-4">
+                  <div className="divide-y divide-border">
+                    <ToggleRow label="Notificar a equipe" description="Menciona os cargos ao abrir." checked={Boolean(tcfg.config.pingStaffOnOpen)} onChange={(value) => updateConfig("tickets", { pingStaffOnOpen: value })} />
+                    <ToggleRow label="Permitir reabertura" description="A pessoa pode voltar ao canal." checked={Boolean(tcfg.config.reopenEnabled)} onChange={(value) => updateConfig("tickets", { reopenEnabled: value })} />
+                    <ToggleRow label="Prioridade" description="A equipe classifica urgência." checked={Boolean(tcfg.config.priorityEnabled)} onChange={(value) => updateConfig("tickets", { priorityEnabled: value })} />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <NumberField id="ticket-close-after" label="Prazo para fechar automaticamente (horas; 0 desliga)" min={0} max={8760} value={Number(tcfg.config.closeAfterHours ?? 48)} onChange={(closeAfterHours) => updateConfig("tickets", { closeAfterHours })} />
+                    <NumberField id="ticket-inactive-close" label="Prazo de inatividade (horas; 0 desliga)" min={0} max={8760} value={Number(tcfg.config.autoCloseInactiveHours ?? 24)} onChange={(autoCloseInactiveHours) => updateConfig("tickets", { autoCloseInactiveHours })} />
+                  </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
-                  <Field label="Meta para primeira resposta (minutos)">
-                    <Input key={String(staffConfig.config.responseTimeGoalMinutes ?? 30)} type="number" min={5} max={10080} defaultValue={Number(staffConfig.config.responseTimeGoalMinutes ?? 30)} onBlur={(e) => updateConfig("staff", { responseTimeGoalMinutes: Math.max(5, Math.min(10080, Number(e.target.value) || 30)) })} />
-                  </Field>
-                  <Field label="Tickets simultâneos por atendente">
-                    <Input key={String(staffConfig.config.maxConcurrentTickets ?? 5)} type="number" min={1} max={100} defaultValue={Number(staffConfig.config.maxConcurrentTickets ?? 5)} onBlur={(e) => updateConfig("staff", { maxConcurrentTickets: Math.max(1, Math.min(100, Number(e.target.value) || 5)) })} />
-                  </Field>
+                  <NumberField id="staff-response-goal" label="Meta para primeira resposta (minutos)" min={5} max={10080} value={Number(staffConfig.config.responseTimeGoalMinutes ?? 30)} onChange={(responseTimeGoalMinutes) => updateConfig("staff", { responseTimeGoalMinutes })} />
+                  <NumberField id="staff-max-concurrent" label="Tickets simultâneos por atendente" min={1} max={100} value={Number(staffConfig.config.maxConcurrentTickets ?? 5)} onChange={(maxConcurrentTickets) => updateConfig("staff", { maxConcurrentTickets })} />
                 </div>
                 <Field label="Mensagem de boas-vindas no canal privado">
                   <Textarea key={asString(tcfg.config.welcomeMessage)} rows={3} defaultValue={asString(tcfg.config.welcomeMessage)} onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })} />
@@ -1250,7 +1247,7 @@ function TicketsPage() {
           </aside>
           </div>
         
-            <div className="fixed bottom-0 left-0 right-0 z-20 border-t bg-background/95 p-3 backdrop-blur sm:hidden">
+            <div className="fixed bottom-0 left-0 right-0 z-30 border-t bg-background/95 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur sm:hidden">
               <Button className="w-full" disabled={pubBusyHook || !validDepartmentSettings} onClick={async () => {
                 const result = await publishPanel("tickets", asString(tcfg.config.panelChannelId));
                 if (result) { announce(result.status === "done" ? "Publicado." : "Pedido enviado."); setDirty(false); }
@@ -1292,14 +1289,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ToggleRow({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3">
+    <div className="flex min-h-14 items-center justify-between gap-4 py-3">
       <div className="min-w-0"><Label>{label}</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">{description}</p></div>
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }
 
 function CharCounter({ current, max }: { current: number; max: number }) {
   const over = current > max;
-  return <p className={cn("m-0 mt-1 text-[10px]", over ? "text-destructive" : "text-muted-foreground")}>{current}/{max}</p>;
+  return <p className={cn("m-0 mt-1 text-xs", over ? "text-destructive" : "text-muted-foreground")}>{current}/{max}</p>;
 }

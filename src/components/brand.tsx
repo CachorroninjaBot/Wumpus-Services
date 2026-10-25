@@ -28,7 +28,7 @@ export function MemberAvatar({
 }) {
   return (
     <span
-      className={cn("grid shrink-0 place-items-center rounded-full text-[11px] font-semibold text-white", className)}
+      className={cn("grid shrink-0 place-items-center rounded-full text-xs font-semibold text-white", className)}
       style={{ width: size, height: size, background: `hsl(${hue} 42% 38%)` }}
       aria-hidden
     >

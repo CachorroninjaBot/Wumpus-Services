@@ -2,7 +2,9 @@ import { PageHeader } from "@/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
+import { Notice } from "@/components/ui/notice";
 import { Label, Textarea } from "@/components/ui/input";
+import { SettingRow } from "@/components/ui/setting-row";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -83,9 +85,9 @@ function SettingsPage() {
           </div>
         ) : null}
         {usage?.serversOverLimit.length ? (
-          <p className="m-0 rounded-lg bg-warn/10 px-3 py-2 text-sm text-muted-foreground" role="status">
+          <Notice tone="warning" className="m-0">
             {usage.serversOverLimit.join(", ")} {usage.serversOverLimit.length === 1 ? "está" : "estão"} acima da cota. O Wumpus desativou o acesso e sairá {usage.serversOverLimit.length === 1 ? "desse servidor" : "desses servidores"}.
-          </p>
+          </Notice>
         ) : null}
         <div className="grid gap-2">
           {catalog.map((plan) => (
@@ -132,16 +134,11 @@ function SettingsPage() {
       </Card>
       <ServerGroups />
       <Card className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="m-0 font-medium">Modo manutenção</p>
-            <p className="m-0 text-sm text-muted-foreground">O bot responde só com a mensagem abaixo.</p>
-          </div>
-          <Switch
-            checked={Boolean(servers.config.maintenanceMode)}
-            onCheckedChange={(v) => updateConfig("servers", { maintenanceMode: v })}
-          />
-        </div>
+        <SettingRow
+          label="Modo manutenção"
+          description="O bot responde só com a mensagem abaixo."
+          control={<Switch checked={Boolean(servers.config.maintenanceMode)} onCheckedChange={(v) => updateConfig("servers", { maintenanceMode: v })} />}
+        />
         {servers.config.maintenanceMode ? (
           <Textarea
             defaultValue={asString(servers.config.maintenanceMessage)}

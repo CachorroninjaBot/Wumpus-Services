@@ -19,6 +19,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
+import { Notice } from "@/components/ui/notice";
 import { DiscordFormPreview } from "@/components/discord-panel";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Badge } from "@/components/ui/badge";
@@ -328,15 +329,13 @@ function FormsPage() {
 
   return (
     <div key={gid} className="mx-auto flex max-w-[1440px] flex-col gap-7">
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="min-w-0 flex-1">
-          <PageHeader title="Formulários" description="Candidaturas e formulários enviados pelos membros." />
-          <p className="mb-0 mt-1 text-sm text-muted-foreground">Crie perguntas claras para a comunidade e acompanhe cada resposta da equipe.</p>
-        </div>
-        {formsAllowed
+      <PageHeader
+        title="Formulários"
+        description="Crie perguntas para a comunidade e acompanhe as respostas da equipe."
+        actions={formsAllowed
           ? <Button onClick={() => setTab("builder")}><FilePlus2 className="size-4" /> Criar formulário</Button>
           : <ExclusiveButton />}
-      </div>
+      />
 
       {!formsAllowed ? (
         <div role="note" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
@@ -356,8 +355,8 @@ function FormsPage() {
         </TabsList>
 
         <TabsContent value="inbox" className="mt-5">
-          {loadError ? <p role="alert" className="mb-4 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{loadError}</p> : null}
-          {reviewNotice ? <p role="status" className="mb-4 rounded-lg bg-muted px-4 py-3 text-sm">{reviewNotice}</p> : null}
+          {loadError ? <Notice tone="error" className="mb-4">{loadError}</Notice> : null}
+          {reviewNotice ? <Notice tone="info" className="mb-4">{reviewNotice}</Notice> : null}
           <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
             <section className="min-w-0" aria-label="Caixa de respostas">
               <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -394,7 +393,7 @@ function FormsPage() {
                         </span>
                         <span className="mt-1 block truncate text-xs text-muted-foreground">{Object.values(submission.answers).find(Boolean) || "Sem resposta em texto"}</span>
                       </span>
-                      <span className="shrink-0 text-right text-[11px] text-muted-foreground">{formatRelative(submission.createdAt)}</span>
+                      <span className="shrink-0 text-right text-xs text-muted-foreground">{formatRelative(submission.createdAt)}</span>
                     </button>
                   );
                 }) : (
@@ -402,12 +401,9 @@ function FormsPage() {
                     <Inbox className="mb-3 size-5 text-primary" />
                     <EmptyState
                       title={submissions.length ? "Nenhuma resposta nesta lista" : "A caixa está pronta"}
-                      action={!submissions.length ? <Button size="sm">Criar primeiro formulário</Button> : undefined}
+                      description={submissions.length ? "Mude o filtro ou a busca para encontrar outra resposta." : "Publique seu primeiro formulário para receber respostas aqui."}
+                      action={!submissions.length ? <Button size="sm" onClick={() => setTab("builder")}>Criar primeiro formulário <ChevronRight className="size-4" /></Button> : undefined}
                     />
-                    <p className="mb-4 mt-1 max-w-[34ch] text-sm leading-6 text-muted-foreground">
-                      {submissions.length ? "Mude o filtro ou a busca para encontrar outra resposta." : "Publique seu primeiro formulário e as respostas aparecerão aqui para revisão."}
-                    </p>
-                    {!submissions.length ? <Button variant="outline" size="sm" onClick={() => setTab("builder")}>Configurar formulário <ChevronRight className="size-4" /></Button> : null}
                   </div>
                 )}
               </div>
@@ -523,7 +519,7 @@ function FormsPage() {
                         <div className="space-y-1.5">
                           <Label htmlFor={`label-${field.id}`}>Pergunta para a comunidade</Label>
                           <Input id={`label-${field.id}`} value={field.label} maxLength={45} onChange={(event) => patchField(field.id, { label: event.target.value })} placeholder="Ex.: O que você precisa resolver?" />
-                          <p className="m-0 text-right text-[11px] tabular-nums text-muted-foreground">{field.label.length}/45</p>
+                          <p className="m-0 text-right text-xs tabular-nums text-muted-foreground">{field.label.length}/45</p>
                         </div>
                         <div className="space-y-1.5">
                           <Label htmlFor={`type-${field.id}`}>Tipo de resposta</Label>
@@ -559,7 +555,7 @@ function FormsPage() {
                             }}
                             placeholder={"Dúvida\nProblema\nSugestão"}
                           />
-                          <p className="m-0 text-right text-[11px] tabular-nums text-muted-foreground">{field.options.length}/25 opções</p>
+                          <p className="m-0 text-right text-xs tabular-nums text-muted-foreground">{field.options.length}/25 opções</p>
                         </div>
                       ) : (
                         <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_120px_120px]">
