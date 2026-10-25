@@ -599,7 +599,7 @@ function TicketsPage() {
                 </p>
               </div>
               {tickets.length === 0 ? (
-                <Button size="sm" onClick={() => setActiveView("panel")}>Configurar o painel de atendimento</Button>
+                <Button className="sm:static"  size="sm" onClick={() => setActiveView("panel")}>Configurar o painel de atendimento</Button>
               ) : null}
             </div>
           ) : (
@@ -1278,7 +1278,21 @@ function TicketsPage() {
             )}
           </aside>
           </div>
-        </TabsContent>
+        
+            <div className="fixed bottom-0 left-0 right-0 z-20 border-t bg-background/95 p-3 backdrop-blur sm:hidden">
+              <Button className="w-full" disabled={pubBusy || !validDepartmentSettings} onClick={async () => {
+                setPubBusy(true);
+                try {
+                  const result = await publishPanelAndWait({ data: { token: getStoredSessionToken()!, guildId: gid } });
+                  announce(publishResultMessage(result)); setDirty(false);
+                } catch (e) {
+                  announce(e instanceof Error ? e.message : "Falha ao publicar", "error");
+                } finally { setPubBusy(false); }
+              }}>
+                {pubBusy ? "Publicando…" : dirty ? "Publicar alterações" : "Publicar painel"}
+              </Button>
+            </div>
+</TabsContent>
       </Tabs>
 
       <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
