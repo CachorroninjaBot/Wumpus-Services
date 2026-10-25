@@ -835,18 +835,26 @@ function TicketsPage() {
         </TabsContent>
         <TabsContent value="panel" className="mt-4 space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="m-0 text-xl font-semibold tracking-tight">Monte seu sistema de tickets</h2><p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Comece com um modelo e personalize categorias, equipe, canais e regras. As alterações só chegam ao Discord quando você publica o painel.</p></div>{dirty ? <Badge tone="warn">Alterações não publicadas</Badge> : null}</div>
-          <section className="space-y-3 rounded-2xl border border-border bg-card p-4" aria-labelledby="ticket-template-heading">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-56 flex-1">
-                <Label htmlFor="ticket-template">Modelo para começar</Label>
-                <NativeSelect id="ticket-template" className="mt-1.5" value={selectedTemplate} onChange={(event) => { setSelectedTemplate(event.target.value); setTemplateNotice(""); }}>
-                  {Object.entries(ticketTemplates).map(([id, template]) => <option key={id} value={id}>{template.label} — {template.description}</option>)}
-                </NativeSelect>
-              </div>
-              <Button type="button" variant="secondary" onClick={() => applyTicketTemplate(selectedTemplate)}>
-                <WandSparkles aria-hidden="true" className="size-4" />
-                Usar modelo
-              </Button>
+          <section className="space-y-3" aria-labelledby="ticket-template-heading">
+            <div>
+              <h3 id="ticket-template-heading" className="m-0 text-sm font-semibold">Comece com um modelo</h3>
+              <p className="m-0 mt-1 text-xs text-muted-foreground">Clique para aplicar um pacote pronto. Você pode ajustar depois.</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {Object.entries(ticketTemplates).map(([id, template]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => { setSelectedTemplate(id); applyTicketTemplate(id); setDirty(true); }}
+                  className={cn(
+                    "rounded-xl border p-3 text-left transition-colors",
+                    selectedTemplate === id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                  )}
+                >
+                  <span className="block text-sm font-semibold">{template.label}</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">{template.description}</span>
+                </button>
+              ))}
             </div>
             {templateNotice ? <p role="status" className="m-0 text-sm text-ok">{templateNotice}</p> : null}
             {!canUseDepartments ? <div className="flex flex-wrap items-center justify-between gap-3"><p className="m-0 text-xs text-muted-foreground">Seu plano permite um tipo de atendimento. Os modelos serão aplicados com uma categoria; departamentos extras são exclusivos dos planos Escala e Vitalício.</p><ExclusiveButton /></div> : null}

@@ -314,7 +314,10 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
             })}
           </ul> : <div className="rounded-2xl border border-dashed border-border px-5 py-10 text-center">
             <BookOpenCheck className="mx-auto size-8 text-muted-foreground" />
-            <h3 className="mb-1 mt-3 text-sm font-semibold">{articles.length ? "Nenhum artigo corresponde" : "Sua base começa aqui"}</h3>
+            <div className="space-y-3">
+              <h3 className="mb-1 mt-3 text-sm font-semibold">{articles.length ? "Nenhum artigo corresponde" : "Sua base começa aqui"}</h3>
+              {!articles.length ? <Button size="sm">Adicionar primeiro artigo</Button> : null}
+            </div>
             <p className="mx-auto mb-4 mt-0 max-w-md text-sm text-muted-foreground">{articles.length ? "Mude a busca ou os filtros para encontrar outro artigo." : "Adicione respostas aprovadas para perguntas recorrentes, regras e procedimentos do servidor."}</p>
             {!articles.length && !editorOpen ? <Button size="sm" onClick={startNew}><FilePlus2 className="size-4" />Criar primeiro artigo</Button> : null}
           </div>}

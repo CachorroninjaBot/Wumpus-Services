@@ -150,7 +150,7 @@ function LogsPage() {
                   </li>
                 ))}
               </ul>
-            ) : <p className="m-0 p-6 text-center text-sm text-muted-foreground">{error ? "A auditoria não foi carregada." : "Nenhum evento corresponde ao filtro."}</p>}
+            ) : <div className="space-y-2 p-6 text-center"><p className="m-0 text-sm text-muted-foreground">{error ? "A auditoria não foi carregada." : "Nenhum evento corresponde ao filtro."}</p>{!error ? <p className="m-0 text-xs text-muted-foreground">Tente limpar os filtros ou aguarde novos eventos do bot.</p> : null}</div>}
           </div>
         </div>
       </details>
