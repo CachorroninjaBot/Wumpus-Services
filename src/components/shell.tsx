@@ -140,7 +140,7 @@ function ServerRail() {
   };
 
   return (
-    <aside aria-label="Servidores" className="flex w-[4.5rem] shrink-0 flex-col items-center gap-2 border-r border-border bg-muted/35 py-2 lg:py-3">
+    <aside aria-label="Servidores" className="hidden w-[4.5rem] shrink-0 flex-col items-center gap-2 border-r border-border bg-muted/35 py-2 lg:flex lg:py-3">
       <Link to="/app" aria-label="Início do Wumpus" className="grid size-12 place-items-center rounded-2xl transition-colors hover:bg-background">
         <BrandMark size={38} />
       </Link>
@@ -424,7 +424,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="app-bar sticky top-0 z-20 flex min-h-[4.5rem] flex-wrap items-center gap-3 border-b border-border px-4 sm:px-7">
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-            <Button variant="outline" size="icon-sm" className="lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Abrir navegação">
+            <Button variant="outline" size="icon" className="lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Abrir navegação">
               <Menu className="size-4" />
             </Button>
             <SheetContent side="left" className="app-surface flex flex-col gap-0 overflow-y-auto border-0 bg-card p-0">
@@ -445,7 +445,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               {runtimeSyncStatus === "syncing" ? "Salvando configuração" : runtimeSyncStatus === "failed" ? "Falha ao sincronizar" : "Configuração atualizada"}
             </span>
           ) : null}
-          <Button variant="ghost" size="icon-sm" aria-label={`Tema atual ${theme}; mudar para ${nextTheme}`} title={`Tema ${theme}`} onClick={() => setTheme(nextTheme)}>
+          <Button variant="ghost" size="icon" className="lg:size-9" aria-label={`Tema atual ${theme}; mudar para ${nextTheme}`} title={`Tema ${theme}`} onClick={() => setTheme(nextTheme)}>
             {theme === "dark" ? <Moon className="size-4" /> : theme === "light" ? <Sun className="size-4" /> : <Monitor className="size-4" />}
           </Button>
           <a href={brand.invite} target="_blank" rel="noreferrer" className="hidden min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:bg-muted sm:inline-flex">
