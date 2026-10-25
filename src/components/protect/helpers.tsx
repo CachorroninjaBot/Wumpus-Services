@@ -1,10 +1,42 @@
-import { Check, CircleAlert, CircleCheck, Eye, LockKeyhole, RefreshCw, Shield, ShieldAlert, ShieldCheck } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import {
+  ArrowRight,
+  Check,
+  ChevronRight,
+  CircleAlert,
+  CircleCheck,
+  Eye,
+  LockKeyhole,
+  RefreshCw,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
-import type { ReactNode } from "react";
+import { presets, type PresetId } from "@/lib/wumpus/defaults";
+import { getGuildProtectionReadiness, getGuildSecurityIncidents } from "@/lib/wumpus/runtime-store";
+import { cn, formatRelative } from "@/lib/utils";
+
+export type SecurityEvent = Awaited<ReturnType<typeof getGuildSecurityIncidents>>[number];
+
+const configFieldLabels: Record<string, string> = {
+  blockInvites: "Bloqueio de convites",
+  blockLinks: "Bloqueio de links",
+  allowedDomains: "Domínios permitidos",
+  blockedTerms: "Termos bloqueados",
+  action: "Ação do AutoMod",
+  capsThresholdPercent: "Limite de letras maiúsculas",
+  mentionLimit: "Limite de menções",
+  raidMode: "Modo anti-raid",
+  raidJoinThreshold: "Limite de entradas",
+  minAccountAgeHours: "Idade mínima da conta",
+  quarantineNewMembers: "Isolamento de contas novas",
+  slaWarningMinutes: "Aviso de prazo do atendimento",
+  departments: "Departamentos de atendimento",
+};
 
 export function SectionHeading({
   title,
@@ -529,21 +561,21 @@ export function formatConfigValue(value: unknown): string {
 export function severityLabel(severity: string) {
   return severity === "critical" ? "Crítico" : severity === "warning" ? "Aviso" : "Informativo";
 }
-function actionLabel(action?: string) {
+export function actionLabel(action?: string) {
   return action === "timeout" || action === "mute"
     ? "apagar e aplicar timeout"
     : action === "warn"
       ? "avisar"
       : "apagar";
 }
-function raidResponseDescription(response: string) {
+export function raidResponseDescription(response: string) {
   return response === "alert"
     ? "O bot avisa a equipe e não aplica restrições automaticamente."
     : response === "auto"
       ? "O bot aplica timeout a membros que entrarem durante a detecção; exige confirmação separada."
       : "Ao detectar uma raid, o bot ativa o lockdown e envia um alerta para revisão da equipe.";
 }
-function channelLabel(channels: Array<{ id: string; name: string }>, id: string) {
+export function channelLabel(channels: Array<{ id: string; name: string }>, id: string) {
   return channels.find((channel) => channel.id === id || channel.name === id)?.name
     ? `Painel em #${channels.find((channel) => channel.id === id || channel.name === id)?.name}`
     : "Canal não encontrado na lista sincronizada";

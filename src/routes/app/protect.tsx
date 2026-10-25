@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   Siren,
 } from "lucide-react";
-import { SectionHeading, SectionTitle, ToggleRow, Field, NumberField, ListField, ModuleStatusRow, ReadinessRow, BotConnectionStatus, PermissionStatus, PermissionCheckInline, CheckLine, PausedNotice, SecurityEventList, getPresetChanges, formatConfigValue, severityLabel } from "@/components/protect/helpers";
+import { SectionHeading, SectionTitle, ToggleRow, Field, NumberField, ListField, ModuleStatusRow, ReadinessRow, BotConnectionStatus, PermissionStatus, PermissionCheckInline, CheckLine, PausedNotice, SecurityEventList, getPresetChanges, formatConfigValue, severityLabel, actionLabel, raidResponseDescription, channelLabel, type SecurityEvent } from "@/components/protect/helpers";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,18 +35,17 @@ import {
   getGuildProtectionReadiness,
   getGuildSecurityActionStatus,
   getGuildSecurityIncidents,
-  requestPanelPublish,
   requestSecurityLockdown,
   requestSecurityRestore,
 } from "@/lib/wumpus/runtime-store";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
+import { usePublishPanel } from "@/lib/wumpus/use-publish-panel";
 import { formatRelative } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/protect")({ component: ProtectPage });
 
 type ProtectSection =
   "overview" | "automod" | "ocr" | "entry" | "verification" | "antinuke" | "incidents";
-type SecurityEvent = Awaited<ReturnType<typeof getGuildSecurityIncidents>>[number];
 type PermissionKey =
   | "manageMessages"
   | "manageChannels"
@@ -101,22 +100,6 @@ const presetModuleLabels: Record<string, string> = {
   tickets: "Atendimento",
 };
 
-const configFieldLabels: Record<string, string> = {
-  blockInvites: "Bloqueio de convites",
-  blockLinks: "Bloqueio de links",
-  allowedDomains: "Domínios permitidos",
-  blockedTerms: "Termos bloqueados",
-  action: "Ação do AutoMod",
-  capsThresholdPercent: "Limite de letras maiúsculas",
-  mentionLimit: "Limite de menções",
-  raidMode: "Modo anti-raid",
-  raidJoinThreshold: "Limite de entradas",
-  minAccountAgeHours: "Idade mínima da conta",
-  quarantineNewMembers: "Isolamento de contas novas",
-  slaWarningMinutes: "Aviso de prazo do atendimento",
-  departments: "Departamentos de atendimento",
-};
-
 function ProtectPage() {
   const guild = useActiveGuild();
   const guildId = useWumpus((state) => state.activeGuildId);
@@ -154,6 +137,7 @@ function ProtectPage() {
   const [eventFilter, setEventFilter] = useState<"all" | "open" | "reviewed">("open");
   const [eventSeverity, setEventSeverity] = useState("all");
   const [raidTestCount, setRaidTestCount] = useState(14);
+  const { publishVerification: requestVerificationPublish } = usePublishPanel(guildId);
   const [nukeTestCount, setNukeTestCount] = useState(6);
   const [raidTestResult, setRaidTestResult] = useState<string | null>(null);
   const [nukeTestResult, setNukeTestResult] = useState<string | null>(null);
@@ -355,6 +339,7 @@ function ProtectPage() {
 
   const publishVerification = async () => {
     if (!guildId || !verificationChannelId || !verifiedRoleId) {
+      setActionFailed(true);
       setActionNote("Escolha o canal e o cargo verificado antes de publicar.");
       return;
     }
@@ -362,27 +347,23 @@ function ProtectPage() {
     setActionFailed(false);
     setActionNote("Enviando o painel de verificação ao bot…");
     try {
-      const result = await requestPanelPublish({
-        data: {
-          token: getStoredSessionToken(),
-          guildId,
-          target: "security-verification",
-          channelRef: verificationChannelId,
-          verificationRoleId: verifiedRoleId,
-        },
-      });
-      const sent = await waitForAction(result.jobId, "Painel publicado no Discord.");
-      if (sent)
-        await useWumpus
-          .getState()
-          .updateConfig("security", {
-            verificationChannelId,
-            verifiedRoleId,
-            verificationEnabled: true,
-          });
+      const outcome = await requestVerificationPublish(verificationChannelId, verifiedRoleId);
+      if (outcome?.ok) {
+        setActionFailed(false);
+        setActionNote(outcome.detail);
+        await useWumpus.getState().updateConfig("security", {
+          verificationChannelId,
+          verifiedRoleId,
+          verificationEnabled: true,
+        });
+      } else {
+        setActionFailed(true);
+        setActionNote(outcome?.detail ?? "Não foi possível publicar o painel.");
+      }
     } catch (error) {
       setActionFailed(true);
       setActionNote(error instanceof Error ? error.message : "Não foi possível publicar o painel.");
+    } finally {
       setActionBusy(false);
     }
   };
