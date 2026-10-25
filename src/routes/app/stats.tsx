@@ -122,10 +122,10 @@ function StatsPage() {
               <XAxis dataKey="label" interval={period === 90 ? 12 : period === 30 ? 4 : "preserveStartEnd"} tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis allowDecimals={false} tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} width={32} />
               <Tooltip contentStyle={{ background: "var(--color-card)", border: "1px solid var(--color-border)", borderRadius: 12 }} labelFormatter={(_, rows) => rows[0]?.payload?.day ? formatDate(rows[0].payload.day) : "Atividade"} />
-              <Area type="monotone" dataKey="tickets" name="Tickets criados" stroke="var(--color-primary)" fill="var(--wumpus-chart-tickets)" strokeWidth={2} activeDot={{ r: 5 }} />
-              <Area type="monotone" dataKey="closed" name="Tickets encerrados" stroke="var(--color-ok)" fill="var(--color-ok)" fillOpacity={0.08} strokeWidth={1.5} activeDot={{ r: 4 }} />
-              <Area type="monotone" dataKey="automod" name="AutoMod" stroke="var(--color-info)" fill="var(--wumpus-chart-automod)" strokeWidth={1.5} activeDot={{ r: 4 }} />
-              <Area type="monotone" dataKey="moderation" name="Moderação" stroke="var(--color-warn)" fill="var(--color-warn)" fillOpacity={0.06} strokeWidth={1.5} activeDot={{ r: 4 }} />
+              <Area type="monotone" dataKey="tickets" name="Tickets criados" stroke="var(--color-primary)" fill="var(--wumpus-chart-tickets)" strokeWidth={2} activeDot={{ r: 5 }} animationDuration={320} animationEasing="ease-out" />
+              <Area type="monotone" dataKey="closed" name="Tickets encerrados" stroke="var(--color-ok)" fill="var(--color-ok)" fillOpacity={0.08} strokeWidth={1.5} activeDot={{ r: 4 }} animationDuration={320} animationEasing="ease-out" />
+              <Area type="monotone" dataKey="automod" name="AutoMod" stroke="var(--color-info)" fill="var(--wumpus-chart-automod)" strokeWidth={1.5} activeDot={{ r: 4 }} animationDuration={320} animationEasing="ease-out" />
+              <Area type="monotone" dataKey="moderation" name="Moderação" stroke="var(--color-warn)" fill="var(--color-warn)" fillOpacity={0.06} strokeWidth={1.5} activeDot={{ r: 4 }} animationDuration={320} animationEasing="ease-out" />
             </AreaChart>
           </ResponsiveContainer>
         </div>

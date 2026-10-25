@@ -440,7 +440,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             {hint ? <p className="m-0 hidden truncate text-xs text-muted-foreground sm:block">{hint}</p> : null}
           </div>
           {runtimeSyncStatus !== "idle" ? (
-            <span className={cn("hidden items-center gap-2 text-xs sm:flex", runtimeSyncStatus === "failed" ? "text-destructive" : "text-muted-foreground")} role="status">
+            <span key={runtimeSyncStatus} className={cn("sync-status hidden items-center gap-2 text-xs sm:flex", runtimeSyncStatus === "failed" ? "text-destructive" : "text-muted-foreground")} role="status">
               <span className={cn("size-2 rounded-full", runtimeSyncStatus === "failed" ? "bg-destructive" : runtimeSyncStatus === "syncing" ? "animate-pulse bg-warn" : "bg-ok")} />
               {runtimeSyncStatus === "syncing" ? "Salvando configuração" : runtimeSyncStatus === "failed" ? "Falha ao sincronizar" : "Configuração atualizada"}
             </span>

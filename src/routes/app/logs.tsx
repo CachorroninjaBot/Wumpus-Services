@@ -116,7 +116,7 @@ function LogsPage() {
           </div>
         </div>
       </Card>
-      <details className="rounded-2xl bg-card text-card-foreground shadow-border">
+      <details className="motion-disclosure rounded-2xl bg-card text-card-foreground shadow-border">
         <summary className="flex min-h-14 cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-2xl px-5 py-3 text-sm font-semibold hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
           <span>Histórico de auditoria</span>
           <span className="text-xs font-normal text-muted-foreground">

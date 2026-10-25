@@ -923,7 +923,7 @@ function TicketsPage() {
             <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">3</span><div><h3 className="m-0 text-base font-semibold">Escolha quem responde</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Cargos selecionados poderão acessar os canais privados.</p></div></div>
             <Field label="Cargos da equipe"><DiscordMultiSelect value={asList(tcfg.config.staffRoleIds)} onChange={(staffRoleIds) => updateConfig("tickets", { staffRoleIds })} /></Field>
           </div>
-          <details className="rounded-2xl border border-border bg-card p-3.5">
+          <details className="motion-disclosure rounded-2xl border border-border bg-card p-3.5">
             <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Mais configurações de atendimento</summary>
             <p className="mb-4 mt-2 text-sm text-muted-foreground">Prazos, automações, registros e aparência. Você pode voltar a elas quando quiser.</p>
             <div className="space-y-4">
@@ -984,7 +984,7 @@ function TicketsPage() {
                 </div>
                 <div className="divide-y divide-border rounded-xl border border-border px-3">
                   {departmentSettings.map((department, index) => (
-                    <details key={department.id} className="group py-3" open={index === 0}>
+                    <details key={department.id} className="motion-disclosure group py-3" open={index === 0}>
                       <summary className="flex cursor-pointer list-none items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <span aria-hidden="true">{department.emoji || "🎫"}</span>
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">{department.name || `Tipo ${index + 1}`}</span>
@@ -1303,4 +1303,3 @@ function CharCounter({ current, max }: { current: number; max: number }) {
   const over = current > max;
   return <p className={cn("m-0 mt-1 text-[10px]", over ? "text-destructive" : "text-muted-foreground")}>{current}/{max}</p>;
 }
-

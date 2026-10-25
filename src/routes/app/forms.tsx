@@ -496,7 +496,7 @@ function FormsPage() {
                   <div><h3 id="questions-title" className="m-0 text-sm font-semibold">Perguntas</h3><p className="mb-0 mt-1 text-xs text-muted-foreground">Escolhas aparecem antes das perguntas de texto no Discord.</p></div>
                   <span className="text-xs tabular-nums text-muted-foreground">{textCount}/5 texto · {selectCount}/5 escolhas</span>
                 </div>
-                <details className="mb-4 rounded-xl border border-border bg-card px-4 py-3 2xl:hidden">
+                <details className="motion-disclosure mb-4 rounded-xl border border-border bg-card px-4 py-3 2xl:hidden">
                   <summary className="cursor-pointer text-sm font-semibold">Ver prévia atualizada no Discord</summary>
                   <p className="mb-3 mt-2 text-xs text-muted-foreground">A prévia acompanha as alterações. Publique quando estiver pronto para enviar ao servidor.</p>
                   <DiscordFormPreview
