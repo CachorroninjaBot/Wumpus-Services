@@ -770,7 +770,7 @@ function ProtectPage() {
                     disabled={!automod.enabled}
                   />
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
                   <Field id="automod-action" label="Quando encontrar uma mensagem">
                     <NativeSelect
                       id="automod-action"
@@ -817,7 +817,7 @@ function ProtectPage() {
                   value={asList(automod.config.blockedTerms)}
                   onChange={(blockedTerms) => updateConfig("automod", { blockedTerms })}
                 />
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
                   <ListField
                     id="blocked-domains"
                     label="Domínios bloqueados"
@@ -846,7 +846,7 @@ function ProtectPage() {
                     Flood e repetição usam o histórico de mensagens do servidor.
                   </p>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-1 md:grid-cols-3">
                   <NumberField
                     id="mention-limit"
                     label="Menções por mensagem"
@@ -915,7 +915,7 @@ function ProtectPage() {
                     hint="0 desliga"
                   />
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
                   <div>
                     <Label>Canais ignorados</Label>
                     <DiscordMultiSelect
@@ -1125,7 +1125,7 @@ function ProtectPage() {
             <div className="space-y-5">
               <Card className="space-y-4">
                 <SectionTitle title="Detectar uma raid" />
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
                   <NumberField
                     id="raid-join-limit"
                     label="Entradas suspeitas"
@@ -1171,7 +1171,7 @@ function ProtectPage() {
                     />
                   </div>
                 ) : null}
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
                   <NumberField
                     id="account-age"
                     label="Idade mínima da conta (horas)"
@@ -1472,7 +1472,7 @@ function ProtectPage() {
               </Card>
               <Card className="space-y-4">
                 <SectionTitle title="Limites de detecção" />
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
                   <NumberField
                     id="nuke-threshold"
                     label="Ações suspeitas"

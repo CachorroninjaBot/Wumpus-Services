@@ -73,7 +73,7 @@ function SettingsPage() {
           {billing.loading ? " Lendo a loja…" : billing.data?.error ? ` ${billing.data.error}` : ""}
         </p>
         {usage ? (
-          <div className="grid gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm sm:grid-cols-2">
+          <div className="grid gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm sm:grid-cols-1 md:grid-cols-2">
             <p className="m-0"><span className="font-medium">Servidores da conta</span><br />
               {usage.serversUsed}{usage.serverLimit === null ? " · sem limite" : ` de ${usage.serverLimit}`}
             </p>

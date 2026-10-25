@@ -214,7 +214,7 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
 
       {saveNotice ? <p className="m-0 rounded-lg bg-ok/10 px-3 py-2 text-sm text-ok" role="status">{saveNotice}</p> : null}
 
-      <section aria-label="Resumo dos artigos" className="grid gap-3 sm:grid-cols-3">
+      <section aria-label="Resumo dos artigos" className="grid gap-3 sm:grid-cols-1 md:grid-cols-3">
         <SummaryCard icon={<Check className="size-4" />} label="Aprovados" value={counts.approved} detail="Disponíveis para a IA" tone="ok" />
         <SummaryCard icon={<Clock3 className="size-4" />} label="Aguardando revisão" value={counts.review} detail="Precisam da aprovação da equipe" tone="warn" />
         <SummaryCard icon={<FilePlus2 className="size-4" />} label="Rascunhos" value={counts.draft} detail="Ainda não entram na revisão" />
@@ -260,7 +260,7 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
             <div><h2 className="m-0 text-lg font-semibold">{editingId ? "Editar artigo" : "Criar artigo"}</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">{faqSuggestionId ? "Complete a resposta com as informações oficiais do servidor antes de enviar para revisão." : "Novos artigos começam como rascunho. Envie para revisão para que a equipe possa aprová-los."}</p></div>
             <Button variant="ghost" onClick={closeEditor}>{editingId ? "Cancelar edição" : "Fechar"}</Button>
           </div>
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-1 md:grid-cols-2">
             <EditorField id="article-title" label="Título"><Input id="article-title" maxLength={200} value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Ex.: Como recuperar minha conta?" /></EditorField>
             <EditorField id="article-category" label="Categoria"><Input id="article-category" maxLength={80} value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))} placeholder="Suporte" /></EditorField>
             <div className="lg:col-span-2">
@@ -340,7 +340,7 @@ function KnowledgeWorkspace({ gid }: { gid: string }) {
               <div className="flex items-start justify-between gap-3"><div><Label htmlFor="mention-required">Exigir menção no canal de perguntas</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">Sem isso, o bot responde perguntas enviadas diretamente no canal escolhido.</p></div><Switch id="mention-required" checked={Boolean(kcfg.config.mentionRequired)} onCheckedChange={(value) => updateConfig("knowledge", { mentionRequired: value })} /></div>
               <div className="flex items-start justify-between gap-3"><div><Label htmlFor="all-channels">Aceitar menções em outros canais</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">Permite que a IA responda quando alguém mencionar o bot fora do canal escolhido.</p></div><Switch id="all-channels" checked={Boolean(kcfg.config.suggestInAllChannels)} onCheckedChange={(value) => updateConfig("knowledge", { suggestInAllChannels: value })} /></div>
               <div className="flex items-start justify-between gap-3"><div><Label htmlFor="respond-all-channels">Responder perguntas em qualquer canal</Label><p className="m-0 mt-0.5 text-xs text-muted-foreground">Quando ativado, responde sem menção em qualquer canal legível pelo bot, inclusive canais privados, se encontrar conteúdo relevante conforme o filtro de aprovação configurado.</p></div><Switch id="respond-all-channels" checked={Boolean(kcfg.config.respondInAllChannels)} onCheckedChange={(value) => updateConfig("knowledge", { respondInAllChannels: value })} /></div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-1 md:grid-cols-2">
                 <EditorField id="minimum-length" label="Tamanho mínimo da pergunta"><Input id="minimum-length" type="number" min={1} max={2000} defaultValue={minQuestionLength} onBlur={(event) => updateConfig("knowledge", { minQuestionLength: Math.max(1, Math.min(2000, Number(event.target.value) || 1)) })} /></EditorField>
                 <EditorField id="knowledge-similarity" label="Correspondência mínima (%)"><Input id="knowledge-similarity" type="number" min={10} max={100} step={5} defaultValue={Math.round(similarityThreshold * 100)} onBlur={(event) => updateConfig("knowledge", { similarityThreshold: Math.max(0.1, Math.min(1, (Number(event.target.value) || 60) / 100)) })} /></EditorField>
               </div>

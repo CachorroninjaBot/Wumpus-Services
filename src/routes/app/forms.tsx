@@ -488,7 +488,7 @@ function FormsPage() {
                 <div className="mb-3 flex items-end justify-between gap-3">
                   <div><h3 id="template-title" className="m-0 text-sm font-semibold">Comece com um modelo</h3><p className="mb-0 mt-1 text-xs text-muted-foreground">Você pode editar cada pergunta depois.</p></div>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-1 md:grid-cols-3">
                   {templates.map((template) => (
                     <button key={template.id} type="button" onClick={() => applyTemplate(template)} className="group min-h-[92px] rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/40 hover:bg-secondary/40">
                       <span className="flex items-center gap-2 text-sm font-semibold"><FilePlus2 className="size-4 text-primary" />{template.title}</span>
@@ -600,7 +600,7 @@ function FormsPage() {
               <section aria-labelledby="delivery-title" className="border-t border-border pt-6">
                 <h3 id="delivery-title" className="m-0 text-base font-semibold">Onde o formulário aparece</h3>
                 <p className="mb-4 mt-1 text-sm text-muted-foreground">O painel é a mensagem que a comunidade encontra no Discord.</p>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
                   <div className="space-y-1.5"><Label htmlFor="form-channel">Canal do painel</Label><DiscordSelect id="form-channel" kind="text" value={asString(fcfg.config.panelChannelId)} onChange={(panelChannelId) => updateConfig("forms", { panelChannelId })} placeholder="Selecione um canal" /></div>
                   <div className="space-y-1.5"><Label htmlFor="form-review-channel">Canal para revisar respostas</Label><DiscordSelect id="form-review-channel" kind="text" value={asString(fcfg.config.reviewChannelId)} onChange={(reviewChannelId) => updateConfig("forms", { reviewChannelId })} placeholder="Selecione um canal" /></div>
                   <datalist id="form-text-channels">{channels.filter((channel) => channel.type === "text").flatMap((channel) => [<option key={channel.id} value={channel.name} />, <option key={`${channel.id}-hash`} value={`#${channel.name}`} />, <option key={`${channel.id}-id`} value={channel.id} />])}</datalist>
@@ -613,7 +613,7 @@ function FormsPage() {
               <section aria-labelledby="review-settings-title" className="border-t border-border pt-6">
                 <h3 id="review-settings-title" className="m-0 text-base font-semibold">Como a equipe recebe e revisa</h3>
                 <p className="mb-4 mt-1 text-sm text-muted-foreground">Essas regras são aplicadas pelo bot quando uma pessoa envia o formulário.</p>
-                <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
+                <div className="grid gap-x-8 gap-y-4 sm:grid-cols-1 md:grid-cols-2">
                   <label className="flex min-h-10 items-center justify-between gap-4 text-sm"><span>Avisar cargos revisores</span><Switch checked={Boolean(fcfg.config.notifyReviewers)} onCheckedChange={(value) => updateConfig("forms", { notifyReviewers: value })} /></label>
                   <label className="flex min-h-10 items-center justify-between gap-4 text-sm"><span>Exigir motivo ao recusar</span><Switch checked={Boolean(fcfg.config.requireReasonOnReject)} onCheckedChange={(value) => updateConfig("forms", { requireReasonOnReject: value })} /></label>
                   <div className="space-y-1.5"><Label htmlFor="form-cooldown">Intervalo entre envios (horas)</Label><Input id="form-cooldown" type="number" min={0} max={8760} value={Number(fcfg.config.cooldownHours ?? 24)} onChange={(event) => updateConfig("forms", { cooldownHours: Math.max(0, Number(event.target.value) || 0) })} /></div>

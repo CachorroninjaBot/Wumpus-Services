@@ -821,7 +821,7 @@ function TicketsPage() {
               <h3 id="ticket-template-heading" className="m-0 text-sm font-semibold">Comece com um modelo</h3>
               <p className="m-0 mt-1 text-xs text-muted-foreground">Clique para aplicar um pacote pronto. Você pode ajustar depois.</p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-1 md:grid-cols-3">
               {Object.entries(ticketTemplates).map(([id, template]) => (
                 <button
                   key={id}
@@ -872,7 +872,7 @@ function TicketsPage() {
               </div>
             </Field>
             <Field label="Como mostrar as opções de atendimento?">
-              <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Formato das opções de atendimento">
+              <div className="grid gap-2 sm:grid-cols-1 md:grid-cols-2" role="group" aria-label="Formato das opções de atendimento">
                 <button type="button" aria-pressed={departmentDisplayMode === "select"} onClick={() => updateConfig("tickets", { departmentDisplayMode: "select" })} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", departmentDisplayMode === "select" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
                   <span className="block text-sm font-semibold">Menu suspenso</span>
                   <span className="mt-1 block text-xs text-muted-foreground">Uma lista compacta que aceita até 25 opções.</span>
@@ -926,7 +926,7 @@ function TicketsPage() {
             <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Mais configurações de atendimento</summary>
             <p className="mb-4 mt-2 text-sm text-muted-foreground">Prazos, automações, registros e aparência. Você pode voltar a elas quando quiser.</p>
             <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
               <Field label="Máximo de tickets abertos por pessoa">
                 <Input key={String(tcfg.config.maxOpenPerUser ?? 1)} type="number" min={1} max={25} defaultValue={Number(tcfg.config.maxOpenPerUser ?? 1)} onBlur={(e) => updateConfig("tickets", { maxOpenPerUser: Math.max(1, Math.min(25, Number(e.target.value) || 1)) })} />
               </Field>
@@ -1109,7 +1109,7 @@ function TicketsPage() {
                     </details>
                   ))}
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
                   <Field label="Canal de transcrições">
                     <DiscordSelect kind="text" value={asString(tcfg.config.transcriptChannelId)} onChange={(transcriptChannelId) => updateConfig("tickets", { transcriptChannelId })} placeholder="Selecione um canal" />
                   </Field>
@@ -1121,14 +1121,14 @@ function TicketsPage() {
                   <Input key={String(tcfg.config.ticketMessageRetentionDays ?? 0)} type="number" min={0} max={3650} defaultValue={Number(tcfg.config.ticketMessageRetentionDays ?? 0)} onBlur={(e) => updateConfig("tickets", { ticketMessageRetentionDays: Math.max(0, Math.min(3650, Number(e.target.value) || 0)) })} />
                   <p className="m-0 text-xs text-muted-foreground">Remove mensagens e anexos locais após o prazo. Tickets novos com retenção configurada usam apenas a exportação local; transcripts externos já gerados não podem ser apagados pelo bot. O resumo permanece para estatísticas.</p>
                 </Field>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Notificar a equipe</Label><p className="m-0 text-xs text-muted-foreground">Menciona os cargos ao abrir.</p></div><Switch checked={Boolean(tcfg.config.pingStaffOnOpen)} onCheckedChange={(value) => updateConfig("tickets", { pingStaffOnOpen: value })} /></div>
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Permitir reabertura</Label><p className="m-0 text-xs text-muted-foreground">A pessoa pode voltar ao canal.</p></div><Switch checked={Boolean(tcfg.config.reopenEnabled)} onCheckedChange={(value) => updateConfig("tickets", { reopenEnabled: value })} /></div>
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3"><div><Label>Prioridade</Label><p className="m-0 text-xs text-muted-foreground">A equipe classifica urgência.</p></div><Switch checked={Boolean(tcfg.config.priorityEnabled)} onCheckedChange={(value) => updateConfig("tickets", { priorityEnabled: value })} /></div>
                   <Field label="Prazo para fechar automaticamente (horas; 0 desliga)"><Input key={String(tcfg.config.closeAfterHours ?? 48)} type="number" min={0} max={8760} defaultValue={Number(tcfg.config.closeAfterHours ?? 48)} onBlur={(e) => updateConfig("tickets", { closeAfterHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
                   <Field label="Prazo de inatividade (horas; 0 desliga)"><Input key={String(tcfg.config.autoCloseInactiveHours ?? 24)} type="number" min={0} max={8760} defaultValue={Number(tcfg.config.autoCloseInactiveHours ?? 24)} onBlur={(e) => updateConfig("tickets", { autoCloseInactiveHours: Math.max(0, Number(e.target.value) || 0) })} /></Field>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
                   <Field label="Meta para primeira resposta (minutos)">
                     <Input key={String(staffConfig.config.responseTimeGoalMinutes ?? 30)} type="number" min={5} max={10080} defaultValue={Number(staffConfig.config.responseTimeGoalMinutes ?? 30)} onBlur={(e) => updateConfig("staff", { responseTimeGoalMinutes: Math.max(5, Math.min(10080, Number(e.target.value) || 30)) })} />
                   </Field>
@@ -1312,6 +1312,11 @@ function ToggleRow({ label, description, checked, onChange }: { label: string; d
       <Switch checked={checked} onCheckedChange={onChange} />
     </div>
   );
+}
+
+function CharCounter({ current, max }: { current: number; max: number }) {
+  const over = current > max;
+  return <p className={cn("m-0 mt-1 text-[10px]", over ? "text-destructive" : "text-muted-foreground")}>{current}/{max}</p>;
 }
 
 function CharCounter({ current, max }: { current: number; max: number }) {
