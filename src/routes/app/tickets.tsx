@@ -1,2 +1,1 @@
-import { createFileRoute } from "@tanstack/react-router";
-// ... full content restored from previous commit b41dfcc ...
+$(cat /tmp/tickets-restore.tsx)
