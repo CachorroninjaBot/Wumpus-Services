@@ -31,7 +31,7 @@ SLA, transcript e feedback.
 | Tipos de atendimento configuráveis | ✅ até 25 opções por painel, com emoji, descrição, categoria Discord, cargos próprios/herdados e boas-vindas |
 | Formulário de abertura | ✅ até 5 perguntas obrigatórias por tipo; respostas aparecem no canal e no histórico da dashboard |
 | Modelos de configuração | ✅ suporte geral, loja e comunidade; aplicam configurações editáveis antes da publicação |
-| Personalização do painel | ✅ título, descrição, botão, emoji e cor; a prévia mostra o seletor e o formulário |
+| Personalização do painel | ✅ título, descrição, rodapé, cor, estilo do botão, menu suspenso ou até 5 botões diretos; opções com emoji e descrição; prévia do painel e do menu |
 
 Build: `npm run typecheck && npm test`. Os testes de tudo novo estão em
 `src/bot/tickets-sla.test.ts` (28 testes) — matemática pura, sem Discord.

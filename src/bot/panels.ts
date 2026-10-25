@@ -49,18 +49,18 @@ function separator() {
   return { type: 14, divider: true, spacing: 1 };
 }
 
-function actionRow(buttons: ButtonSpec[]) {
-  return {
-    type: 1,
-    components: buttons.slice(0, 5).map((button) => ({
-      type: 2,
-      style: button.style ?? 2,
-      label: button.label.slice(0, 80),
-      custom_id: button.customId.slice(0, 100),
-      ...(button.emoji ? { emoji: { name: button.emoji } } : {}),
-      ...(button.disabled ? { disabled: true } : {})
-    }))
-  };
+function actionRows(buttons: ButtonSpec[]) {
+  return Array.from({ length: Math.min(5, Math.ceil(buttons.length / 5)) }, (_, rowIndex) => ({
+      type: 1,
+      components: buttons.slice(rowIndex * 5, rowIndex * 5 + 5).map((button) => ({
+        type: 2,
+        style: button.style ?? 2,
+        label: button.label.slice(0, 80),
+        custom_id: button.customId.slice(0, 100),
+        ...(button.emoji ? { emoji: { name: button.emoji } } : {}),
+        ...(button.disabled ? { disabled: true } : {})
+      }))
+    }));
 }
 
 function container(accentColor: string, children: unknown[]) {
@@ -131,7 +131,7 @@ export function buildPanelPayload(input: {
   const buttons = input.buttons ?? [];
   if (buttons.length) {
     children.push(separator());
-    children.push(actionRow(buttons));
+    children.push(...actionRows(buttons));
   }
 
   if (input.footer?.trim()) {
@@ -158,10 +158,12 @@ export function defaultButtons(module: string, config?: Record<string, unknown>)
   if (module === "tickets") {
     const label = typeof config?.panelButtonLabel === "string" ? config.panelButtonLabel.trim() : "";
     const emoji = typeof config?.panelButtonEmoji === "string" ? config.panelButtonEmoji.trim() : "";
+    const configuredStyle = Number(config?.panelButtonStyle);
+    const style = [1, 2, 3, 4].includes(configuredStyle) ? configuredStyle as 1 | 2 | 3 | 4 : 1;
     return [{
       label: (label || "Abrir atendimento").slice(0, 80),
       customId: id("ticket", "open"),
-      style: 1,
+      style,
       ...(emoji ? { emoji } : { emoji: "🎫" }),
     }];
   }

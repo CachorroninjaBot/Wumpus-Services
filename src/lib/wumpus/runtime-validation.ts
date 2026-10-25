@@ -15,6 +15,7 @@ const enumValues: Record<string, readonly string[]> = {
   raidMode: ["smart", "strict", "passive"],
   response: ["alert", "lockdown_review", "auto"],
   panelFormat: ["components_v2", "embed"],
+  departmentDisplayMode: ["select", "buttons"],
   type: ["short", "paragraph", "select"],
 };
 
@@ -166,5 +167,22 @@ export const publishInputSchema = z.object({
   }
   if (typeof ticketConfig?.panelButtonEmoji === "string" && ticketConfig.panelButtonEmoji.length > 32) {
     ctx.addIssue({ code: "custom", message: "O emoji do botão de tickets deve ter até 32 caracteres." });
+  }
+  if (typeof ticketConfig?.panelFooter === "string" && ticketConfig.panelFooter.length > 300) {
+    ctx.addIssue({ code: "custom", message: "O rodapé do painel de tickets deve ter até 300 caracteres." });
+  }
+  if (typeof ticketConfig?.departmentMenuPrompt === "string" && ticketConfig.departmentMenuPrompt.length > 2000) {
+    ctx.addIssue({ code: "custom", message: "A mensagem de escolha do departamento deve ter até 2.000 caracteres." });
+  }
+  if (typeof ticketConfig?.departmentMenuPlaceholder === "string" && ticketConfig.departmentMenuPlaceholder.length > 150) {
+    ctx.addIssue({ code: "custom", message: "O texto do menu de departamentos deve ter até 150 caracteres." });
+  }
+  for (const key of ["panelButtonStyle", "departmentButtonStyle"]) {
+    if (ticketConfig?.[key] !== undefined && ![1, 2, 3, 4].includes(Number(ticketConfig[key]))) {
+      ctx.addIssue({ code: "custom", message: `Estilo inválido para tickets.${key}.` });
+    }
+  }
+  if (ticketConfig?.departmentDisplayMode === "buttons" && Array.isArray(departments) && departments.length > 5) {
+    ctx.addIssue({ code: "custom", message: "O modo de botões aceita até 5 tipos de atendimento." });
   }
 });

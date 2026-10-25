@@ -1242,14 +1242,38 @@ export async function reopenClosedTicket(
 export async function buildTicketPanel(guild: Guild) {
   const config = await moduleConfig(guild.id, "tickets");
   const departments = list(config, "departments");
+  const departmentSettings = Array.isArray(config?.departmentSettings)
+    ? config.departmentSettings.filter(
+        (entry): entry is Record<string, unknown> =>
+          Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+      )
+    : [];
+  const useDepartmentButtons =
+    config?.departmentDisplayMode === "buttons" &&
+    departments.length > 0 &&
+    departments.length <= 5;
+  const buttonStyle = Number(config?.departmentButtonStyle);
+  const departmentButtonStyle = [1, 2, 3, 4].includes(buttonStyle)
+    ? buttonStyle as 1 | 2 | 3 | 4
+    : 2;
 
   return buildPanelPayload({
     title: str(config, "panelTitle", "Central de atendimento"),
-    description: [
-      str(config, "panelDescription", "Abra um atendimento privado e fale com a equipe."),
-      departments.length ? `\nDepartamentos: ${departments.join(" · ")}` : ""
-    ].join(""),
+    description: str(config, "panelDescription", "Abra um atendimento privado e fale com a equipe."),
     accentColor: str(config, "panelAccentColor", "#28655b"),
-    buttons: defaultButtons("tickets", config ?? undefined)
+    footer: str(config, "panelFooter", ""),
+    buttons: useDepartmentButtons
+      ? departmentSettings
+          .filter((department) => departments.includes(String(department.name ?? "")))
+          .slice(0, 5)
+          .map((department) => ({
+            label: String(department.name ?? "").slice(0, 80),
+            customId: id("ticket", "department", encodeURIComponent(String(department.id ?? ""))),
+            style: departmentButtonStyle,
+            ...(typeof department.emoji === "string" && department.emoji.trim()
+              ? { emoji: department.emoji.trim() }
+              : {}),
+          }))
+      : defaultButtons("tickets", config ?? undefined)
   });
 }

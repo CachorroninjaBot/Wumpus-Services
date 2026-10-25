@@ -73,24 +73,27 @@ test("botao do painel de tickets usa o rótulo e emoji configurados", () => {
   assert.deepEqual(defaultButtons("tickets", {
     panelButtonLabel: "Falar com a equipe",
     panelButtonEmoji: "💬",
+    panelButtonStyle: 3,
   }), [{
     label: "Falar com a equipe",
     customId: "wumpus:v1:ticket:open",
-    style: 1,
+    style: 3,
     emoji: "💬",
   }]);
 });
 
-test("painel limita a 5 botoes por action row", () => {
+test("painel divide botoes em action rows com no maximo 5 controles", () => {
   const buttons = Array.from({ length: 8 }, (_, index) => ({
     label: `b${index}`,
     customId: `wumpus:v1:x:y:${index}`,
   }));
   const payload = buildPanelPayload({ title: "T", description: "D", buttons });
-  const row = (payload.components[0].components as Array<{ type: number; components: unknown[] }>).find(
+  const rows = (payload.components[0].components as Array<{ type: number; components: unknown[] }>).filter(
     (child) => child.type === 1
   );
-  assert.equal(row?.components.length, 5);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.components.length, 5);
+  assert.equal(rows[1]?.components.length, 3);
 });
 
 /* ------------------------------------------------- cabecalho e orcamento --- */

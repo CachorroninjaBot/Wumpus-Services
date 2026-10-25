@@ -614,9 +614,15 @@ async function promptDepartment(interaction: ButtonInteraction, log: Logger): Pr
   }
 
   const departmentSettings = getTicketDepartmentSettings(config);
+  const menuPlaceholder = typeof config?.departmentMenuPlaceholder === "string"
+    ? config.departmentMenuPlaceholder.trim().slice(0, 150)
+    : "";
+  const menuPrompt = typeof config?.departmentMenuPrompt === "string"
+    ? config.departmentMenuPrompt.trim().slice(0, 2000)
+    : "";
   const menu = new StringSelectMenuBuilder()
     .setCustomId(id("ticket", "dept"))
-    .setPlaceholder("Escolha o departamento")
+    .setPlaceholder(menuPlaceholder || "Escolha o departamento")
     .setMinValues(1)
     .setMaxValues(1)
     .addOptions(
@@ -638,7 +644,7 @@ async function promptDepartment(interaction: ButtonInteraction, log: Logger): Pr
     );
 
   await interaction.reply({
-    content: "Escolha o departamento para abrir o atendimento:",
+    content: menuPrompt || "Escolha o departamento para abrir o atendimento:",
     ephemeral: true,
     components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
   });
@@ -890,6 +896,23 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
 
   if (kind === "ticket" && action === "open") {
     await promptDepartment(interaction, log);
+    return;
+  }
+
+  if (kind === "ticket" && action === "department") {
+    const maintenance = await maintenanceNotice(guild.id);
+    if (maintenance) {
+      await interaction.reply({ content: maintenance, ephemeral: true });
+      return;
+    }
+    const departmentId = decodeURIComponent(args[0] ?? "");
+    const config = await moduleConfig(guild.id, "tickets");
+    const department = getTicketDepartmentSettings(config).find((entry) => entry.id === departmentId);
+    if (!department || typeof department.name !== "string") {
+      await interaction.reply({ content: "Esta opção de atendimento não está mais disponível.", ephemeral: true });
+      return;
+    }
+    await beginTicketOpen(interaction, department.name, log);
     return;
   }
 

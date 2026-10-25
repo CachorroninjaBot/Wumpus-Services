@@ -86,6 +86,12 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     ],
     panelButtonLabel: "Abrir atendimento",
     panelButtonEmoji: "🎫",
+    panelButtonStyle: 1,
+    panelFooter: "",
+    departmentDisplayMode: "select",
+    departmentButtonStyle: 2,
+    departmentMenuPrompt: "Escolha o departamento para abrir o atendimento:",
+    departmentMenuPlaceholder: "Escolha o departamento",
   },
   forms: {
     panelChannelId: "",

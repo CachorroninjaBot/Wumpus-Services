@@ -88,6 +88,43 @@ test("aceita configurações de departamento para canais, cargos e mensagens", (
   }).success, true);
 });
 
+test("aceita personalização do painel e rejeita limites inválidos", () => {
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: {
+      tickets: {
+        departmentDisplayMode: "buttons",
+        departmentButtonStyle: 3,
+        panelButtonStyle: 1,
+        panelFooter: "Atendimento de segunda a sexta.",
+        departmentMenuPrompt: "Escolha o assunto:",
+        departmentMenuPlaceholder: "Selecione uma opção",
+        departments: ["Suporte"],
+        departmentSettings: [{
+          id: "support",
+          name: "Suporte",
+          description: "Ajuda com o servidor",
+          emoji: "🛟",
+          categoryId: "",
+          staffRoleIds: [],
+          inheritStaff: true,
+          welcomeMessage: "",
+          intakeQuestions: [],
+        }],
+      },
+    },
+  }).success, true);
+
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: { tickets: { departmentDisplayMode: "buttons", departmentButtonStyle: 5 } },
+  }).success, false);
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: { tickets: { panelFooter: "x".repeat(301) } },
+  }).success, false);
+});
+
 test("recusa mais departamentos configurados do que o Discord suporta", () => {
   assert.equal(publishInputSchema.safeParse({
     ...valid,

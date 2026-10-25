@@ -9,6 +9,11 @@ export function DiscordPanel({
   accent = "#28655b",
   buttons,
   choiceOptions,
+  choiceDisplayMode = "select",
+  choiceButtonStyle = "primary",
+  menuPlaceholder = "Escolha o departamento",
+  menuPrompt = "Escolha o departamento para abrir o atendimento:",
+  footer,
   format = "v2",
 }: {
   channel?: string;
@@ -17,8 +22,20 @@ export function DiscordPanel({
   accent?: string;
   buttons: string[];
   choiceOptions?: Array<{ name: string; description?: string; emoji?: string }>;
+  choiceDisplayMode?: "buttons" | "select";
+  choiceButtonStyle?: "primary" | "secondary" | "success" | "danger";
+  menuPlaceholder?: string;
+  menuPrompt?: string;
+  footer?: string;
   format?: "v2" | "embed";
 }) {
+  const styleClass = {
+    primary: "primary",
+    secondary: "secondary",
+    success: "success",
+    danger: "danger",
+  }[choiceButtonStyle];
+
   return (
     <div className="discord-window" aria-hidden="true">
       <div className="discord-top">
@@ -48,30 +65,46 @@ export function DiscordPanel({
                   <p className="m-0 mt-2 text-[15px] font-semibold text-white">{title}</p>
                   <p className="mt-1.5 mb-0 text-[13px] leading-relaxed text-discord-text">{description}</p>
                   <div className="discord-sep" />
-                  <div className="flex flex-wrap gap-2">
-                    {buttons.map((label) => (
-                      <span key={label} className="discord-btn primary">
-                        {label}
-                      </span>
-                    ))}
-                  </div>
-                  {choiceOptions?.length ? (
+                  {choiceDisplayMode === "buttons" && choiceOptions?.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {choiceOptions.slice(0, 5).map((option) => (
+                        <span key={option.name} className={`discord-btn ${styleClass}`}>
+                          {option.emoji || "🎫"} {option.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {buttons.map((label) => (
+                        <span key={label} className={`discord-btn ${styleClass}`}>
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {choiceDisplayMode === "select" && choiceOptions?.length && choiceOptions.length > 1 ? (
                     <div className="mt-3 rounded-lg bg-discord-surface p-2.5">
-                      <p className="m-0 mb-2 text-[10px] font-semibold uppercase tracking-wide text-discord-muted">Depois do clique · escolha uma categoria</p>
-                      <div className="space-y-1.5">
+                      <p className="m-0 mb-2 text-[10px] font-semibold uppercase tracking-wide text-discord-muted">Resposta privada após o clique</p>
+                      <p className="m-0 mb-2 text-[11px] text-discord-text">{menuPrompt}</p>
+                      <div className="flex min-w-0 items-center justify-between gap-2 rounded-md bg-discord-surface-deep px-2.5 py-2 text-[11px] text-discord-muted">
+                        <span className="truncate">{menuPlaceholder}</span>
+                        <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+                      </div>
+                      <div className="mt-2 space-y-1">
                         {choiceOptions.slice(0, 4).map((option) => (
-                          <div key={option.name} className="flex min-w-0 items-start gap-2 rounded-md bg-discord-surface-deep px-2.5 py-2">
+                          <div key={option.name} className="flex min-w-0 items-start gap-2 rounded-md bg-discord-surface-deep px-2 py-1.5">
                             <span aria-hidden="true">{option.emoji || "🎫"}</span>
                             <span className="min-w-0">
-                              <span className="block truncate text-[11px] font-medium text-discord-text">{option.name}</span>
-                              {option.description ? <span className="block truncate text-[10px] text-discord-muted">{option.description}</span> : null}
+                              <span className="block truncate text-[10px] font-medium text-discord-text">{option.name}</span>
+                              {option.description ? <span className="block truncate text-[9px] text-discord-muted">{option.description}</span> : null}
                             </span>
                           </div>
                         ))}
-                        {choiceOptions.length > 4 ? <p className="m-0 text-[10px] text-discord-muted">e mais {choiceOptions.length - 4} opções</p> : null}
+                        {choiceOptions.length > 4 ? <p className="m-0 text-[10px] text-discord-muted">+ {choiceOptions.length - 4} opções</p> : null}
                       </div>
                     </div>
                   ) : null}
+                  {footer?.trim() ? <p className="m-0 mt-3 text-[10px] text-discord-muted">{footer}</p> : null}
                 </div>
               ) : (
                 <div className="discord-embed" style={{ borderLeftColor: accent }}>

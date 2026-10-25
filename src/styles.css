@@ -425,6 +425,18 @@ html { scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 55%, tr
   background: #5865f2;
 }
 
+.discord-btn.secondary {
+  background: #4e5058;
+}
+
+.discord-btn.success {
+  background: #248046;
+}
+
+.discord-btn.danger {
+  background: #da373c;
+}
+
 .discord-v2 {
   margin-top: 12px;
   border-radius: 12px;

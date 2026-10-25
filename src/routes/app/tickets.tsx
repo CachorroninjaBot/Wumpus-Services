@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemberAvatar } from "@/components/brand";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { ArrowDown, ArrowUp, Check, Plus, Search, Trash2, WandSparkles } from "lucide-react";
-import { DiscordModalPreview, DiscordPanel } from "@/components/discord-panel";
+import { DiscordPanel } from "@/components/discord-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -43,6 +43,13 @@ const priorityLabel: Record<TicketPriority, string> = {
   high: "Alta",
   urgent: "Urgente",
 };
+
+const discordButtonStyles = [
+  { value: 1, label: "Azul", preview: "primary" as const },
+  { value: 2, label: "Cinza", preview: "secondary" as const },
+  { value: 3, label: "Verde", preview: "success" as const },
+  { value: 4, label: "Vermelho", preview: "danger" as const },
+];
 
 type NoticeTone = "neutral" | "success" | "error";
 type SavedReply = { id: string; label: string; content: string };
@@ -169,8 +176,12 @@ function TicketsPage() {
     return canUseDepartments ? normalized.slice(0, 25) : normalized.slice(0, 1);
   }, [canUseDepartments, tcfg.config.departmentSettings, tcfg.config.departments]);
   const departments = departmentSettings.map((department) => department.name);
+  const departmentDisplayMode = asString(tcfg.config.departmentDisplayMode, "select") === "buttons" ? "buttons" : "select";
+  const panelButtonStyle = discordButtonStyles.find((style) => style.value === Number(tcfg.config.panelButtonStyle)) ?? discordButtonStyles[0]!;
+  const departmentButtonStyle = discordButtonStyles.find((style) => style.value === Number(tcfg.config.departmentButtonStyle)) ?? discordButtonStyles[1]!;
   const departmentNames = departments.map((name) => name.trim().toLocaleLowerCase("pt-BR"));
   const validDepartmentSettings = departmentSettings.length > 0
+    && (departmentDisplayMode !== "buttons" || departmentSettings.length <= 5)
     && departmentSettings.every((department) =>
       department.name.trim().length > 0
       && department.name.length <= 100
@@ -858,10 +869,51 @@ function TicketsPage() {
             <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">2</span><div><h3 className="m-0 text-base font-semibold">Dê contexto ao painel</h3><p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p></div></div>
             <Field label="Título do painel"><Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => updateConfig("tickets", { panelTitle: e.target.value })} /></Field>
             <Field label="Descrição do painel"><Textarea maxLength={4000} value={asString(tcfg.config.panelDescription)} onChange={(e) => updateConfig("tickets", { panelDescription: e.target.value })} /></Field>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
-              <Field label="Texto do botão"><Input maxLength={80} value={asString(tcfg.config.panelButtonLabel, "Abrir atendimento")} onChange={(e) => updateConfig("tickets", { panelButtonLabel: e.target.value })} placeholder="Abrir atendimento" /></Field>
-              <Field label="Emoji"><Input maxLength={32} value={asString(tcfg.config.panelButtonEmoji, "����")} onChange={(e) => updateConfig("tickets", { panelButtonEmoji: e.target.value })} placeholder="🎫" /></Field>
-            </div>
+            <Field label="Como mostrar as opções de atendimento?">
+              <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Formato das opções de atendimento">
+                <button type="button" aria-pressed={departmentDisplayMode === "select"} onClick={() => updateConfig("tickets", { departmentDisplayMode: "select" })} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", departmentDisplayMode === "select" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
+                  <span className="block text-sm font-semibold">Menu suspenso</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">Uma lista compacta que aceita até 25 opções.</span>
+                </button>
+                <button type="button" aria-pressed={departmentDisplayMode === "buttons"} disabled={departmentSettings.length > 5} onClick={() => updateConfig("tickets", { departmentDisplayMode: "buttons" })} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50", departmentDisplayMode === "buttons" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
+                  <span className="block text-sm font-semibold">Botões no painel</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">Cada tipo aparece direto na publicação, até 5.</span>
+                </button>
+              </div>
+              {departmentSettings.length > 5 ? <p className="m-0 text-xs text-muted-foreground">Para usar botões, reduza os tipos de atendimento para no máximo 5.</p> : null}
+            </Field>
+            {departmentDisplayMode === "select" ? (
+              <>
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+                  <Field label="Texto do botão de abertura"><Input maxLength={80} value={asString(tcfg.config.panelButtonLabel, "Abrir atendimento")} onChange={(e) => updateConfig("tickets", { panelButtonLabel: e.target.value })} placeholder="Abrir atendimento" /></Field>
+                  <Field label="Emoji"><Input maxLength={32} value={asString(tcfg.config.panelButtonEmoji, "🎫")} onChange={(e) => updateConfig("tickets", { panelButtonEmoji: e.target.value })} placeholder="🎫" /></Field>
+                </div>
+                <Field label="Mensagem ao escolher um tipo">
+                  <Textarea rows={2} maxLength={2000} value={asString(tcfg.config.departmentMenuPrompt, "Escolha o departamento para abrir o atendimento:")} onChange={(event) => updateConfig("tickets", { departmentMenuPrompt: event.target.value })} />
+                </Field>
+                <Field label="Texto dentro do menu">
+                  <Input maxLength={150} value={asString(tcfg.config.departmentMenuPlaceholder, "Escolha o departamento")} onChange={(event) => updateConfig("tickets", { departmentMenuPlaceholder: event.target.value })} />
+                </Field>
+                <Field label="Cor do botão de abertura">
+                  <NativeSelect value={String(panelButtonStyle.value)} onChange={(event) => updateConfig("tickets", { panelButtonStyle: Number(event.target.value) })}>
+                    {discordButtonStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}
+                  </NativeSelect>
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label="Cor dos botões de opção">
+                  <NativeSelect value={String(departmentButtonStyle.value)} onChange={(event) => updateConfig("tickets", { departmentButtonStyle: Number(event.target.value) })}>
+                    {discordButtonStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}
+                  </NativeSelect>
+                </Field>
+                <p className="m-0 text-xs text-muted-foreground">O Discord não exibe as descrições no formato de botões; elas aparecem no menu suspenso.</p>
+              </>
+            )}
+            <Field label="Texto complementar no rodapé (opcional)">
+              <Textarea rows={2} maxLength={300} value={asString(tcfg.config.panelFooter)} onChange={(event) => updateConfig("tickets", { panelFooter: event.target.value })} placeholder="Ex.: Horário de atendimento: 9h às 18h" />
+              <p className="m-0 text-xs text-muted-foreground">Aparece em texto discreto abaixo do painel.</p>
+            </Field>
           </div>
           <div className="space-y-4 rounded-2xl border border-border bg-card p-4">
             <div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold">3</span><div><h3 className="m-0 text-base font-semibold">Escolha quem responde</h3><p className="m-0 mt-1 text-sm text-muted-foreground">Cargos selecionados poderão acessar os canais privados.</p></div></div>
@@ -1190,10 +1242,12 @@ function TicketsPage() {
               accent={asString(tcfg.config.panelAccentColor, "#28655b")}
               buttons={[`${asString(tcfg.config.panelButtonEmoji, "🎫")} ${asString(tcfg.config.panelButtonLabel, "Abrir atendimento")}`]}
               choiceOptions={departmentSettings}
+              choiceDisplayMode={departmentDisplayMode}
+              choiceButtonStyle={departmentDisplayMode === "buttons" ? departmentButtonStyle.preview : panelButtonStyle.preview}
+              menuPrompt={asString(tcfg.config.departmentMenuPrompt, "Escolha o departamento para abrir o atendimento:")}
+              menuPlaceholder={asString(tcfg.config.departmentMenuPlaceholder, "Escolha o departamento")}
+              footer={asString(tcfg.config.panelFooter)}
             />
-            {departmentSettings[0]?.intakeQuestions.length ? (
-              <DiscordModalPreview title={departmentSettings[0].name} questions={departmentSettings[0].intakeQuestions} />
-            ) : null}
           </aside>
           </div>
         </TabsContent>
