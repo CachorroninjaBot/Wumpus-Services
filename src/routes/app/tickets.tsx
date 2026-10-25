@@ -1,1 +1,1 @@
-$(cat /tmp/tickets.tsx)
+PLACEHOLDER - will be replaced
