@@ -67,6 +67,20 @@ export async function exchangeDiscordCodeDirect(code: string, options: DiscordOA
     body,
     signal: AbortSignal.timeout(10_000),
   });
+  if (tokenRes.status === 429) {
+    const retryAfter = Number(tokenRes.headers.get("retry-after"));
+    const waitHint = Number.isFinite(retryAfter) && retryAfter > 0
+      ? ` Aguarde pelo menos ${Math.ceil(retryAfter)} segundos.`
+      : " Aguarde alguns minutos.";
+    console.warn("[discord-oauth-token] Discord limitou a troca do código OAuth.", JSON.stringify({
+      status: tokenRes.status,
+      retryAfterSeconds: Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : null,
+    }));
+    return {
+      ok: false as const,
+      error: `O Discord está limitando tentativas de login.${waitHint} Volte ao início e inicie um novo login; não reutilize esta página de callback.`,
+    };
+  }
   if (!tokenRes.ok) return { ok: false as const, error: `Discord recusou o código (${tokenRes.status}).` };
   const token = (await tokenRes.json()) as { access_token?: unknown };
   if (typeof token.access_token !== "string" || token.access_token.length < 1 || token.access_token.length > 4096) {
