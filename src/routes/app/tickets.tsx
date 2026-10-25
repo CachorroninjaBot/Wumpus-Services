@@ -22,6 +22,7 @@ import { cn, formatRelative, formatTime } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MarkdownContent } from "@/components/markdown-content";
 import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
 
 export const Route = createFileRoute("/app/tickets")({ component: TicketsPage });
 
@@ -577,31 +578,11 @@ function TicketsPage() {
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
         <Card className={cn("max-h-[70vh] overflow-y-auto p-2", showTicketOnMobile && "hidden lg:block")}>
           {list.length === 0 ? (
-            <div className="space-y-3 p-4">
-              <div>
-                <h2 className="m-0 text-base font-semibold">
-                  {!ticketsLoaded
-                    ? "Carregando atendimentos…"
-                    : ticketLoadError
-                    ? "Não foi possível carregar a fila"
-                    : tickets.length === 0
-                    ? "Sua fila começa aqui"
-                    : "Nenhum atendimento encontrado. Crie um painel para começar a receber tickets."}
-                </h2>
-                <p className="mt-1 mb-0 text-sm text-muted-foreground">
-                  {!ticketsLoaded
-                    ? "Buscando os atendimentos registrados pelo bot."
-                    : ticketLoadError
-                    ? "A fila tentará carregar novamente em instantes."
-                    : tickets.length === 0
-                    ? "Configure o canal e os cargos de atendimento e publique o painel no Discord para receber os primeiros tickets."
-                    : "Ajuste a busca ou os filtros para encontrar atendimentos."}
-                </p>
-              </div>
-              {tickets.length === 0 ? (
-                <Button className="sm:static"  size="sm" onClick={() => setActiveView("panel")}>Configurar o painel de atendimento</Button>
-              ) : null}
-            </div>
+            <EmptyState
+              title={!ticketsLoaded ? "Carregando atendimentos…" : ticketLoadError ? "Não foi possível carregar a fila" : tickets.length === 0 ? "Sua fila começa aqui" : "Nenhum atendimento encontrado"}
+              description={!ticketsLoaded ? "Buscando os atendimentos registrados pelo bot." : ticketLoadError ? "A fila tentará carregar novamente em instantes." : tickets.length === 0 ? "Configure o canal e os cargos e publique o painel para receber os primeiros tickets." : "Ajuste a busca ou os filtros."}
+              action={tickets.length === 0 ? <Button size="sm" onClick={() => setActiveView("panel")}>Configurar o painel</Button> : undefined}
+            />
           ) : (
             list.map((t) => {
               const sla = ticketSla(t, tcfg.config);

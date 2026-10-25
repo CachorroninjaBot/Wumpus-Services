@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
+import { EmptyState } from "@/components/empty-state";
   ArrowDown,
   ArrowUp,
   Check,
@@ -406,10 +407,10 @@ function FormsPage() {
                 }) : (
                   <div className="px-5 py-10">
                     <Inbox className="mb-3 size-5 text-primary" />
-                    <div className="space-y-3">
-                      <h2 className="m-0 text-base font-semibold">{submissions.length ? "Nenhuma resposta nesta lista" : "A caixa está pronta"}</h2>
-                      {!submissions.length ? <Button size="sm">Criar primeiro formulário</Button> : null}
-                    </div>
+                    <EmptyState
+                      title={submissions.length ? "Nenhuma resposta nesta lista" : "A caixa está pronta"}
+                      action={!submissions.length ? <Button size="sm">Criar primeiro formulário</Button> : undefined}
+                    />
                     <p className="mb-4 mt-1 max-w-[34ch] text-sm leading-6 text-muted-foreground">
                       {submissions.length ? "Mude o filtro ou a busca para encontrar outra resposta." : "Publique seu primeiro formulário e as respostas aparecerão aqui para revisão."}
                     </p>
