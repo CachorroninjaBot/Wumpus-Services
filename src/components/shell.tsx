@@ -101,6 +101,7 @@ function ServerRail() {
   const setActiveGuild = useWumpus((state) => state.setActiveGuild);
   const userId = useWumpus((state) => state.sessionUser.id);
   const [orderedIds, setOrderedIds] = useState<string[]>([]);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
   const orderKey = `wumpus-server-order-v1:${userId}`;
 
   useEffect(() => {
@@ -159,7 +160,9 @@ function ServerRail() {
               onDragStart={(event) => {
                 event.dataTransfer.setData("text/plain", guild.id);
                 event.dataTransfer.effectAllowed = "move";
+                setDraggingId(guild.id);
               }}
+              onDragEnd={() => setDraggingId(null)}
               onDragOver={(event) => {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
@@ -167,6 +170,7 @@ function ServerRail() {
               onDrop={(event) => {
                 event.preventDefault();
                 reorder(event.dataTransfer.getData("text/plain"), guild.id);
+                setDraggingId(null);
               }}
               onKeyDown={(event) => {
                 if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
@@ -175,8 +179,9 @@ function ServerRail() {
                 if (target) reorder(guild.id, target.id);
               }}
               className={cn(
-                "relative grid size-12 shrink-0 place-items-center rounded-[18px] transition-[border-radius,background] duration-150 hover:rounded-[14px] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                "relative grid size-12 shrink-0 place-items-center rounded-[18px] cursor-grab transition-[border-radius,background,opacity,transform] duration-150 hover:rounded-[14px] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:cursor-grabbing",
                 active && "rounded-[14px] bg-background shadow-border",
+                draggingId === guild.id && "opacity-40 scale-95",
               )}
             >
               <span aria-hidden="true" className={cn("absolute -left-2 w-1 rounded-r-full bg-primary transition-all", active ? "h-8" : "h-2 opacity-0")} />
