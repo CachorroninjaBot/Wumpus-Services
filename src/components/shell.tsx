@@ -458,7 +458,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         {runtimeSyncError ? <p role="alert" className="mx-4 mb-0 mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive sm:mx-7">{runtimeSyncError}</p> : null}
-        <main id="main-content" tabIndex={-1} className="app-page w-full flex-1 px-4 py-6 outline-none sm:px-7 sm:py-8">
+        <main id="main-content" tabIndex={-1} className="app-page mx-auto w-full max-w-7xl flex-1 px-5 py-10 outline-none sm:px-8 sm:py-12 lg:py-14">
           {children}
         </main>
       </div>

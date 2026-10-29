@@ -1,52 +1,35 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MemberAvatar } from "@/components/brand";
-import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
-import { ArrowDown, ArrowUp, Check, Plus, Search, Trash2, WandSparkles } from "lucide-react";
-import { DiscordPanel, DiscordModalPreview } from "@/components/discord-panel";
-import { Badge } from "@/components/ui/badge";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ExternalLink,
+  Inbox,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Notice } from "@/components/ui/notice";
-import { Dialog, DialogContent, DialogDesc, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { analyzeWithGrok } from "@/lib/wumpus/analyze";
-import { asList, asString, planAllows, searchArticles, shouldAutoClose, ticketSla, type SlaState } from "@/lib/wumpus/engine";
-import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
+import { asList, asString, planAllows } from "@/lib/wumpus/engine";
+import { useActiveGuild, useModule, useWumpus } from "@/lib/wumpus/store";
 import { usePublishPanel } from "@/lib/wumpus/use-publish-panel";
-import { getGuildTicketMessages, getGuildTickets, getTicketActionStatus, requestTicketAction } from "@/lib/wumpus/runtime-store";
+import { getGuildTickets } from "@/lib/wumpus/runtime-store";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { ExclusiveButton } from "@/components/exclusive-button";
-import type { Ticket, TicketDepartmentConfig, TicketPriority } from "@/lib/wumpus/types";
-import { cn, formatRelative, formatTime } from "@/lib/utils";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MarkdownContent } from "@/components/markdown-content";
+import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
+import { DiscordPanel, DiscordModalPreview } from "@/components/discord-panel";
+import type { TicketDepartmentConfig } from "@/lib/wumpus/types";
+import { cn, formatRelative } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { NumberField } from "@/components/protect/helpers";
 
 export const Route = createFileRoute("/app/tickets")({ component: TicketsPage });
-
-const slaTone: Record<SlaState, "ok" | "warn" | "danger"> = {
-  ok: "ok",
-  warning: "warn",
-  breach: "danger",
-};
-
-const priorityTone: Record<TicketPriority, "default" | "info" | "warn" | "danger"> = {
-  low: "default",
-  normal: "info",
-  high: "warn",
-  urgent: "danger",
-};
-
-const priorityLabel: Record<TicketPriority, string> = {
-  low: "Baixa",
-  normal: "Normal",
-  high: "Alta",
-  urgent: "Urgente",
-};
 
 const discordButtonStyles = [
   { value: 1, label: "Azul", preview: "primary" as const },
@@ -55,18 +38,21 @@ const discordButtonStyles = [
   { value: 4, label: "Vermelho", preview: "danger" as const },
 ];
 
-type NoticeTone = "neutral" | "success" | "error";
-type SavedReply = { id: string; label: string; content: string };
+const statusLabel: Record<string, string> = {
+  open: "Aberto",
+  claimed: "Em atendimento",
+  closed: "Encerrado",
+  archived: "Arquivado",
+};
 
-function readSavedReplies(value: unknown): SavedReply[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry): SavedReply[] => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-    const row = entry as Record<string, unknown>;
-    if (typeof row.id !== "string" || typeof row.label !== "string" || typeof row.content !== "string") return [];
-    return [{ id: row.id, label: row.label, content: row.content }];
-  }).slice(0, 20);
-}
+type ArchiveTicket = {
+  id: string;
+  number: number;
+  subject: string;
+  department: string;
+  status: string;
+  createdAt: number;
+};
 
 const ticketTemplates: Record<string, { label: string; description: string; config: Partial<Record<string, unknown>> }> = {
   support: {
@@ -133,24 +119,14 @@ const ticketTemplates: Record<string, { label: string; description: string; conf
 
 function TicketsPage() {
   const gid = useWumpus((s) => s.activeGuildId);
-  const { busy: pubBusyHook, publish: publishPanel } = usePublishPanel(gid);
+  const { busy: pubBusy, publish: publishPanel } = usePublishPanel(gid);
   const guild = useActiveGuild();
-  const user = useWumpus((s) => s.sessionUser);
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [ticketsLoaded, setTicketsLoaded] = useState(false);
-  const [ticketLoadError, setTicketLoadError] = useState<string | null>(null);
-  const [loadingTicketId, setLoadingTicketId] = useState<string | null>(null);
-  const members = useGuildMembers();
   const tcfg = useModule("tickets");
   const staffConfig = useModule("staff");
   const updateConfig = useWumpus((s) => s.updateConfig);
   const setEnabled = useWumpus((s) => s.setModuleEnabled);
-  const articles = useWumpus((s) => s.articles);
-  const kcfg = useModule("knowledge");
-  const aiAllowed = planAllows(guild.plan, "ai") && Boolean(tcfg.config.aiSupportEnabled);
-  const configuredSavedReplies = readSavedReplies(tcfg.config.savedReplies);
-  const savedReplies = configuredSavedReplies.filter((item) => item.label.trim() && item.content.trim());
   const canUseDepartments = planAllows(guild.plan, "multiDepartment");
+
   const departmentSettings = useMemo<TicketDepartmentConfig[]>(() => {
     const saved = Array.isArray(tcfg.config.departmentSettings)
       ? tcfg.config.departmentSettings.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
@@ -180,6 +156,7 @@ function TicketsPage() {
         }));
     return canUseDepartments ? normalized.slice(0, 25) : normalized.slice(0, 1);
   }, [canUseDepartments, tcfg.config.departmentSettings, tcfg.config.departments]);
+
   const departments = departmentSettings.map((department) => department.name);
   const departmentDisplayMode = asString(tcfg.config.departmentDisplayMode, "select") === "buttons" ? "buttons" : "select";
   const panelButtonStyle = discordButtonStyles.find((style) => style.value === Number(tcfg.config.panelButtonStyle)) ?? discordButtonStyles[0]!;
@@ -194,8 +171,14 @@ function TicketsPage() {
       && department.intakeQuestions.every((question) => question.trim().length > 0 && question.length <= 45)
     )
     && new Set(departmentNames).size === departmentNames.length;
+
   const [selectedTemplate, setSelectedTemplate] = useState("support");
   const [templateNotice, setTemplateNotice] = useState("");
+  const [previewMode, setPreviewMode] = useState<"panel" | "modal">("panel");
+  const [dirty, setDirty] = useState(false);
+  const [activeView, setActiveView] = useState<"panel" | "archive">("panel");
+  const [pubNotice, setPubNotice] = useState<string | null>(null);
+  const [pubTone, setPubTone] = useState<"ok" | "error" | "neutral">("neutral");
 
   function saveDepartments(next: TicketDepartmentConfig[]) {
     const limited = canUseDepartments ? next.slice(0, 25) : next.slice(0, 1);
@@ -203,10 +186,6 @@ function TicketsPage() {
       departments: limited.map((department) => department.name.trim()).filter(Boolean),
       departmentSettings: limited,
     });
-  }
-
-  function saveSavedReplies(next: SavedReply[]) {
-    updateConfig("tickets", { savedReplies: next.slice(0, 20) });
   }
 
   function applyTicketTemplate(templateId: string) {
@@ -219,627 +198,157 @@ function TicketsPage() {
       departments: limitedDepartments.map((department) => department.name),
       departmentSettings: limitedDepartments,
     });
-    setTemplateNotice(`Modelo “${template.label}” aplicado. Você pode ajustar cada opção antes de publicar.`);
+    setTemplateNotice(`Modelo “${template.label}” aplicado. Ajuste o que quiser e publique o painel.`);
   }
 
-  const [filter, setFilter] = useState<"active" | "closed">("active");
-  const [query, setQuery] = useState("");
-  const [departmentFilter, setDepartmentFilter] = useState("all");
-  const [priorityFilter, setPriorityFilter] = useState("all");
-  const [quickFilter, setQuickFilter] = useState<"all" | "mine" | "unassigned" | "overdue" | "urgent">("all");
-  const [selectedId, setSelectedId] = useState<string | null>(tickets[0]?.id ?? null);
-  const [showTicketOnMobile, setShowTicketOnMobile] = useState(false);
-  const [compactQueue, setCompactQueue] = useState(false);
-  const [reply, setReply] = useState("");
-  const [internalNote, setInternalNote] = useState(false);
-  const [transferStaffInput, setTransferStaffInput] = useState("");
-  const [closeReason, setCloseReason] = useState("");
-  const [activeView, setActiveView] = useState<"queue" | "panel">("queue");
-  const [previewMode, setPreviewMode] = useState<"panel" | "modal">("panel");
-  const [dirty, setDirty] = useState(false);
-  const [ai, setAi] = useState<string | null>(null);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [closeOpen, setCloseOpen] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [noticeTone, setNoticeTone] = useState<NoticeTone>("neutral");
-  const noticeId = useRef(0);
-  const [pubBusy, setPubBusy] = useState(false);
-  const [actionBusy, setActionBusy] = useState(false);
-  const firstTicketId = tickets[0]?.id ?? null;
-  const announce = useCallback((message: string, tone: NoticeTone = "neutral") => {
-    setNotice(message);
-    setNoticeTone(tone);
-    noticeId.current += 1;
-  }, []);
+  async function publish() {
+    setPubNotice(null);
+    const result = await publishPanel("tickets", asString(tcfg.config.panelChannelId));
+    if (result) {
+      setPubNotice(result.status === "done" ? "Painel publicado no Discord." : result.status === "failed" ? result.detail ?? "O bot não conseguiu publicar o painel." : "Pedido enviado; o bot vai confirmar em instantes.");
+      setPubTone(result.status === "done" ? "ok" : result.status === "failed" ? "error" : "neutral");
+      if (result.status === "done") setDirty(false);
+    }
+  }
 
-  useEffect(() => {
-    let stopped = false;
-    let inFlight = false;
-    const refresh = async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        const token = getStoredSessionToken();
-        if (!token || !gid) {
-          if (!stopped) {
-            setTickets([]);
-            setTicketLoadError("Entre com Discord para consultar os tickets deste servidor.");
-            setTicketsLoaded(true);
-          }
-          return;
-        }
-        const rows = await getGuildTickets({ data: { token, guildId: gid } });
-        if (!stopped) {
-          setTickets((current) => {
-            const currentById = new Map(current.map((ticket) => [ticket.id, ticket]));
-            const next = rows.map((row) => ({
-              ...row,
-              messages: currentById.get(row.id)?.messages ?? row.messages,
-            }));
-            return next.length === current.length && next.every((row, index) => {
-              const previous = current[index];
-              return previous
-                && previous.id === row.id
-                && previous.subject === row.subject
-                && previous.subject === row.subject
-                && previous.status === row.status
-                && previous.priority === row.priority
-                && previous.claimedBy === row.claimedBy
-                && previous.waitingOn === row.waitingOn
-                && previous.department === row.department
-                && previous.createdAt === row.createdAt
-                && previous.firstResponseAt === row.firstResponseAt
-                && previous.closedAt === row.closedAt
-                && previous.feedback?.rating === row.feedback?.rating
-                && previous.feedback?.comment === row.feedback?.comment;
-            }) ? current : next;
-          });
-          setTicketLoadError(null);
-          setTicketsLoaded(true);
-          const requestedTicket = new URLSearchParams(window.location.search).get("ticket");
-          const requested = requestedTicket && rows.find((row) => row.id === requestedTicket || String(row.number) === requestedTicket);
-          if (requested) {
-            setSelectedId(requested.id);
-            setShowTicketOnMobile(true);
-          }
-        }
-      } catch (error) {
-        if (!stopped) { setTicketLoadError(error instanceof Error ? error.message : "Não foi possível carregar os atendimentos reais."); setTicketsLoaded(true); }
-      } finally {
-        inFlight = false;
-      }
-    };
-    setTickets([]);
-    setTicketsLoaded(false);
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 10_000);
-    return () => { stopped = true; window.clearInterval(timer); };
+  // Registro de consulta: as conversas acontecem no Discord; aqui listamos e linkamos.
+  const [archive, setArchive] = useState<ArchiveTicket[]>([]);
+  const [archiveQuery, setArchiveQuery] = useState("");
+  const [archiveStatus, setArchiveStatus] = useState("open");
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveLoadedFor, setArchiveLoadedFor] = useState<string | null>(null);
+
+  const loadArchive = useCallback(async () => {
+    const token = getStoredSessionToken();
+    if (!token || !gid) {
+      setArchiveError("Entre com Discord para consultar o registro de atendimentos.");
+      setArchiveLoadedFor(gid);
+      return;
+    }
+    setArchiveLoading(true);
+    setArchiveError(null);
+    try {
+      const rows = await getGuildTickets({ data: { token, guildId: gid } });
+      setArchive(rows.map((row) => ({
+        id: row.channelName || row.id,
+        number: row.number,
+        subject: row.subject,
+        department: row.department ?? "Geral",
+        status: row.status,
+        createdAt: row.createdAt,
+      })));
+    } catch (error) {
+      setArchiveError(error instanceof Error ? error.message : "Não foi possível carregar o registro de atendimentos.");
+    } finally {
+      setArchiveLoading(false);
+      setArchiveLoadedFor(gid);
+    }
   }, [gid]);
 
-  async function runTicketAction(action: "claim" | "reply" | "note" | "close" | "priority" | "transfer" | "escalate" | "waiting_user" | "waiting_staff" | "resume", input: { content?: string; priority?: TicketPriority; reason?: string; targetStaffId?: string } = {}) {
-    if (!ticket) return false;
-    const token = getStoredSessionToken();
-    if (!token) { announce("Entre novamente com Discord para atender tickets.", "error"); return false; }
-    setActionBusy(true);
-    setNotice(null);
-    try {
-      const { jobId } = await requestTicketAction({ data: { token, guildId: gid, ticketId: ticket.number, actorId: user.id, action, ...input } });
-      for (let attempt = 0; attempt < 24; attempt++) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1000));
-        const result = await getTicketActionStatus({ data: { token, guildId: gid, jobId } });
-        if (result.status === "done" || result.status === "failed") {
-          announce(
-            result.detail ?? (
-              result.status === "done"
-                ? action === "close"
-                  ? `Atendimento #${ticket.number} encerrado.`
-                  : "Ação concluída no Discord."
-                : "O bot não conseguiu executar a ação."
-            ),
-            result.status === "done" ? "success" : "error",
-          );
-          const rows = await getGuildTickets({ data: { token, guildId: gid } });
-          setTickets((current) => {
-            const currentById = new Map(current.map((item) => [item.id, item]));
-            return rows.map((row) => ({ ...row, messages: currentById.get(row.id)?.messages ?? row.messages }));
-          });
-          return result.status === "done";
-        }
-      }
-      announce("O bot ainda está processando. A fila será atualizada automaticamente.");
-      return false;
-    } catch (error) {
-      announce(error instanceof Error ? error.message : "Não foi possível solicitar a ação ao bot.", "error");
-      return false;
-    } finally { setActionBusy(false); }
-  }
-
   useEffect(() => {
-    const requestedTicket = new URLSearchParams(window.location.search).get("ticket");
-    const requested = requestedTicket ? tickets.find((row) => row.id === requestedTicket || String(row.number) === requestedTicket) : undefined;
-    if (requested) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("ticket");
-      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-    }
-    setSelectedId(requested?.id ?? firstTicketId);
-    setShowTicketOnMobile(Boolean(requested));
-  }, [gid, tickets, firstTicketId]);
+    setArchive([]);
+    setArchiveLoadedFor(null);
+    setArchiveError(null);
+  }, [gid]);
 
-  const memberById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
-  const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
-  const list = useMemo(() => {
-    return tickets
-      .filter((t) => (filter === "active" ? t.status === "open" || t.status === "claimed" : t.status === filter))
-      .filter((t) => departmentFilter === "all" || t.department === departmentFilter)
-      .filter((t) => priorityFilter === "all" || t.priority === priorityFilter)
-      .filter((t) => {
-        if (quickFilter === "mine") return t.claimedBy === user.id;
-        if (quickFilter === "unassigned") return !t.claimedBy;
-        if (quickFilter === "overdue") return ticketSla(t, tcfg.config) === "breach";
-        if (quickFilter === "urgent") return t.priority === "urgent";
-        return true;
-      })
-      .filter((t) => {
-        const opener = memberById.get(t.openerId)?.displayName ?? t.openerId;
-        const haystack = `#${t.number} ${t.subject} ${t.department} ${opener} ${t.claimedBy ?? ""}`;
-        return haystack.toLocaleLowerCase("pt-BR").includes(normalizedQuery);
-      })
-      .sort((a, b) => b.createdAt - a.createdAt);
-  }, [tickets, filter, departmentFilter, priorityFilter, quickFilter, normalizedQuery, memberById, user.id, tcfg.config]);
-
-  const ticket = list.find((t) => t.id === selectedId) ?? list[0] ?? null;
-  const selectedTicketId = ticket?.id;
-  const selectedTicketNumber = ticket?.number;
-  useEffect(() => {
-    if (!selectedTicketId || !selectedTicketNumber || !gid) return;
-    let stopped = false;
-    let inFlight = false;
-    let firstRequest = true;
-    let errorAnnounced = false;
-    const refreshMessages = async () => {
-      if (stopped || inFlight || document.visibilityState === "hidden") return;
-      const token = getStoredSessionToken();
-      if (!token) return;
-      inFlight = true;
-      if (firstRequest) setLoadingTicketId(selectedTicketId);
-      try {
-        const detail = await getGuildTicketMessages({ data: { token, guildId: gid, ticketId: selectedTicketNumber } });
-        if (stopped) return;
-        setTickets((current) => current.map((row) => row.id === selectedTicketId
-          ? { ...row, subject: detail.subject, messages: detail.messages }
-          : row));
-        errorAnnounced = false;
-      } catch (error) {
-        if (!stopped && !errorAnnounced) {
-          announce(error instanceof Error ? error.message : "Não foi possível carregar a conversa.", "error");
-          errorAnnounced = true;
-        }
-      } finally {
-        inFlight = false;
-        const wasFirstRequest = firstRequest;
-        firstRequest = false;
-        if (!stopped && wasFirstRequest) setLoadingTicketId((current) => current === selectedTicketId ? null : current);
-      }
-    };
-    void refreshMessages();
-    const timer = window.setInterval(() => void refreshMessages(), 5_000);
-    return () => { stopped = true; window.clearInterval(timer); };
-  }, [announce, gid, selectedTicketId, selectedTicketNumber]);
-
-  async function runAi(t: Ticket) {
-    const token = getStoredSessionToken();
-    if (!token) { setAi("Entre novamente com Discord para usar a análise por IA."); return; }
-    setAiBusy(true);
-    setAi(null);
-    const redact = (value: string) => value
-      .replace(/<@!?\d{17,20}>|<@&\d{17,20}>|<#\d{17,20}>/g, "[referência Discord]")
-      .replace(/\b\d{17,20}\b/g, "[ID removido]")
-      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[e-mail removido]")
-      .replace(/(?:\+?\d[\d ().-]{7,}\d)/g, "[telefone removido]")
-      .replace(/(?:discord\.gg|discord\.com\/invite)\/[\w-]+/gi, "[convite removido]");
-    const includeConversation = Boolean(tcfg.config.aiIncludeConversation);
-    const transcript = includeConversation
-      ? t.messages.filter((message) => message.kind !== "internal").map((m) => `${m.kind}: ${redact(m.content)}`).join("\n")
-      : "A conversa foi omitida conforme a configuração de privacidade do servidor.";
-    const safeSubject = includeConversation ? redact(t.subject) : `Atendimento #${t.number}`;
-    const related = kcfg.enabled
-      ? searchArticles(includeConversation ? `${safeSubject}\n${transcript}` : "", articles.filter((a) => a.guildId === gid), Boolean(kcfg.config.requireApprovedArticles)).slice(0, 3)
-      : [];
-    const knowledge = related.map((a) => `${a.title}: ${a.body}`).join("\n");
-    try {
-      const res = await analyzeWithGrok({
-        data: {
-          token,
-          guildId: gid,
-          kind: "ticket",
-          title: `#${t.number} ${safeSubject} (${t.department})`,
-          body: transcript,
-          extra: `SLA ${String(tcfg.config.slaWarningMinutes)} min. Prioridade ${t.priority}.${knowledge ? `\nBase do servidor:\n${knowledge}` : ""}`,
-        },
-      });
-      setAi(res.ok ? res.text : res.error);
-    } catch (error) {
-      setAi(error instanceof Error ? error.message : "A análise não ficou disponível.");
-    } finally {
-      setAiBusy(false);
-    }
-  }
+  const visibleArchive = useMemo(() => {
+    const needle = archiveQuery.trim().toLocaleLowerCase("pt-BR");
+    return archive
+      .filter((t) => archiveStatus === "all" || t.status === archiveStatus)
+      .filter((t) => !needle || `#${t.number} ${t.subject} ${t.department}`.toLocaleLowerCase("pt-BR").includes(needle))
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 50);
+  }, [archive, archiveQuery, archiveStatus]);
 
   return (
-      <div key={gid} className="mx-auto flex max-w-7xl flex-col gap-6">
+    <div key={gid} className="mx-auto flex max-w-7xl flex-col gap-8">
       <PageHeader
         title="Atendimento"
-        description="Configure o painel e acompanhe cada conversa com sua equipe."
+        description="Monte o painel que recebe pedidos de ajuda. As conversas acontecem no Discord, em canais privados — aqui você só cria o painel e acompanha o histórico."
       />
 
-      <Tabs value={activeView} onValueChange={(value) => setActiveView(value as "queue" | "panel")}>
-        <TabsList aria-label="Área de atendimento">
-          <TabsTrigger value="queue">Fila de tickets</TabsTrigger>
-          <TabsTrigger value="panel">Painel e regras</TabsTrigger>
-        </TabsList>
-        <TabsContent value="queue" className="mt-4 space-y-4">
-
-      <Notice tone="info" className="m-0">
-        O bot executa as ações no Discord e confirma quando conclui.
-      </Notice>
-      {ticketLoadError ? <Notice tone="warning" className="m-0">{ticketLoadError}</Notice> : null}
-
-      {!tcfg.enabled ? (
-        <Notice tone="warning" className="m-0">Atendimento pausado neste servidor.</Notice>
-      ) : null}
-      {notice ? (
-        <p
-          key={noticeId.current}
-          role="status"
-          aria-live="polite"
-          className={cn(
-            "m-0 flex items-center gap-2 rounded-xl px-3 py-2 text-sm",
-            noticeTone === "success" && "bg-ok/10 text-ok",
-            noticeTone === "error" && "bg-warn/15 text-warn",
-            noticeTone === "neutral" && "bg-muted text-foreground",
-          )}
-        >
-          {noticeTone === "success" ? <Check aria-hidden="true" className="ticket-success-check size-4 shrink-0" /> : null}
-          <span>{notice}</span>
-        </p>
-      ) : null}
-      {!planAllows(guild.plan, "ai") ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="m-0 text-sm text-muted-foreground">A análise com IA é exclusiva dos planos Pro, Escala e Vitalício.</p>
-          <ExclusiveButton />
-        </div>
-      ) : null}
-      {!planAllows(guild.plan, "transcripts") ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="m-0 text-sm text-muted-foreground">A exportação de transcrições é exclusiva dos planos Pro, Escala e Vitalício.</p>
-          <ExclusiveButton />
-        </div>
-      ) : null}
-
-      <div className="flex flex-wrap gap-1.5">
-        {(["active", "closed"] as const).map((f) => (
-          <button
-            key={f}
-            type="button"
-            onClick={() => setFilter(f)}
-            className={cn(
-              "h-9 rounded-full px-3 text-sm",
-              filter === f ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-muted",
-            )}
-          >
-            {f === "active" ? "Abertos" : "Encerrados"}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-1 rounded-xl border border-border bg-card p-1 w-fit" role="tablist" aria-label="Área de atendimento">
+        <button type="button" role="tab" aria-selected={activeView === "panel"} onClick={() => setActiveView("panel")}
+          className={cn("min-h-10 rounded-lg px-4 text-sm font-medium transition-colors", activeView === "panel" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}>
+          Criar painel
+        </button>
+        <button type="button" role="tab" aria-selected={activeView === "archive"} onClick={() => setActiveView("archive")}
+          className={cn("min-h-10 rounded-lg px-4 text-sm font-medium transition-colors", activeView === "archive" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}>
+          Atendimentos
+        </button>
       </div>
 
-      {filter === "active" ? (
-        <div className="flex flex-wrap gap-2" aria-label="Filtros rápidos da fila">
-          {([
-            ["all", "Todos"],
-            ["mine", "Meus tickets"],
-            ["unassigned", "Sem responsável"],
-            ["overdue", "SLA estourado"],
-            ["urgent", "Urgentes"],
-          ] as const).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={quickFilter === value}
-              onClick={() => setQuickFilter(value)}
-              className={cn(
-                "min-h-10 rounded-full border px-3 text-sm transition-colors",
-                quickFilter === value
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border text-muted-foreground hover:bg-muted",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="grid gap-2 rounded-2xl border border-border bg-card p-3 sm:grid-cols-[minmax(220px,1fr)_180px_150px]">
-        <div className="relative">
-          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input aria-label="Buscar tickets" className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por assunto, pessoa ou número" />
-        </div>
-        <NativeSelect aria-label="Filtrar por departamento" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)}>
-          <option value="all">Todos os departamentos</option>
-          {[...new Set(tickets.map((item) => item.department).filter(Boolean))].map((department) => <option key={department} value={department}>{department}</option>)}
-        </NativeSelect>
-        <NativeSelect aria-label="Filtrar por prioridade" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}>
-          <option value="all">Todas as prioridades</option>
-          <option value="urgent">Urgente</option><option value="high">Alta</option><option value="normal">Normal</option><option value="low">Baixa</option>
-        </NativeSelect>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>{list.length} {list.length === 1 ? "atendimento" : "atendimentos"} nesta vista · fila mantida ao abrir um registro</span>
-        <span className="flex items-center gap-3"><span><i className="mr-1 inline-block size-2 rounded-full bg-ok" />No prazo</span><span><i className="mr-1 inline-block size-2 rounded-full bg-warn" />Atenção</span><span><i className="mr-1 inline-block size-2 rounded-full bg-destructive" />Atrasado</span></span>
-      </div>
-
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
-        <Card className={cn("max-h-[70vh] overflow-y-auto p-2", showTicketOnMobile && "hidden lg:block")}>
-          <div className="flex justify-end px-2 pb-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              aria-pressed={compactQueue}
-              onClick={() => setCompactQueue((value) => !value)}
-            >
-              {compactQueue ? "Modo confortável" : "Modo compacto"}
+      {activeView === "archive" ? (
+        <Card className="space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="m-0 text-lg font-semibold tracking-tight">Registro de atendimentos</h2>
+              <p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">
+                Cada ticket vive no Discord, no canal privado criado para a pessoa. Abra o canal para responder — a conversa inteira acontece lá.
+              </p>
+            </div>
+            <Button variant="outline" disabled={archiveLoading} onClick={() => void loadArchive()}>
+              {archiveLoading ? "Buscando…" : archiveLoadedFor === gid ? "Atualizar" : "Carregar atendimentos"}
             </Button>
           </div>
-          {list.length === 0 ? (
+          {archiveError ? <Notice tone="warning" className="m-0">{archiveError}</Notice> : null}
+          <div className="grid gap-2 rounded-xl border border-border bg-muted/30 p-3 sm:grid-cols-[minmax(200px,1fr)_180px]">
+            <div className="relative">
+              <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input aria-label="Buscar atendimentos" className="pl-9" value={archiveQuery} onChange={(event) => setArchiveQuery(event.target.value)} placeholder="Buscar por assunto ou número" />
+            </div>
+            <NativeSelect aria-label="Filtrar por status" value={archiveStatus} onChange={(event) => setArchiveStatus(event.target.value)}>
+              <option value="open">Abertos</option>
+              <option value="claimed">Em atendimento</option>
+              <option value="closed">Encerrados</option>
+              <option value="all">Todos</option>
+            </NativeSelect>
+          </div>
+          {visibleArchive.length === 0 ? (
             <EmptyState
-              title={!ticketsLoaded ? "Carregando atendimentos…" : ticketLoadError ? "Não foi possível carregar a fila" : tickets.length === 0 ? "Sua fila começa aqui" : "Nenhum atendimento encontrado"}
-              description={!ticketsLoaded ? "Buscando os atendimentos registrados pelo bot." : ticketLoadError ? "A fila tentará carregar novamente em instantes." : tickets.length === 0 ? "Configure o canal e os cargos e publique o painel para receber os primeiros tickets." : "Ajuste a busca ou os filtros."}
-              action={tickets.length === 0 ? <Button size="sm" onClick={() => setActiveView("panel")}>Configurar o painel</Button> : undefined}
+              icon={<Inbox aria-hidden="true" className="size-8 text-muted-foreground" />}
+              title={archiveLoading ? "Carregando…" : "Nenhum atendimento nesta vista"}
+              description="Publique o painel para receber os primeiros tickets ou ajuste os filtros. Cada linha abre o canal no Discord."
             />
           ) : (
-            list.map((t) => {
-              const sla = ticketSla(t, tcfg.config);
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  aria-pressed={ticket?.id === t.id}
-                  onClick={() => {
-                    setSelectedId(t.id);
-                    setShowTicketOnMobile(true);
-                    setAi(null);
-                  }}
-                  className={cn(
-                    "flex w-full text-left",
-                    compactQueue
-                      ? "min-h-11 flex-row items-center gap-2 rounded-lg px-2 py-1.5"
-                      : "flex-col gap-1 rounded-xl px-3 py-2.5",
-                    ticket?.id === t.id ? "bg-muted" : "hover:bg-muted/50",
-                  )}
-                >
-                  <span className={cn("flex flex-wrap items-center gap-1.5 text-sm font-medium", compactQueue && "shrink-0")}>
-                    #{t.number}
-                    <Badge tone={priorityTone[t.priority]}>{priorityLabel[t.priority]}</Badge>
-                    <Badge tone={slaTone[sla]}>{sla === "breach" ? "SLA vencido" : sla === "warning" ? "SLA atenção" : "SLA no prazo"}</Badge>
-                    {t.waitingOn ? <Badge tone="warn">{t.waitingOn === "user" ? "Aguardando usuário" : "Aguardando equipe"}</Badge> : null}
-                    {shouldAutoClose(t, tcfg.config) ? <Badge tone="warn">ocioso</Badge> : null}
-                  </span>
-                  <span className={cn("truncate text-[13px] text-muted-foreground", compactQueue && "min-w-0 flex-1 text-xs")}>{t.subject}</span>
-                  <span className={cn("flex min-w-0 justify-between gap-2 text-xs text-muted-foreground", compactQueue && "hidden sm:flex sm:w-36 sm:shrink-0")}>
-                    <span className="truncate">{t.department} · {t.claimedBy ? memberById.get(t.claimedBy)?.displayName ?? "com responsável" : "sem responsável"}</span>
-                    <span className="shrink-0">{formatRelative(t.createdAt)}</span>
-                  </span>
-                </button>
-              );
-            })
+            <ul className="m-0 divide-y divide-border p-0">
+              {visibleArchive.map((t) => (
+                <li key={t.id} className="flex flex-wrap items-center gap-3 py-3">
+                  <span className="font-mono-num text-sm font-semibold">#{t.number}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm">{t.subject}</span>
+                  <Badge tone="default">{t.department}</Badge>
+                  <Badge tone={t.status === "open" ? "ok" : t.status === "claimed" ? "info" : "default"}>{statusLabel[t.status] ?? t.status}</Badge>
+                  <span className="hidden text-xs text-muted-foreground sm:inline">{formatRelative(t.createdAt)}</span>
+                  <a
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-primary hover:underline"
+                    href={`https://discord.com/channels/${gid}/${t.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Abrir no Discord <ExternalLink aria-hidden="true" className="size-3.5" />
+                  </a>
+                </li>
+              ))}
+            </ul>
           )}
         </Card>
-
-        {ticket ? (
-          <Card className={cn("min-h-[70vh] min-w-0 flex-col p-0", showTicketOnMobile ? "flex" : "hidden lg:flex")}>
-            <header className="border-b border-border px-4 py-3">
-              <div className="flex flex-wrap items-start gap-2">
-                <Button
-                  className="lg:hidden"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setShowTicketOnMobile(false)}
-                >
-                  Voltar à fila
-                </Button>
-                <div className="min-w-0 flex-1">
-                  <p className="m-0 text-xs text-muted-foreground">
-                    #{ticket.number} · <a className="underline underline-offset-2" href={`https://discord.com/channels/${ticket.guildId}/${ticket.channelName}`} target="_blank" rel="noreferrer">Abrir canal</a>
-                  </p>
-                  <h2 className="mt-0.5 mb-0 text-lg font-semibold">{ticket.subject}</h2>
-                </div>
-                {tcfg.config.priorityEnabled ? (
-                  <NativeSelect
-                    className="h-9 w-auto"
-                    value={ticket.priority}
-                    disabled={actionBusy || ticket.status === "closed"}
-                    onChange={(e) => void runTicketAction("priority", { priority: e.target.value as TicketPriority })}
-                  >
-                    <option value="low">baixa</option>
-                    <option value="normal">normal</option>
-                    <option value="high">alta</option>
-                    <option value="urgent">urgente</option>
-                  </NativeSelect>
-                ) : null}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span>{ticket.department}</span>
-                <span>aberto {formatTime(ticket.createdAt)}</span>
-                {ticket.claimedBy ? <span>com {memberById.get(ticket.claimedBy)?.displayName ?? ticket.claimedBy}</span> : <span>sem dono</span>}
-                {ticket.waitingOn ? <Badge tone="warn">{ticket.waitingOn === "user" ? "Aguardando usuário" : "Aguardando equipe"} · SLA ativo</Badge> : null}
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {ticket.status === "open" || ticket.status === "claimed" ? (
-                  <>
-                    <Button size="sm" variant="secondary" disabled={actionBusy} onClick={() => void runTicketAction("claim")}>
-                      Assumir
-                    </Button>
-                    <Button size="sm" variant="outline" disabled={actionBusy || ticket.priority === "urgent"} onClick={() => void runTicketAction("escalate")}>
-                      Escalar
-                    </Button>
-                    <Button size="sm" variant="outline" disabled={actionBusy} onClick={() => setCloseOpen(true)}>
-                      Encerrar
-                    </Button>
-                    <Button size="sm" variant="outline" disabled={actionBusy || ticket.waitingOn === "user"} onClick={() => void runTicketAction("waiting_user")}>
-                      Aguardar usuário
-                    </Button>
-                    <Button size="sm" variant="outline" disabled={actionBusy || ticket.waitingOn === "staff"} onClick={() => void runTicketAction("waiting_staff")}>
-                      Aguardar equipe
-                    </Button>
-                    {ticket.waitingOn ? (
-                      <Button size="sm" variant="secondary" disabled={actionBusy} onClick={() => void runTicketAction("resume")}>
-                        Retomar
-                      </Button>
-                    ) : null}
-                    {aiAllowed ? (
-                      <Button size="sm" variant="ghost" disabled={aiBusy} onClick={() => void runAi(ticket)}>
-                        {aiBusy ? "Analisando…" : "Analisar com IA"}
-                      </Button>
-                    ) : null}
-                  </>
-                ) : null}
-              </div>
-              {ticket.status !== "closed" ? <form className="mt-3 flex flex-wrap gap-2" onSubmit={(event) => {
-                event.preventDefault();
-                const match = transferStaffInput.trim().match(/^(?:<@!?(\d{17,20})>|(\d{17,20}))$/);
-                const targetStaffId = match?.[1] ?? match?.[2];
-                if (targetStaffId) void runTicketAction("transfer", { targetStaffId }).then((ok) => { if (ok) setTransferStaffInput(""); });
-              }}>
-                <Input className="min-w-48 flex-1" value={transferStaffInput} onChange={(event) => setTransferStaffInput(event.target.value)} placeholder="ID ou menção do novo atendente" aria-label="Atendente para transferência" />
-                <Button size="sm" variant="outline" type="submit" disabled={actionBusy || !/^(?:<@!?\d{17,20}>|\d{17,20})$/.test(transferStaffInput.trim())}>Transferir</Button>
-              </form> : null}
-            </header>
-
-            <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-              {ticket.messages.length ? (
-                ticket.messages.map((m) => {
-                  const who = m.kind === "system" || m.kind === "internal" ? null : memberById.get(m.authorId);
-                  return (
-                    <div
-                      key={m.id}
-                      className={cn(
-                        "flex gap-2 rounded-lg px-2 py-1",
-                        m.kind === "internal" && "bg-warn/10",
-                      )}
-                    >
-                      {who ? <MemberAvatar name={who.displayName} hue={who.hue} size={28} /> : <span className="size-7" />}
-                      <div className="min-w-0">
-                        <p className="m-0 text-xs text-muted-foreground">
-                          {m.kind === "internal" ? "Nota interna · " : ""}
-                          {who?.displayName ?? m.authorName ?? "Sistema"} · {formatRelative(m.at)}
-                        </p>
-                        <p className="m-0 text-sm leading-relaxed">{m.content}</p>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="m-0 text-sm text-muted-foreground" role="status">
-                  {loadingTicketId === ticket.id ? "Carregando conversa…" : "Nenhuma mensagem registrada neste atendimento."}
-                </p>
-              )}
-              {ai ? (
-                <div className="rounded-xl bg-primary/10 px-3 py-2 text-sm leading-6"><MarkdownContent content={ai} /></div>
-              ) : null}
-              {ticket.transcript && ticket.status !== "open" ? (
-                <details className="rounded-xl bg-muted px-3 py-2 text-sm">
-                  <summary className="cursor-pointer font-medium">Transcrição</summary>
-                  <pre className="mt-2 mb-0 overflow-x-auto whitespace-pre-wrap font-sans text-muted-foreground">
-                    {ticket.transcript}
-                  </pre>
-                </details>
-              ) : null}
-              {ticket.transcriptUrl && /^https:\/\/haiz-transcript\.shardweb\.app\/transcript\/\d{17,20}$/.test(ticket.transcriptUrl) ? (
-                <a
-                  className="inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline"
-                  href={ticket.transcriptUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Abrir transcrição completa
-                </a>
-              ) : null}
-              {ticket.feedback ? (
-                <p className="m-0 text-sm">
-                  Feedback: {ticket.feedback.rating}/5 — {ticket.feedback.comment}
-                </p>
-              ) : null}
+      ) : (
+        <div className="space-y-8">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="m-0 text-xl font-semibold tracking-tight">Monte seu sistema de tickets</h2>
+              <p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Comece com um modelo e personalize categorias, equipe, canais e regras. As alterações só chegam ao Discord quando você publica o painel.</p>
             </div>
+            {dirty ? <Badge tone="warn">Alterações não publicadas</Badge> : null}
+          </div>
 
-            {ticket.status === "open" || ticket.status === "claimed" ? (
-              <form
-                className="space-y-2 border-t border-border p-3"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!reply.trim()) return;
-                  void runTicketAction(internalNote ? "note" : "reply", { content: reply.trim() }).then((ok) => {
-                    if (ok) {
-                      setReply("");
-                      setInternalNote(false);
-                    }
-                  });
-                }}
-              >
-                {savedReplies.length ? (
-                  <NativeSelect
-                    aria-label="Inserir resposta salva"
-                    value=""
-                    onChange={(event) => {
-                      const selectedReply = savedReplies.find((item) => item.id === event.target.value);
-                      if (selectedReply) {
-                        setInternalNote(false);
-                        setReply(selectedReply.content);
-                      }
-                    }}
-                  >
-                    <option value="">Inserir resposta salva…</option>
-                    {savedReplies.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                  </NativeSelect>
-                ) : null}
-                <Textarea
-                  value={reply}
-                  onChange={(e) => setReply(e.target.value)}
-                  maxLength={2000}
-                  rows={3}
-                  aria-label={internalNote ? "Nota interna para a equipe" : "Resposta ao usuário"}
-                  placeholder={internalNote ? "Escreva uma nota visível apenas para a equipe…" : "Responder ao usuário…"}
-                />
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <label className="flex min-h-11 items-center gap-2 text-sm">
-                    <Switch checked={internalNote} onCheckedChange={setInternalNote} />
-                    Nota interna
-                  </label>
-                  <Button type="submit" disabled={actionBusy || !reply.trim()}>
-                    {actionBusy ? "Enviando…" : internalNote ? "Registrar nota" : "Enviar resposta"}
-                  </Button>
-                </div>
-              </form>
-            ) : null}
-
-          </Card>
-        ) : (
-          <Card className={cn("min-h-64 place-items-center text-sm text-muted-foreground", showTicketOnMobile ? "grid" : "hidden lg:grid")}>
-            {tickets.length ? "Selecione um atendimento da fila." : "Configure e publique o painel para começar a receber atendimentos."}
-          </Card>
-        )}
-      </div>
-
-        </TabsContent>
-        <TabsContent value="panel" className="mt-4 space-y-5">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="m-0 text-xl font-semibold tracking-tight">Monte seu sistema de tickets</h2><p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">Comece com um modelo e personalize categorias, equipe, canais e regras. As alterações só chegam ao Discord quando você publica o painel.</p></div>{dirty ? <Badge tone="warn">Alterações não publicadas</Badge> : null}</div>
           <section className="space-y-3" aria-labelledby="ticket-template-heading">
             <div>
               <h3 id="ticket-template-heading" className="m-0 text-sm font-semibold">Comece com um modelo</h3>
               <p className="m-0 mt-1 text-xs text-muted-foreground">Clique para aplicar um pacote pronto. Você pode ajustar depois.</p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-1 md:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-3">
               {Object.entries(ticketTemplates).map(([id, template]) => (
                 <button
                   key={id}
@@ -858,422 +367,342 @@ function TicketsPage() {
             {templateNotice ? <p role="status" className="m-0 text-sm text-ok">{templateNotice}</p> : null}
             {!canUseDepartments ? <div className="flex flex-wrap items-center justify-between gap-3"><p className="m-0 text-xs text-muted-foreground">Seu plano permite um tipo de atendimento. Os modelos serão aplicados com uma categoria; departamentos extras são exclusivos dos planos Escala e Vitalício.</p><ExclusiveButton /></div> : null}
           </section>
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(300px,.82fr)]">
-          <div className="min-w-0 space-y-4">
-          <section className="space-y-3 border-b border-border pb-5" aria-labelledby="ticket-location-heading">
-            <header>
-              <h3 id="ticket-location-heading" className="m-0 text-base font-semibold">Onde a pessoa encontra ajuda?</h3>
-              <p className="m-0 mt-1 text-sm text-muted-foreground">Escolha o canal público e a categoria para os canais privados.</p>
-            </header>
-            <Field label="Canal do painel de atendimento">
-              <DiscordSelect kind="text" value={asString(tcfg.config.panelChannelId)} onChange={(panelChannelId) => updateConfig("tickets", { panelChannelId })} placeholder="Selecione um canal" />
-            </Field>
-            <Field label="Categoria onde os canais privados serão criados">
-              <DiscordSelect kind="category" value={asString(tcfg.config.categoryId)} onChange={(categoryId) => updateConfig("tickets", { categoryId })} placeholder="Selecione uma categoria" />
-            </Field>
-            <ToggleRow label="Atendimento ligado" description="Desligue para pausar a abertura de novos tickets." checked={tcfg.enabled} onChange={(value) => setEnabled("tickets", value)} />
-          </section>
-          <section className="space-y-3 border-b border-border pb-5" aria-labelledby="ticket-context-heading">
-            <header>
-              <h3 id="ticket-context-heading" className="m-0 text-base font-semibold">Dê contexto ao painel</h3>
-              <p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p>
-            </header>
-            <Field label="Título do painel">
-              <Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => { updateConfig("tickets", { panelTitle: e.target.value }); setDirty(true); }} />
-              <CharCounter current={asString(tcfg.config.panelTitle).length} max={100} />
-            </Field>
-            <Field label="Descrição do painel">
-              <Textarea maxLength={4000} value={asString(tcfg.config.panelDescription)} onChange={(e) => { updateConfig("tickets", { panelDescription: e.target.value }); setDirty(true); }} />
-              <CharCounter current={asString(tcfg.config.panelDescription).length} max={4000} />
-            </Field>
-            <Field label="Cor de destaque">
-              <div className="flex gap-2">
-                <input type="color" value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => { updateConfig("tickets", { panelAccentColor: e.target.value }); setDirty(true); }} className="h-9 w-12 cursor-pointer rounded border border-border bg-background" />
-                <Input value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => { updateConfig("tickets", { panelAccentColor: e.target.value }); setDirty(true); }} placeholder="#28655b" />
-              </div>
-            </Field>
-            <Field label="Como mostrar as opções de atendimento?">
-              <div className="grid gap-2 sm:grid-cols-1 md:grid-cols-2" role="group" aria-label="Formato das opções de atendimento">
-                <button type="button" aria-pressed={departmentDisplayMode === "select"} onClick={() => updateConfig("tickets", { departmentDisplayMode: "select" })} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", departmentDisplayMode === "select" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
-                  <span className="block text-sm font-semibold">Menu suspenso</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">Uma lista compacta que aceita até 25 opções.</span>
-                </button>
-                <button type="button" aria-pressed={departmentDisplayMode === "buttons"} disabled={departmentSettings.length > 5} onClick={() => updateConfig("tickets", { departmentDisplayMode: "buttons" })} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50", departmentDisplayMode === "buttons" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
-                  <span className="block text-sm font-semibold">Botões no painel</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">Cada tipo aparece direto na publicação, até 5.</span>
-                </button>
-              </div>
-              {departmentSettings.length > 5 ? <p className="m-0 text-xs text-muted-foreground">Para usar botões, reduza os tipos de atendimento para no máximo 5.</p> : null}
-            </Field>
-            {departmentDisplayMode === "select" ? (
-              <>
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
-                  <Field label="Texto do botão de abertura"><Input maxLength={80} value={asString(tcfg.config.panelButtonLabel, "Abrir atendimento")} onChange={(e) => updateConfig("tickets", { panelButtonLabel: e.target.value })} placeholder="Abrir atendimento" /></Field>
-                  <Field label="Emoji"><Input maxLength={32} value={asString(tcfg.config.panelButtonEmoji, "🎫")} onChange={(e) => updateConfig("tickets", { panelButtonEmoji: e.target.value })} placeholder="🎫" /></Field>
-                </div>
-                <Field label="Mensagem ao escolher um tipo">
-                  <Textarea rows={2} maxLength={2000} value={asString(tcfg.config.departmentMenuPrompt, "Escolha o departamento para abrir o atendimento:")} onChange={(event) => updateConfig("tickets", { departmentMenuPrompt: event.target.value })} />
+
+          <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(320px,.8fr)]">
+            <div className="min-w-0 space-y-8">
+              <section className="space-y-4 rounded-2xl border border-border bg-card p-5" aria-labelledby="ticket-location-heading">
+                <header>
+                  <h3 id="ticket-location-heading" className="m-0 text-base font-semibold">Onde a pessoa encontra ajuda?</h3>
+                  <p className="m-0 mt-1 text-sm text-muted-foreground">Escolha o canal público e a categoria para os canais privados.</p>
+                </header>
+                <Field label="Canal do painel de atendimento">
+                  <DiscordSelect kind="text" value={asString(tcfg.config.panelChannelId)} onChange={(panelChannelId) => updateConfig("tickets", { panelChannelId })} placeholder="Selecione um canal" />
                 </Field>
-                <Field label="Texto dentro do menu">
-                  <Input maxLength={150} value={asString(tcfg.config.departmentMenuPlaceholder, "Escolha o departamento")} onChange={(event) => updateConfig("tickets", { departmentMenuPlaceholder: event.target.value })} />
+                <Field label="Categoria onde os canais privados serão criados">
+                  <DiscordSelect kind="category" value={asString(tcfg.config.categoryId)} onChange={(categoryId) => updateConfig("tickets", { categoryId })} placeholder="Selecione uma categoria" />
                 </Field>
-                <Field label="Cor do botão de abertura">
-                  <NativeSelect value={String(panelButtonStyle.value)} onChange={(event) => updateConfig("tickets", { panelButtonStyle: Number(event.target.value) })}>
-                    {discordButtonStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}
-                  </NativeSelect>
+                <ToggleRow label="Atendimento ligado" description="Desligue para pausar a abertura de novos tickets." checked={tcfg.enabled} onChange={(value) => setEnabled("tickets", value)} />
+              </section>
+
+              <section className="space-y-4 rounded-2xl border border-border bg-card p-5" aria-labelledby="ticket-context-heading">
+                <header>
+                  <h3 id="ticket-context-heading" className="m-0 text-base font-semibold">Dê contexto ao painel</h3>
+                  <p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p>
+                </header>
+                <Field label="Título do painel">
+                  <Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => { updateConfig("tickets", { panelTitle: e.target.value }); setDirty(true); }} />
+                  <CharCounter current={asString(tcfg.config.panelTitle).length} max={100} />
                 </Field>
-              </>
-            ) : (
-              <>
-                <Field label="Cor dos botões de opção">
-                  <NativeSelect value={String(departmentButtonStyle.value)} onChange={(event) => updateConfig("tickets", { departmentButtonStyle: Number(event.target.value) })}>
-                    {discordButtonStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}
-                  </NativeSelect>
+                <Field label="Descrição do painel">
+                  <Textarea maxLength={4000} value={asString(tcfg.config.panelDescription)} onChange={(e) => { updateConfig("tickets", { panelDescription: e.target.value }); setDirty(true); }} />
+                  <CharCounter current={asString(tcfg.config.panelDescription).length} max={4000} />
                 </Field>
-                <p className="m-0 text-xs text-muted-foreground">O Discord não exibe as descrições no formato de botões; elas aparecem no menu suspenso.</p>
-              </>
-            )}
-            <Field label="Texto complementar no rodapé (opcional)">
-              <Textarea rows={2} maxLength={300} value={asString(tcfg.config.panelFooter)} onChange={(event) => { updateConfig("tickets", { panelFooter: event.target.value }); setDirty(true); }} placeholder="Ex.: Horário de atendimento: 9h às 18h" />
-              <CharCounter current={asString(tcfg.config.panelFooter).length} max={300} />
-              <p className="m-0 text-xs text-muted-foreground">Aparece em texto discreto abaixo do painel.</p>
-            </Field>
-          </section>
-          <section className="space-y-3 pb-2" aria-labelledby="ticket-staff-heading">
-            <header>
-              <h3 id="ticket-staff-heading" className="m-0 text-base font-semibold">Escolha quem responde</h3>
-              <p className="m-0 mt-1 text-sm text-muted-foreground">Cargos selecionados poderão acessar os canais privados.</p>
-            </header>
-            <Field label="Cargos da equipe"><DiscordMultiSelect value={asList(tcfg.config.staffRoleIds)} onChange={(staffRoleIds) => updateConfig("tickets", { staffRoleIds })} /></Field>
-          </section>
-          <details className="motion-disclosure rounded-2xl border border-border bg-card p-3.5">
-            <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Mais configurações de atendimento</summary>
-            <p className="mb-4 mt-2 text-sm text-muted-foreground">Prazos, automações, registros e aparência. Você pode voltar a elas quando quiser.</p>
-            <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
-              <NumberField id="ticket-max-open" label="Máximo de tickets abertos por pessoa" min={1} max={25} value={Number(tcfg.config.maxOpenPerUser ?? 1)} onChange={(maxOpenPerUser) => updateConfig("tickets", { maxOpenPerUser })} />
-              <Field label="Nome do canal · use {user}, {department} e {number}">
-                <Input key={asString(tcfg.config.namingPattern, "atendimento-{user}")} defaultValue={asString(tcfg.config.namingPattern, "atendimento-{user}")} onBlur={(e) => updateConfig("tickets", { namingPattern: e.target.value.trim() || "atendimento-{user}" })} />
-              </Field>
-            </div>
-            <NumberField id="ticket-sla-warning" label="Avisar a equipe depois de (minutos; 0 desliga)" min={0} max={10080} value={Number(tcfg.config.slaWarningMinutes ?? 60)} onChange={(slaWarningMinutes) => updateConfig("tickets", { slaWarningMinutes })} />
-            <ToggleRow label="Pedir avaliação ao encerrar" description="Receba uma nota e um comentário do cliente." checked={Boolean(tcfg.config.feedbackEnabled)} onChange={(value) => updateConfig("tickets", { feedbackEnabled: value })} />
-              <section className="space-y-3" aria-labelledby="ticket-departments-heading">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 id="ticket-departments-heading" className="m-0 text-sm font-semibold">Tipos de atendimento</h3>
-                    <p className="m-0 mt-1 text-xs text-muted-foreground">Cada tipo pode encaminhar para outra categoria do Discord e outra equipe.</p>
+                <Field label="Cor de destaque">
+                  <div className="flex gap-2">
+                    <input type="color" value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => { updateConfig("tickets", { panelAccentColor: e.target.value }); setDirty(true); }} className="h-9 w-12 cursor-pointer rounded border border-border bg-background" />
+                    <Input value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => { updateConfig("tickets", { panelAccentColor: e.target.value }); setDirty(true); }} placeholder="#28655b" />
                   </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={departmentSettings.length >= (canUseDepartments ? 25 : 1)}
-                    onClick={() => saveDepartments([...departmentSettings, {
-                      name: `Novo tipo ${departmentSettings.length + 1}`,
-                      id: `custom-${crypto.randomUUID()}`,
-                      description: "",
-                      emoji: "🎫",
-                      categoryId: "",
-                      staffRoleIds: [],
-                      inheritStaff: true,
-                      welcomeMessage: "",
-                      intakeQuestions: [],
-                    }])}
-                  >
-                    <Plus aria-hidden="true" className="size-4" />
-                    Adicionar tipo
-                  </Button>
-                </div>
-                <div className="divide-y divide-border rounded-xl border border-border px-3">
-                  {departmentSettings.map((department, index) => (
-                    <details key={department.id} className="motion-disclosure group py-3" open={index === 0}>
-                      <summary className="flex cursor-pointer list-none items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        <span aria-hidden="true">{department.emoji || "🎫"}</span>
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{department.name || `Tipo ${index + 1}`}</span>
-                        <span className="text-xs text-muted-foreground">{department.inheritStaff ? "Equipe padrão" : "Equipe própria"}</span>
-                      </summary>
-                      <div className="space-y-3 pb-1 pt-3">
-                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_6rem]">
-                          <Field label="Nome da opção">
-                            <Input maxLength={100} value={department.name} onChange={(event) => {
-                              const next = [...departmentSettings];
-                              next[index] = { ...department, name: event.target.value };
-                              saveDepartments(next);
-                            }} />
-                          </Field>
-                          <Field label="Emoji">
-                            <Input maxLength={32} value={department.emoji} onChange={(event) => {
-                              const next = [...departmentSettings];
-                              next[index] = { ...department, emoji: event.target.value };
-                              saveDepartments(next);
-                            }} />
-                          </Field>
-                        </div>
-                        <Field label="Descrição no menu do Discord">
-                          <Input maxLength={100} value={department.description} onChange={(event) => {
-                            const next = [...departmentSettings];
-                            next[index] = { ...department, description: event.target.value };
-                            saveDepartments(next);
-                          }} placeholder="Explique brevemente quando escolher esta opção" />
-                        </Field>
-                        <Field label="Categoria para criar os tickets">
-                          <DiscordSelect kind="category" value={department.categoryId} onChange={(categoryId) => {
-                            const next = [...departmentSettings];
-                            next[index] = { ...department, categoryId };
-                            saveDepartments(next);
-                          }} placeholder="Usar categoria padrão" />
-                        </Field>
-                        <ToggleRow label="Usar cargos da equipe padrão" description="Desative para definir uma equipe exclusiva para esta categoria." checked={department.inheritStaff} onChange={(inheritStaff) => {
-                            const next = [...departmentSettings];
-                            next[index] = { ...department, inheritStaff };
-                            saveDepartments(next);
-                          }} />
-                        {!department.inheritStaff ? (
-                          <Field label="Cargos desta equipe">
-                            <DiscordMultiSelect value={department.staffRoleIds} onChange={(staffRoleIds) => {
-                              const next = [...departmentSettings];
-                              next[index] = { ...department, staffRoleIds };
-                              saveDepartments(next);
-                            }} />
-                          </Field>
-                        ) : null}
-                        <Field label="Mensagem de boas-vindas específica">
-                          <Textarea rows={2} maxLength={2000} value={department.welcomeMessage} onChange={(event) => {
-                            const next = [...departmentSettings];
-                            next[index] = { ...department, welcomeMessage: event.target.value };
-                            saveDepartments(next);
-                          }} placeholder="Vazio usa a mensagem padrão do painel" />
-                        </Field>
-                        <Field label="Perguntas antes de abrir (até 5)">
-                          <div className="space-y-2">
-                            {department.intakeQuestions.map((question, questionIndex) => (
-                              <div key={`${department.id}-question-${questionIndex}`} className="flex gap-2">
-                                <Input
-                                  maxLength={45}
-                                  value={question}
-                                  aria-label={`Pergunta ${questionIndex + 1} de ${department.name}`}
-                                  onChange={(event) => {
-                                    const next = [...departmentSettings];
-                                    const intakeQuestions = [...department.intakeQuestions];
-                                    intakeQuestions[questionIndex] = event.target.value;
-                                    next[index] = { ...department, intakeQuestions };
-                                    saveDepartments(next);
-                                  }}
-                                />
-                                <Button type="button" size="icon" variant="ghost" aria-label={`Remover pergunta ${questionIndex + 1}`} onClick={() => {
+                </Field>
+                <Field label="Como mostrar as opções de atendimento?">
+                  <div className="grid gap-2 sm:grid-cols-1 md:grid-cols-2" role="group" aria-label="Formato das opções de atendimento">
+                    <button type="button" aria-pressed={departmentDisplayMode === "select"} onClick={() => { updateConfig("tickets", { departmentDisplayMode: "select" }); setDirty(true); }} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", departmentDisplayMode === "select" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
+                      <span className="block text-sm font-semibold">Menu suspenso</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">Uma lista compacta que aceita até 25 opções.</span>
+                    </button>
+                    <button type="button" aria-pressed={departmentDisplayMode === "buttons"} disabled={departmentSettings.length > 5} onClick={() => { updateConfig("tickets", { departmentDisplayMode: "buttons" }); setDirty(true); }} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50", departmentDisplayMode === "buttons" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
+                      <span className="block text-sm font-semibold">Botões no painel</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">Cada tipo aparece direto na publicação, até 5.</span>
+                    </button>
+                  </div>
+                  {departmentSettings.length > 5 ? <p className="m-0 text-xs text-muted-foreground">Para usar botões, reduza os tipos de atendimento para no máximo 5.</p> : null}
+                </Field>
+                {departmentDisplayMode === "select" ? (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+                      <Field label="Texto do botão de abertura"><Input maxLength={80} value={asString(tcfg.config.panelButtonLabel, "Abrir atendimento")} onChange={(e) => { updateConfig("tickets", { panelButtonLabel: e.target.value }); setDirty(true); }} placeholder="Abrir atendimento" /></Field>
+                      <Field label="Emoji"><Input maxLength={32} value={asString(tcfg.config.panelButtonEmoji, "🎫")} onChange={(e) => { updateConfig("tickets", { panelButtonEmoji: e.target.value }); setDirty(true); }} placeholder="🎫" /></Field>
+                    </div>
+                    <Field label="Mensagem ao escolher um tipo">
+                      <Textarea rows={2} maxLength={2000} value={asString(tcfg.config.departmentMenuPrompt, "Escolha o departamento para abrir o atendimento:")} onChange={(event) => { updateConfig("tickets", { departmentMenuPrompt: event.target.value }); setDirty(true); }} />
+                    </Field>
+                    <Field label="Texto dentro do menu">
+                      <Input maxLength={150} value={asString(tcfg.config.departmentMenuPlaceholder, "Escolha o departamento")} onChange={(event) => { updateConfig("tickets", { departmentMenuPlaceholder: event.target.value }); setDirty(true); }} />
+                    </Field>
+                    <Field label="Cor do botão de abertura">
+                      <NativeSelect value={String(panelButtonStyle.value)} onChange={(event) => { updateConfig("tickets", { panelButtonStyle: Number(event.target.value) }); setDirty(true); }}>
+                        {discordButtonStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}
+                      </NativeSelect>
+                    </Field>
+                  </>
+                ) : (
+                  <>
+                    <Field label="Cor dos botões de opção">
+                      <NativeSelect value={String(departmentButtonStyle.value)} onChange={(event) => { updateConfig("tickets", { departmentButtonStyle: Number(event.target.value) }); setDirty(true); }}>
+                        {discordButtonStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}
+                      </NativeSelect>
+                    </Field>
+                    <p className="m-0 text-xs text-muted-foreground">O Discord não exibe as descrições no formato de botões; elas aparecem no menu suspenso.</p>
+                  </>
+                )}
+                <Field label="Texto complementar no rodapé (opcional)">
+                  <Textarea rows={2} maxLength={300} value={asString(tcfg.config.panelFooter)} onChange={(event) => { updateConfig("tickets", { panelFooter: event.target.value }); setDirty(true); }} placeholder="Ex.: Horário de atendimento: 9h às 18h" />
+                  <CharCounter current={asString(tcfg.config.panelFooter).length} max={300} />
+                  <p className="m-0 text-xs text-muted-foreground">Aparece em texto discreto abaixo do painel.</p>
+                </Field>
+              </section>
+
+              <section className="space-y-4 rounded-2xl border border-border bg-card p-5" aria-labelledby="ticket-staff-heading">
+                <header>
+                  <h3 id="ticket-staff-heading" className="m-0 text-base font-semibold">Escolha quem responde</h3>
+                  <p className="m-0 mt-1 text-sm text-muted-foreground">Cargos selecionados poderão acessar os canais privados.</p>
+                </header>
+                <Field label="Cargos da equipe"><DiscordMultiSelect value={asList(tcfg.config.staffRoleIds)} onChange={(staffRoleIds) => { updateConfig("tickets", { staffRoleIds }); setDirty(true); }} /></Field>
+              </section>
+
+              <details className="motion-disclosure rounded-2xl border border-border bg-card p-3.5">
+                <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Mais configurações de atendimento</summary>
+                <p className="mb-4 mt-2 text-sm text-muted-foreground">Prazos, automações, registros e aparência. Você pode voltar a elas quando quiser.</p>
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
+                    <NumberField id="ticket-max-open" label="Máximo de tickets abertos por pessoa" min={1} max={25} value={Number(tcfg.config.maxOpenPerUser ?? 1)} onChange={(maxOpenPerUser) => updateConfig("tickets", { maxOpenPerUser })} />
+                    <Field label="Nome do canal · use {user}, {department} e {number}">
+                      <Input key={asString(tcfg.config.namingPattern, "atendimento-{user}")} defaultValue={asString(tcfg.config.namingPattern, "atendimento-{user}")} onBlur={(e) => updateConfig("tickets", { namingPattern: e.target.value.trim() || "atendimento-{user}" })} />
+                    </Field>
+                  </div>
+                  <NumberField id="ticket-sla-warning" label="Avisar a equipe depois de (minutos; 0 desliga)" min={0} max={10080} value={Number(tcfg.config.slaWarningMinutes ?? 60)} onChange={(slaWarningMinutes) => updateConfig("tickets", { slaWarningMinutes })} />
+                  <ToggleRow label="Pedir avaliação ao encerrar" description="Receba uma nota e um comentário do cliente." checked={Boolean(tcfg.config.feedbackEnabled)} onChange={(value) => updateConfig("tickets", { feedbackEnabled: value })} />
+                  <section className="space-y-3" aria-labelledby="ticket-departments-heading">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 id="ticket-departments-heading" className="m-0 text-sm font-semibold">Tipos de atendimento</h3>
+                        <p className="m-0 mt-1 text-xs text-muted-foreground">Cada tipo pode encaminhar para outra categoria do Discord e outra equipe.</p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={departmentSettings.length >= (canUseDepartments ? 25 : 1)}
+                        onClick={() => saveDepartments([...departmentSettings, {
+                          name: `Novo tipo ${departmentSettings.length + 1}`,
+                          id: `custom-${crypto.randomUUID()}`,
+                          description: "",
+                          emoji: "🎫",
+                          categoryId: "",
+                          staffRoleIds: [],
+                          inheritStaff: true,
+                          welcomeMessage: "",
+                          intakeQuestions: [],
+                        }])}
+                      >
+                        <Plus aria-hidden="true" className="size-4" />
+                        Adicionar tipo
+                      </Button>
+                    </div>
+                    <div className="divide-y divide-border rounded-xl border border-border px-3">
+                      {departmentSettings.map((department, index) => (
+                        <details key={department.id} className="motion-disclosure group py-3" open={index === 0}>
+                          <summary className="flex cursor-pointer list-none items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                            <span aria-hidden="true">{department.emoji || "🎫"}</span>
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium">{department.name || `Tipo ${index + 1}`}</span>
+                            <span className="text-xs text-muted-foreground">{department.inheritStaff ? "Equipe padrão" : "Equipe própria"}</span>
+                          </summary>
+                          <div className="space-y-3 pb-1 pt-3">
+                            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_6rem]">
+                              <Field label="Nome da opção">
+                                <Input maxLength={100} value={department.name} onChange={(event) => {
                                   const next = [...departmentSettings];
-                                  next[index] = { ...department, intakeQuestions: department.intakeQuestions.filter((_, itemIndex) => itemIndex !== questionIndex) };
+                                  next[index] = { ...department, name: event.target.value };
                                   saveDepartments(next);
-                                }}>
+                                }} />
+                              </Field>
+                              <Field label="Emoji">
+                                <Input maxLength={32} value={department.emoji} onChange={(event) => {
+                                  const next = [...departmentSettings];
+                                  next[index] = { ...department, emoji: event.target.value };
+                                  saveDepartments(next);
+                                }} />
+                              </Field>
+                            </div>
+                            <Field label="Descrição no menu do Discord">
+                              <Input maxLength={100} value={department.description} onChange={(event) => {
+                                const next = [...departmentSettings];
+                                next[index] = { ...department, description: event.target.value };
+                                saveDepartments(next);
+                              }} placeholder="Explique brevemente quando escolher esta opção" />
+                            </Field>
+                            <Field label="Categoria para criar os tickets">
+                              <DiscordSelect kind="category" value={department.categoryId} onChange={(categoryId) => {
+                                const next = [...departmentSettings];
+                                next[index] = { ...department, categoryId };
+                                saveDepartments(next);
+                              }} placeholder="Usar categoria padrão" />
+                            </Field>
+                            <ToggleRow label="Usar cargos da equipe padrão" description="Desative para definir uma equipe exclusiva para esta categoria." checked={department.inheritStaff} onChange={(inheritStaff) => {
+                              const next = [...departmentSettings];
+                              next[index] = { ...department, inheritStaff };
+                              saveDepartments(next);
+                            }} />
+                            {!department.inheritStaff ? (
+                              <Field label="Cargos desta equipe">
+                                <DiscordMultiSelect value={department.staffRoleIds} onChange={(staffRoleIds) => {
+                                  const next = [...departmentSettings];
+                                  next[index] = { ...department, staffRoleIds };
+                                  saveDepartments(next);
+                                }} />
+                              </Field>
+                            ) : null}
+                            <Field label="Mensagem de boas-vindas específica">
+                              <Textarea rows={2} maxLength={2000} value={department.welcomeMessage} onChange={(event) => {
+                                const next = [...departmentSettings];
+                                next[index] = { ...department, welcomeMessage: event.target.value };
+                                saveDepartments(next);
+                              }} placeholder="Vazio usa a mensagem padrão do painel" />
+                            </Field>
+                            <Field label="Perguntas antes de abrir (até 5)">
+                              <div className="space-y-2">
+                                {department.intakeQuestions.map((question, questionIndex) => (
+                                  <div key={`${department.id}-question-${questionIndex}`} className="flex gap-2">
+                                    <Input
+                                      maxLength={45}
+                                      value={question}
+                                      aria-label={`Pergunta ${questionIndex + 1} de ${department.name}`}
+                                      onChange={(event) => {
+                                        const next = [...departmentSettings];
+                                        const intakeQuestions = [...department.intakeQuestions];
+                                        intakeQuestions[questionIndex] = event.target.value;
+                                        next[index] = { ...department, intakeQuestions };
+                                        saveDepartments(next);
+                                      }}
+                                    />
+                                    <Button type="button" size="icon" variant="ghost" aria-label={`Remover pergunta ${questionIndex + 1}`} onClick={() => {
+                                      const next = [...departmentSettings];
+                                      next[index] = { ...department, intakeQuestions: department.intakeQuestions.filter((_, itemIndex) => itemIndex !== questionIndex) };
+                                      saveDepartments(next);
+                                    }}>
+                                      <Trash2 aria-hidden="true" className="size-4" />
+                                    </Button>
+                                  </div>
+                                ))}
+                                {department.intakeQuestions.length < 5 ? (
+                                  <Button type="button" size="sm" variant="outline" onClick={() => {
+                                    const next = [...departmentSettings];
+                                    next[index] = { ...department, intakeQuestions: [...department.intakeQuestions, "Nova pergunta"] };
+                                    saveDepartments(next);
+                                  }}>
+                                    <Plus aria-hidden="true" className="size-4" />
+                                    Adicionar pergunta
+                                  </Button>
+                                ) : null}
+                              </div>
+                              <p className="m-0 text-xs text-muted-foreground">A pessoa responde em um formulário do Discord antes da criação do canal. O limite da plataforma é de 5 perguntas por formulário.</p>
+                            </Field>
+                            {departmentSettings.length > 1 ? (
+                              <div className="flex justify-between gap-2">
+                                <div className="flex gap-1">
+                                  <Button type="button" size="icon" variant="ghost" aria-label={`Mover ${department.name} para cima`} disabled={index === 0} onClick={() => {
+                                    const next = [...departmentSettings];
+                                    [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
+                                    saveDepartments(next);
+                                  }}><ArrowUp aria-hidden="true" className="size-4" /></Button>
+                                  <Button type="button" size="icon" variant="ghost" aria-label={`Mover ${department.name} para baixo`} disabled={index === departmentSettings.length - 1} onClick={() => {
+                                    const next = [...departmentSettings];
+                                    [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
+                                    saveDepartments(next);
+                                  }}><ArrowDown aria-hidden="true" className="size-4" /></Button>
+                                </div>
+                                <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={() => saveDepartments(departmentSettings.filter((_, itemIndex) => itemIndex !== index))}>
                                   <Trash2 aria-hidden="true" className="size-4" />
+                                  Remover tipo
                                 </Button>
                               </div>
-                            ))}
-                            {department.intakeQuestions.length < 5 ? (
-                              <Button type="button" size="sm" variant="outline" onClick={() => {
-                                const next = [...departmentSettings];
-                                next[index] = { ...department, intakeQuestions: [...department.intakeQuestions, "Nova pergunta"] };
-                                saveDepartments(next);
-                              }}>
-                                <Plus aria-hidden="true" className="size-4" />
-                                Adicionar pergunta
-                              </Button>
                             ) : null}
                           </div>
-                          <p className="m-0 text-xs text-muted-foreground">A pessoa responde em um formulário do Discord antes da criação do canal. O limite da plataforma é de 5 perguntas por formulário.</p>
-                        </Field>
-                        {departmentSettings.length > 1 ? (
-                          <div className="flex justify-between gap-2">
-                            <div className="flex gap-1">
-                              <Button type="button" size="icon" variant="ghost" aria-label={`Mover ${department.name} para cima`} disabled={index === 0} onClick={() => {
-                                const next = [...departmentSettings];
-                                [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
-                                saveDepartments(next);
-                              }}><ArrowUp aria-hidden="true" className="size-4" /></Button>
-                              <Button type="button" size="icon" variant="ghost" aria-label={`Mover ${department.name} para baixo`} disabled={index === departmentSettings.length - 1} onClick={() => {
-                                const next = [...departmentSettings];
-                                [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
-                                saveDepartments(next);
-                              }}><ArrowDown aria-hidden="true" className="size-4" /></Button>
-                            </div>
-                            <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={() => saveDepartments(departmentSettings.filter((_, itemIndex) => itemIndex !== index))}>
-                              <Trash2 aria-hidden="true" className="size-4" />
-                              Remover tipo
-                            </Button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </details>
-                  ))}
-                </div>
-                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
-                  <Field label="Canal de transcrições">
-                    <DiscordSelect kind="text" value={asString(tcfg.config.transcriptChannelId)} onChange={(transcriptChannelId) => updateConfig("tickets", { transcriptChannelId })} placeholder="Selecione um canal" />
-                  </Field>
-                  <Field label="Canal de auditoria">
-                    <DiscordSelect kind="text" value={asString(tcfg.config.logChannelId)} onChange={(logChannelId) => updateConfig("tickets", { logChannelId })} placeholder="Selecione um canal" />
-                  </Field>
-                </div>
-                <div>
-                  <NumberField id="ticket-message-retention" label="Apagar mensagens após (dias; 0 mantém sem prazo)" min={0} max={3650} value={Number(tcfg.config.ticketMessageRetentionDays ?? 0)} onChange={(ticketMessageRetentionDays) => updateConfig("tickets", { ticketMessageRetentionDays })} />
-                  <p className="m-0 text-xs text-muted-foreground">Remove mensagens e anexos locais após o prazo. Tickets novos com retenção configurada usam apenas a exportação local; transcripts externos já gerados não podem ser apagados pelo bot. O resumo permanece para estatísticas.</p>
-                </div>
-                <div className="space-y-4">
-                  <div className="divide-y divide-border">
-                    <ToggleRow label="Notificar a equipe" description="Menciona os cargos ao abrir." checked={Boolean(tcfg.config.pingStaffOnOpen)} onChange={(value) => updateConfig("tickets", { pingStaffOnOpen: value })} />
-                    <ToggleRow label="Permitir reabertura" description="A pessoa pode voltar ao canal." checked={Boolean(tcfg.config.reopenEnabled)} onChange={(value) => updateConfig("tickets", { reopenEnabled: value })} />
-                    <ToggleRow label="Prioridade" description="A equipe classifica urgência." checked={Boolean(tcfg.config.priorityEnabled)} onChange={(value) => updateConfig("tickets", { priorityEnabled: value })} />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <NumberField id="ticket-close-after" label="Prazo para fechar automaticamente (horas; 0 desliga)" min={0} max={8760} value={Number(tcfg.config.closeAfterHours ?? 48)} onChange={(closeAfterHours) => updateConfig("tickets", { closeAfterHours })} />
-                    <NumberField id="ticket-inactive-close" label="Prazo de inatividade (horas; 0 desliga)" min={0} max={8760} value={Number(tcfg.config.autoCloseInactiveHours ?? 24)} onChange={(autoCloseInactiveHours) => updateConfig("tickets", { autoCloseInactiveHours })} />
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
-                  <NumberField id="staff-response-goal" label="Meta para primeira resposta (minutos)" min={5} max={10080} value={Number(staffConfig.config.responseTimeGoalMinutes ?? 30)} onChange={(responseTimeGoalMinutes) => updateConfig("staff", { responseTimeGoalMinutes })} />
-                  <NumberField id="staff-max-concurrent" label="Tickets simultâneos por atendente" min={1} max={100} value={Number(staffConfig.config.maxConcurrentTickets ?? 5)} onChange={(maxConcurrentTickets) => updateConfig("staff", { maxConcurrentTickets })} />
-                </div>
-                <Field label="Mensagem de boas-vindas no canal privado">
-                  <Textarea key={asString(tcfg.config.welcomeMessage)} rows={3} defaultValue={asString(tcfg.config.welcomeMessage)} onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })} />
-                  <p className="m-0 text-xs text-muted-foreground">Enviada automaticamente quando o atendimento é aberto.</p>
-                </Field>
-                <section className="space-y-3" aria-labelledby="ticket-saved-replies-heading">
-                  <div>
-                    <h3 id="ticket-saved-replies-heading" className="m-0 text-sm font-semibold">Respostas salvas</h3>
-                    <p className="m-0 mt-1 text-xs text-muted-foreground">Atalhos para mensagens frequentes da equipe. Elas só são enviadas depois da confirmação no ticket.</p>
-                  </div>
-                  {configuredSavedReplies.map((item, index) => (
-                    <div key={item.id} className="space-y-2 rounded-xl border border-border p-3">
-                      <div className="flex gap-2">
-                        <Input
-                          aria-label={`Nome da resposta salva ${index + 1}`}
-                          maxLength={60}
-                          value={item.label}
-                          placeholder="Nome da resposta"
-                          onChange={(event) => {
-                            const next = [...configuredSavedReplies];
-                            next[index] = { ...item, label: event.target.value };
-                            saveSavedReplies(next);
-                          }}
-                        />
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          aria-label={`Remover resposta salva ${index + 1}`}
-                          onClick={() => saveSavedReplies(configuredSavedReplies.filter((_, replyIndex) => replyIndex !== index))}
-                        >
-                          <Trash2 aria-hidden="true" className="size-4" />
-                        </Button>
-                      </div>
-                      <Textarea
-                        aria-label={`Texto da resposta salva ${index + 1}`}
-                        rows={2}
-                        maxLength={2000}
-                        value={item.content}
-                        placeholder="Texto que será inserido no campo de resposta"
-                        onChange={(event) => {
-                          const next = [...configuredSavedReplies];
-                          next[index] = { ...item, content: event.target.value };
-                          saveSavedReplies(next);
-                        }}
-                      />
+                        </details>
+                      ))}
                     </div>
-                  ))}
-                  {configuredSavedReplies.length < 20 ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => saveSavedReplies([
-                        ...configuredSavedReplies,
-                        { id: `reply-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, label: "", content: "" },
-                      ])}
-                    >
-                      <Plus aria-hidden="true" className="size-4" />
-                      Adicionar resposta salva
-                    </Button>
-                  ) : <p className="m-0 text-xs text-muted-foreground">Limite de 20 respostas salvas atingido.</p>}
-                </section>
-                <ToggleRow label="IA de apoio à equipe" description="Gera sugestões privadas para os atendentes." checked={Boolean(tcfg.config.aiSupportEnabled)} onChange={(value) => updateConfig("tickets", { aiSupportEnabled: value })} />
-                <ToggleRow label="Incluir conversa nas análises por IA" description="Quando desligado, o conteúdo das mensagens não é enviado à IA." checked={Boolean(tcfg.config.aiIncludeConversation)} onChange={(value) => updateConfig("tickets", { aiIncludeConversation: value })} />
-              </section>
+                    <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
+                      <Field label="Canal de transcrições">
+                        <DiscordSelect kind="text" value={asString(tcfg.config.transcriptChannelId)} onChange={(transcriptChannelId) => updateConfig("tickets", { transcriptChannelId })} placeholder="Selecione um canal" />
+                      </Field>
+                      <Field label="Canal de auditoria">
+                        <DiscordSelect kind="text" value={asString(tcfg.config.logChannelId)} onChange={(logChannelId) => updateConfig("tickets", { logChannelId })} placeholder="Selecione um canal" />
+                      </Field>
+                    </div>
+                    <div>
+                      <NumberField id="ticket-message-retention" label="Apagar mensagens após (dias; 0 mantém sem prazo)" min={0} max={3650} value={Number(tcfg.config.ticketMessageRetentionDays ?? 0)} onChange={(ticketMessageRetentionDays) => updateConfig("tickets", { ticketMessageRetentionDays })} />
+                      <p className="m-0 text-xs text-muted-foreground">Remove mensagens e anexos locais após o prazo. Tickets novos com retenção configurada usam apenas a exportação local; transcripts externos já gerados não podem ser apagados pelo bot. O resumo permanece para estatísticas.</p>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="divide-y divide-border">
+                        <ToggleRow label="Notificar a equipe" description="Menciona os cargos ao abrir." checked={Boolean(tcfg.config.pingStaffOnOpen)} onChange={(value) => updateConfig("tickets", { pingStaffOnOpen: value })} />
+                        <ToggleRow label="Permitir reabertura" description="A pessoa pode voltar ao canal." checked={Boolean(tcfg.config.reopenEnabled)} onChange={(value) => updateConfig("tickets", { reopenEnabled: value })} />
+                        <ToggleRow label="Prioridade" description="A equipe classifica urgência." checked={Boolean(tcfg.config.priorityEnabled)} onChange={(value) => updateConfig("tickets", { priorityEnabled: value })} />
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <NumberField id="ticket-close-after" label="Prazo para fechar automaticamente (horas; 0 desliga)" min={0} max={8760} value={Number(tcfg.config.closeAfterHours ?? 48)} onChange={(closeAfterHours) => updateConfig("tickets", { closeAfterHours })} />
+                        <NumberField id="ticket-inactive-close" label="Prazo de inatividade (horas; 0 desliga)" min={0} max={8760} value={Number(tcfg.config.autoCloseInactiveHours ?? 24)} onChange={(autoCloseInactiveHours) => updateConfig("tickets", { autoCloseInactiveHours })} />
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
+                      <NumberField id="staff-response-goal" label="Meta para primeira resposta (minutos)" min={5} max={10080} value={Number(staffConfig.config.responseTimeGoalMinutes ?? 30)} onChange={(responseTimeGoalMinutes) => updateConfig("staff", { responseTimeGoalMinutes })} />
+                      <NumberField id="staff-max-concurrent" label="Tickets simultâneos por atendente" min={1} max={100} value={Number(staffConfig.config.maxConcurrentTickets ?? 5)} onChange={(maxConcurrentTickets) => updateConfig("staff", { maxConcurrentTickets })} />
+                    </div>
+                    <Field label="Mensagem de boas-vindas no canal privado">
+                      <Textarea key={asString(tcfg.config.welcomeMessage)} rows={3} defaultValue={asString(tcfg.config.welcomeMessage)} onBlur={(e) => updateConfig("tickets", { welcomeMessage: e.target.value })} />
+                      <p className="m-0 text-xs text-muted-foreground">Enviada automaticamente quando o atendimento é aberto.</p>
+                    </Field>
+                    <div className="space-y-4 divide-y divide-border">
+                      <ToggleRow label="IA de apoio à equipe" description="Sugestões privadas aparecem no canal para os atendentes." checked={Boolean(tcfg.config.aiSupportEnabled)} onChange={(value) => updateConfig("tickets", { aiSupportEnabled: value })} />
+                      <ToggleRow label="Incluir conversa nas análises por IA" description="Quando desligado, o conteúdo das mensagens não é enviado à IA." checked={Boolean(tcfg.config.aiIncludeConversation)} onChange={(value) => updateConfig("tickets", { aiIncludeConversation: value })} />
+                    </div>
+                  </section>
+                </div>
+              </details>
             </div>
-          </details>
-          <div className="space-y-2 rounded-2xl border border-border p-4">
-            <h3 className="m-0 text-base font-semibold">Publicar no Discord</h3>
-            <p className="m-0 text-sm text-muted-foreground">A publicação só aparece como concluída depois que o bot confirmar no Discord.</p>
-            {!asString(tcfg.config.panelChannelId).trim() ? <p className="m-0 text-sm text-warn">Escolha o canal do painel acima para continuar.</p> : null}
-            {!validDepartmentSettings ? <p role="alert" className="m-0 text-sm text-destructive">Revise os tipos: os nomes devem ser únicos, e cada pergunta precisa ter até 45 caracteres (máximo de 5 por tipo).</p> : null}
-                <Button
-                  disabled={pubBusyHook || !asString(tcfg.config.panelChannelId).trim() || !validDepartmentSettings}
-                  onClick={async () => {
-                    setNotice(null);
-                    const result = await publishPanel("tickets", asString(tcfg.config.panelChannelId));
-                    if (result) { announce(result.status === "done" ? "Publicado." : "Pedido enviado."); setDirty(false); }
-                  }}
-                >
-                  {pubBusy ? "Aguardando confirmação do bot…" : "Publicar painel no Discord"}
-                </Button>
-            {notice ? <p role="status" className="m-0 rounded-lg bg-muted px-3 py-2 text-sm">{notice}</p> : null}
-          </div>
-          </div>
-          <aside className="min-w-0 space-y-2 xl:sticky xl:top-24 xl:self-start">
-            <div className="flex items-center justify-between">
-              <p className="m-0 text-sm font-semibold">Prévia</p>
-              <div className="flex gap-1 rounded-lg border p-0.5 text-xs">
-                <button type="button" className={cn("rounded px-2 py-1", previewMode === "panel" && "bg-primary text-primary-foreground")} onClick={() => setPreviewMode("panel")}>Painel</button>
-                <button type="button" className={cn("rounded px-2 py-1", previewMode === "modal" && "bg-primary text-primary-foreground")} onClick={() => setPreviewMode("modal")}>Modal</button>
-              </div>
-            </div>
-            {previewMode === "modal" ? (
-              <DiscordModalPreview title={departmentSettings[0]?.name || "Abrir atendimento"} questions={departmentSettings[0]?.intakeQuestions || ["Como podemos ajudar?"]} />
-            ) : (
-            <DiscordPanel
-              channel={asString(tcfg.config.panelChannelId, "abrir-ticket").replace(/^#/, "") || "abrir-ticket"}
-              title={asString(tcfg.config.panelTitle, "Precisa de ajuda?")}
-              description={asString(tcfg.config.panelDescription, "Escolha uma opção para falar com nossa equipe.")}
-              accent={asString(tcfg.config.panelAccentColor, "#28655b")}
-              buttons={[`${asString(tcfg.config.panelButtonEmoji, "🎫")} ${asString(tcfg.config.panelButtonLabel, "Abrir atendimento")}`]}
-              choiceOptions={departmentSettings}
-              choiceDisplayMode={departmentDisplayMode}
-              choiceButtonStyle={departmentDisplayMode === "buttons" ? departmentButtonStyle.preview : panelButtonStyle.preview}
-              menuPrompt={asString(tcfg.config.departmentMenuPrompt, "Escolha o departamento para abrir o atendimento:")}
-              menuPlaceholder={asString(tcfg.config.departmentMenuPlaceholder, "Escolha o departamento")}
-              footer={asString(tcfg.config.panelFooter)}
-            />
-            )}
-          </aside>
-          </div>
-        
-            <div className="fixed bottom-0 left-0 right-0 z-30 border-t bg-background/95 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur sm:hidden">
-              <Button className="w-full" disabled={pubBusyHook || !validDepartmentSettings} onClick={async () => {
-                const result = await publishPanel("tickets", asString(tcfg.config.panelChannelId));
-                if (result) { announce(result.status === "done" ? "Publicado." : "Pedido enviado."); setDirty(false); }
-              }}>
-                {pubBusy ? "Publicando…" : dirty ? "Publicar alterações" : "Publicar painel"}
-              </Button>
-            </div>
-</TabsContent>
-      </Tabs>
 
-      <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
-        <DialogContent>
-          <DialogTitle>Encerrar atendimento</DialogTitle>
-          <DialogDesc>Informe o motivo. O bot registrará no histórico e encerrará o canal. Se houver transcrição configurada e disponível no seu plano, ela será enviada ao canal escolhido.</DialogDesc>
-          <Field label="Motivo do encerramento">
-            <Textarea rows={3} maxLength={500} value={closeReason} onChange={(event) => setCloseReason(event.target.value)} placeholder="Ex.: dúvida resolvida, solicitação concluída…" />
-          </Field>
-          <Button
-            className="mt-4 w-full"
-            disabled={actionBusy || !closeReason.trim()}
-            onClick={() => void runTicketAction("close", { reason: closeReason.trim() }).then((ok) => { if (ok) { setCloseOpen(false); setCloseReason(""); } })}
-          >
-            Encerrar atendimento
-          </Button>
-        </DialogContent>
-      </Dialog>
+            <aside className="min-w-0 space-y-4 xl:sticky xl:top-24 xl:self-start">
+              <div className="flex items-center justify-between">
+                <p className="m-0 text-sm font-semibold">Prévia</p>
+                <div className="flex gap-1 rounded-lg border p-0.5 text-xs">
+                  <button type="button" className={cn("rounded px-2 py-1", previewMode === "panel" && "bg-primary text-primary-foreground")} onClick={() => setPreviewMode("panel")}>Painel</button>
+                  <button type="button" className={cn("rounded px-2 py-1", previewMode === "modal" && "bg-primary text-primary-foreground")} onClick={() => setPreviewMode("modal")}>Modal</button>
+                </div>
+              </div>
+              {previewMode === "modal" ? (
+                <DiscordModalPreview title={departmentSettings[0]?.name || "Abrir atendimento"} questions={departmentSettings[0]?.intakeQuestions || ["Como podemos ajudar?"]} />
+              ) : (
+                <DiscordPanel
+                  channel={asString(tcfg.config.panelChannelId, "abrir-ticket").replace(/^#/, "") || "abrir-ticket"}
+                  title={asString(tcfg.config.panelTitle, "Precisa de ajuda?")}
+                  description={asString(tcfg.config.panelDescription, "Escolha uma opção para falar com nossa equipe.")}
+                  accent={asString(tcfg.config.panelAccentColor, "#28655b")}
+                  buttons={[`${asString(tcfg.config.panelButtonEmoji, "🎫")} ${asString(tcfg.config.panelButtonLabel, "Abrir atendimento")}`]}
+                  choiceOptions={departmentSettings}
+                  choiceDisplayMode={departmentDisplayMode}
+                  choiceButtonStyle={departmentDisplayMode === "buttons" ? departmentButtonStyle.preview : panelButtonStyle.preview}
+                  menuPrompt={asString(tcfg.config.departmentMenuPrompt, "Escolha o departamento para abrir o atendimento:")}
+                  menuPlaceholder={asString(tcfg.config.departmentMenuPlaceholder, "Escolha o departamento")}
+                  footer={asString(tcfg.config.panelFooter)}
+                />
+              )}
+              <div className="space-y-2 rounded-2xl border border-border p-4">
+                <h3 className="m-0 text-base font-semibold">Publicar no Discord</h3>
+                <p className="m-0 text-sm text-muted-foreground">A publicação só aparece como concluída depois que o bot confirmar no Discord.</p>
+                {!asString(tcfg.config.panelChannelId).trim() ? <p className="m-0 text-sm text-warn">Escolha o canal do painel acima para continuar.</p> : null}
+                {!validDepartmentSettings ? <p role="alert" className="m-0 text-sm text-destructive">Revise os tipos: os nomes devem ser únicos, e cada pergunta precisa ter até 45 caracteres (máximo de 5 por tipo).</p> : null}
+                {pubNotice ? <p role="status" className={cn("m-0 rounded-lg px-3 py-2 text-sm", pubTone === "ok" && "bg-ok/10 text-ok", pubTone === "error" && "bg-warn/15 text-warn", pubTone === "neutral" && "bg-muted text-foreground")}>{pubNotice}</p> : null}
+                <Button
+                  className="w-full"
+                  disabled={pubBusy || !asString(tcfg.config.panelChannelId).trim() || !validDepartmentSettings}
+                  onClick={() => void publish()}
+                >
+                  {pubBusy ? "Aguardando confirmação do bot…" : dirty ? "Publicar alterações" : "Publicar painel no Discord"}
+                </Button>
+              </div>
+            </aside>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

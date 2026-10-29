@@ -1663,16 +1663,11 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     );
     const activationTimer = setTimeout(() => {
       void (async () => {
-        if (await guildPlan(guild.id)) return;
-        log.warn("servidor sem licença ativa após o período de ativação; saindo", {
+        const plan = await guildPlan(guild.id);
+        if (plan) return;
+        log.warn("servidor adicionado sem licença ativa; mantendo o bot no servidor e bloqueando acesso até o cadastro na dashboard", {
           guildId: guild.id,
         });
-        await guild.leave().catch((error) =>
-          log.warn("não foi possível sair do servidor sem licença", {
-            guildId: guild.id,
-            error: String(error),
-          }),
-        );
       })();
     }, 15 * 60_000);
     activationTimer.unref();
@@ -1690,23 +1685,9 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
         const license = await guildEntitlement(guild.id);
         const status = await guildEntitlementStatus(guild.id);
         if (status !== "inactive" && !(license && license.accountId !== guild.ownerId)) continue;
-        log.warn("licença inativa ou fora do limite do plano; saindo do servidor", {
+        log.warn("licença inativa ou fora do limite do plano; mantendo o bot no servidor e bloqueando funcionalidades até o cadastro na dashboard", {
           guildId: guild.id,
         });
-        const owner = await guild.fetchOwner().catch(() => null);
-        if (owner) {
-          await owner
-            .send(
-              "O Wumpus saiu deste servidor porque ele está sem licença ativa ou acima do limite do plano. Entre na dashboard com a conta Discord proprietária para conferir o plano e a cota; depois, se necessário, adicione o bot novamente.",
-            )
-            .catch(() => undefined);
-        }
-        await guild.leave().catch((error) =>
-          log.warn("não foi possível sair do servidor sem licença", {
-            guildId: guild.id,
-            error: String(error),
-          }),
-        );
       }
     })();
   }, 60_000);
