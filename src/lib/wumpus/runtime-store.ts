@@ -13,7 +13,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { enqueueOutbox, mutateRuntime, readBotCollection, readRuntime, updateBotCollection, type BotFormRecord, type BotStaffRosterSnapshot, type BotTicketMessage, type BotTicketRecord, type KnowledgeFaqSuggestion, type OutboxJob } from "./runtime.server";
+import { enqueueOutbox, mutateRuntime, readBotCollection, readRuntime, updateBotCollection, type BotFormRecord, type BotStaffRosterSnapshot, type BotTicketMessage, type BotTicketRecord, type KnowledgeFaqSuggestion, type OutboxJob, type SecurityAuditRecord } from "./runtime.server";
 import { requireGuildAccess } from "./session-access.server";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
@@ -22,6 +22,7 @@ import { markSecurityEventReviewed, readReviewedSecurityEvents } from "./securit
 import { monthlyOcrLimit, planAllows } from "./engine";
 import { aggregateStaffMonitoring } from "./staff-monitoring";
 import { slaState } from "../../bot/tickets-sla";
+import { enforceRequestLimit } from "./request-limits.server";
 
 export const getDiscordGuildResources = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/) }).strict().parse(input))
@@ -230,7 +231,7 @@ export const updateGuildKnowledgeFaqSuggestion = createServerFn({ method: "POST"
     return { ok: true as const };
   });
 
-export type { RuntimeFile, RuntimeGuild, RuntimeArticle, KnowledgeFaqSuggestion, OutboxJob } from "./runtime.server";
+export type { RuntimeFile, RuntimeGuild, RuntimeArticle, KnowledgeFaqSuggestion, OutboxJob, SecurityAuditRecord, SecurityAuditFinding } from "./runtime.server";
 
 /** Payload de config de um servidor: `{ modulo: { ...campos, enabled } }`. */
 export type PublishInput = {
@@ -354,6 +355,89 @@ export const getGuildSecurityActionStatus = createServerFn({ method: "POST" })
     await requireGuildAccess(data.token, data.guildId);
     const job = (await readRuntime()).outbox?.find((entry) => entry.id === data.jobId && entry.guildId === data.guildId && (entry.target === "security" || entry.target === "security-verification"));
     return job ? { status: job.status, detail: job.detail ?? null, at: job.at ?? null } : { status: "missing" as const, detail: null, at: null };
+  });
+
+/**
+ * Pedido de auditoria de permissoes por IA.
+ *
+ * Enfileira um job `security_audit`; o bot monta o snapshot do servidor, chama
+ * a IA e grava o relatorio na colecao `security-audits`, que o painel le em
+ * `getGuildSecurityAudits`. Recurso do plano: exige `ai` (Pro ou acima).
+ */
+export const requestSecurityAudit = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildAccess(data.token, data.guildId);
+    const plan = session.entitlements.plan;
+    if (!plan || !planAllows(plan, "ai")) {
+      throw new Error("A auditoria por IA exige o plano Pro ou superior.");
+    }
+    await enforceRequestLimit("ai-analysis", 20, 10 * 60_000, session.userId);
+    const job: OutboxJob = {
+      id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      guildId: data.guildId,
+      kind: "security_audit",
+      target: "security",
+      channelRef: "",
+      createdAt: Date.now(),
+      status: "queued",
+    };
+    await enqueueOutbox(job);
+    return { ok: true as const, jobId: job.id };
+  });
+
+/** Relatorios de auditoria de permissoes de um servidor, do mais recente para o mais antigo. */
+export const getGuildSecurityAudits = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    limit: z.number().int().min(1).max(50).default(10),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    await requireGuildAccess(data.token, data.guildId);
+    const rows = await readBotCollection<SecurityAuditRecord>("security-audits");
+    return rows
+      .filter((row) => row.guildId === data.guildId)
+      .sort((a, b) => b.at - a.at)
+      .slice(0, data.limit);
+  });
+
+/**
+ * Pedido de correcao da auditoria.
+ *
+ * Enfileira um job `security_fix` apontando para o relatorio e o achado.
+ * `findingIndex` vazio = corrigir todos os achados com acoes seguras. O bot
+ * aplica com verificacao de seguranca e grava os resultados no relatorio.
+ */
+export const requestSecurityFix = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({
+    token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
+    guildId: z.string().regex(/^\d{17,20}$/),
+    auditId: z.string().min(1).max(100),
+    findingIndex: z.number().int().min(0).optional(),
+  }).strict().parse(input))
+  .handler(async ({ data }) => {
+    const session = await requireGuildAccess(data.token, data.guildId);
+    const plan = session.entitlements.plan;
+    if (!plan || !planAllows(plan, "ai")) {
+      throw new Error("As correções da auditoria exigem o plano Pro ou superior.");
+    }
+    await enforceRequestLimit("ai-analysis", 20, 10 * 60_000, session.userId);
+    const job: OutboxJob = {
+      id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      guildId: data.guildId,
+      kind: "security_fix",
+      target: "security",
+      channelRef: "",
+      securityFix: { auditId: data.auditId, ...(data.findingIndex !== undefined ? { findingIndex: data.findingIndex } : {}) },
+      createdAt: Date.now(),
+      status: "queued",
+    };
+    await enqueueOutbox(job);
+    return { ok: true as const, jobId: job.id };
   });
 
 /**

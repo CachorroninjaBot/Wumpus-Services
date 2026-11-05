@@ -119,12 +119,12 @@ export type OutboxJob = {
   id: string;
   guildId: string;
   /** O que publicar. */
-  kind: "panel" | "ticket_action" | "form_action" | "support_handoff" | "support_message" | "support_rating" | "staff_roster";
+  kind: "panel" | "ticket_action" | "form_action" | "support_handoff" | "support_message" | "support_rating" | "staff_roster" | "security_audit" | "security_fix";
   /** "tickets" | "forms" — decide o modulo de config a usar. */
   target: string;
   /** Referencia de canal da config (nome como "ch_atendimento" ou snowflake). */
   channelRef: string;
-  action?: "claim" | "reply" | "note" | "close" | "priority" | "transfer" | "escalate" | "waiting_user" | "waiting_staff" | "resume" | "approve_form" | "reject_form" | "security_restore" | "security_lockdown_on" | "security_lockdown_off";
+  action?: "claim" | "reply" | "note" | "close" | "priority" | "transfer" | "escalate" | "waiting_user" | "waiting_staff" | "resume" | "approve_form" | "reject_form" | "security_restore" | "security_lockdown_on" | "security_lockdown_off" | "permission_audit";
   verificationRoleId?: string;
   ticketId?: number;
   formId?: number;
@@ -138,6 +138,8 @@ export type OutboxJob = {
   rating?: number;
   reason?: string;
   priority?: "low" | "normal" | "high" | "urgent";
+  /** Correção de auditoria pedida pelo painel: aponta para o relatório e o achado. */
+  securityFix?: { auditId: string; findingIndex?: number };
   createdAt: number;
   status: "queued" | "done" | "failed";
   /** Preenchido pelo bot. */
@@ -213,6 +215,61 @@ export type BotFormRecord = {
   messageId: string | null;
 };
 
+export type SecurityAuditFix = {
+  kind: "remove_role_permission" | "deny_channel_permission";
+  /** Nome (ou id) do cargo para remove_role_permission; do canal para deny_channel_permission. */
+  target: string;
+  /** Cargo afetado pelo overwrite — só para deny_channel_permission. Pode ser "@everyone". */
+  role?: string;
+  /** Nome da permissão (pt-BR ou inglês). */
+  permission: string;
+  note?: string;
+};
+
+export type SecurityAuditFinding = {
+  title: string;
+  detail: string;
+  severity: "info" | "attention" | "urgent";
+  suggestion: string;
+  /** Cargo, canal ou @everyone afetado pelo achado. */
+  scope: string;
+  /** Ações seguras que o bot pode aplicar para corrigir este achado. */
+  fixes: SecurityAuditFix[];
+};
+
+export type SecurityFixOutcome = {
+  fixIndex: number;
+  ok: boolean;
+  /** `true` quando a ação foi realmente aplicada no Discord. */
+  applied: boolean;
+  detail: string;
+};
+
+export type SecurityFixBatch = {
+  findingIndex: number;
+  at: number;
+  outcomes: SecurityFixOutcome[];
+};
+
+export type SecurityAuditRecord = {
+  id: string;
+  guildId: string;
+  at: number;
+  trigger: "manual" | "scheduled";
+  summary: string;
+  risk: number;
+  findings: SecurityAuditFinding[];
+  /** `unavailable` quando a IA nao devolveu resposta utilizavel. */
+  source: "ai" | "unavailable";
+  /** Quantos cargos + canais entraram no snapshot. */
+  snapshotSize: number;
+  /** Texto do snapshot do servidor enviado a IA; exibido acima da analise. */
+  context?: string;
+  durationMs: number;
+  /** Resultado das correções aplicadas, por achado. */
+  fixResults?: SecurityFixBatch[];
+};
+
 export type RuntimeFile = {
   updatedAt: number;
   guilds: Record<string, RuntimeGuild>;
@@ -259,7 +316,7 @@ export async function readRuntime(): Promise<RuntimeFile> {
 }
 
 /** Coleções do bot; o modo local sem banco continua usando arquivos JSON. */
-export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status" | "support-chats" | "assistant-chats" | "staff-rosters";
+export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status" | "support-chats" | "assistant-chats" | "staff-rosters" | "security-audits";
 
 export async function readBotCollection<T>(name: BotCollectionName): Promise<T[]> {
   if (isDatabaseConfigured()) {

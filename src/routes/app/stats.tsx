@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/input";
 import { Notice } from "@/components/ui/notice";
 import { Section } from "@/components/ui/section";
+import { SkeletonKpi } from "@/components/ui/skeleton";
 import { getGuildActivity, getGuildTickets } from "@/lib/wumpus/runtime-store";
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { useModule, useWumpus } from "@/lib/wumpus/store";
@@ -101,21 +102,31 @@ function StatsPage() {
       {error ? <Notice tone="error" className="m-0">{error}{activity ? " Os números exibidos são da última sincronização bem-sucedida." : ""}</Notice> : null}
       {activity?.bot.status !== "online" && activity ? <Notice tone="warning" className="m-0">O bot não está enviando atualizações agora. Os dados disponíveis podem estar desatualizados.</Notice> : null}
 
-      <section aria-label="Indicadores do período" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <Kpi icon={<Tickets className="size-4" />} label="Tickets criados" value={range ? String(range.opened) : loading ? "…" : "—"} detail={range && previous ? relativeText(range.opened, previous.opened) : "No período selecionado"} />
-        <Kpi icon={<TicketCheck className="size-4" />} label="Tickets encerrados" value={range ? String(range.closed) : loading ? "…" : "—"} detail={range && previous ? relativeText(range.closed, previous.closed) : "No período selecionado"} />
-        <Kpi icon={<Clock3 className="size-4" />} label="Mediana da 1ª resposta" value={range?.medianResponseMinutes == null ? "—" : formatDuration(range.medianResponseMinutes)} detail={`${range?.responseCount ?? 0} tickets com resposta`} />
-        <Kpi icon={<MessageSquareText className="size-4" />} label="Satisfação (CSAT)" value={range?.csat == null ? "—" : `${range.csat.toFixed(1)}/5`} detail={`${range?.csatCount ?? 0} avaliações no período`} />
-        <Kpi icon={<Activity className="size-4" />} label="Respostas dentro do prazo" value={range?.slaMet == null ? "—" : `${range.slaMet}%`} detail={Number(tcfg.config.slaWarningMinutes ?? 60) > 0 ? `${range?.slaCount ?? 0} tickets respondidos ou já vencidos · meta ${Number(tcfg.config.slaWarningMinutes ?? 60)} min` : "Meta de resposta desativada"} />
-        <Kpi icon={<UsersRound className="size-4" />} label="Fila aberta agora" value={activity ? String(activity.currentOpen) : loading ? "…" : "—"} detail={activity?.oldestUnanswered ? `Mais antigo sem resposta: ${formatRelative(activity.oldestUnanswered.createdAt)}` : "Sem ticket aguardando primeira resposta"} tone={activity?.oldestUnanswered ? "warn" : "default"} />
-        <Kpi icon={<ClipboardList className="size-4" />} label="Formulários aguardando" value={activity ? String(activity.pendingForms) : loading ? "…" : "—"} detail="Envios que ainda precisam de análise" tone={activity?.pendingForms ? "warn" : "default"} />
+      <section aria-label="Indicadores do período" aria-busy={loading} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {loading && !activity ? (
+          Array.from({ length: 7 }).map((_, index) => <SkeletonKpi key={index} />)
+        ) : (
+          <>
+            <Kpi icon={<Tickets className="size-4" />} label="Tickets criados" value={range ? String(range.opened) : "—"} detail={range && previous ? relativeText(range.opened, previous.opened) : "No período selecionado"} />
+            <Kpi icon={<TicketCheck className="size-4" />} label="Tickets encerrados" value={range ? String(range.closed) : "—"} detail={range && previous ? relativeText(range.closed, previous.closed) : "No período selecionado"} />
+            <Kpi icon={<Clock3 className="size-4" />} label="Mediana da 1ª resposta" value={range?.medianResponseMinutes == null ? "—" : formatDuration(range.medianResponseMinutes)} detail={`${range?.responseCount ?? 0} tickets com resposta`} />
+            <Kpi icon={<MessageSquareText className="size-4" />} label="Satisfação (CSAT)" value={range?.csat == null ? "—" : `${range.csat.toFixed(1)}/5`} detail={`${range?.csatCount ?? 0} avaliações no período`} />
+            <Kpi icon={<Activity className="size-4" />} label="Respostas dentro do prazo" value={range?.slaMet == null ? "—" : `${range.slaMet}%`} detail={Number(tcfg.config.slaWarningMinutes ?? 60) > 0 ? `${range?.slaCount ?? 0} tickets respondidos ou já vencidos · meta ${Number(tcfg.config.slaWarningMinutes ?? 60)} min` : "Meta de resposta desativada"} />
+            <Kpi icon={<UsersRound className="size-4" />} label="Fila aberta agora" value={activity ? String(activity.currentOpen) : "—"} detail={activity?.oldestUnanswered ? `Mais antigo sem resposta: ${formatRelative(activity.oldestUnanswered.createdAt)}` : "Sem ticket aguardando primeira resposta"} tone={activity?.oldestUnanswered ? "warn" : "default"} />
+            <Kpi icon={<ClipboardList className="size-4" />} label="Formulários aguardando" value={activity ? String(activity.pendingForms) : "—"} detail="Envios que ainda precisam de análise" tone={activity?.pendingForms ? "warn" : "default"} />
+          </>
+        )}
       </section>
 
       {activity && !dataInRange ? <Card className="border-dashed p-6 text-center"><h2 className="m-0 text-base font-semibold">Ainda sem atividade neste período</h2><p className="mb-0 mt-1 text-sm text-muted-foreground">Quando houver atendimentos ou eventos do bot, eles aparecerão aqui. Tente ampliar o período para consultar o histórico.</p></Card> : null}
 
       <Card className="space-y-3 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="m-0 text-base font-semibold">Atividade por dia</h2><p className="m-0 mt-1 text-sm text-muted-foreground">Selecione um dia no gráfico ou na lista para ver os tickets criados nele.</p></div><div className="flex flex-wrap items-center gap-3"><NativeSelect aria-label="Ver tickets de um dia" value={selectedDay ?? ""} onChange={(event) => setSelectedDay(event.target.value || null)} className="h-9 w-auto min-w-40 text-xs"><option value="">Detalhar um dia…</option>{chartData.map((day) => <option key={day.day} value={day.day}>{formatDate(day.day)}</option>)}</NativeSelect><div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><LegendDot color="var(--color-primary)" label="Criados" /><LegendDot color="var(--color-ok)" label="Encerrados" /><LegendDot color="var(--color-info)" label="AutoMod" /><LegendDot color="var(--color-warn)" label="Moderação" /></div></div></div>
-        <div className="h-[19rem] w-full">
+        <div
+          className="h-[19rem] w-full"
+          role="img"
+          aria-label={chartSummary(chartData, period)}
+        >
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData} onClick={(state) => { const row = state?.activePayload?.[0]?.payload as { day?: string } | undefined; if (row?.day) setSelectedDay((current) => current === row.day ? null : row.day!); }}>
               <CartesianGrid stroke="var(--wumpus-chart-grid)" vertical={false} />
@@ -198,6 +209,36 @@ function formatDuration(minutes: number) {
   if (minutes < 60) return `${Math.round(minutes)} min`;
   const hours = minutes / 60;
   return hours < 24 ? `${hours.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} h` : `${(hours / 24).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} dias`;
+}
+
+/**
+ * Resumo textual do gráfico para leitores de tela.
+ *
+ * Um gráfico só é acessível quando a CONCLUSÃO está em texto. "Gráfico de
+ * atividade" não diz nada a quem não vê as áreas; a frase abaixo diz o que
+ * aconteceu no período e qual foi o dia de pico.
+ */
+function chartSummary(
+  days: Array<{ day: string; tickets?: number; closed?: number; automod?: number; moderation?: number }>,
+  period: number,
+): string {
+  if (!days.length) return `Gráfico de atividade dos últimos ${period} dias: ainda sem dados no período.`;
+  const sum = (key: "tickets" | "closed" | "automod" | "moderation") =>
+    days.reduce((total, day) => total + (day[key] ?? 0), 0);
+  const created = sum("tickets");
+  const closed = sum("closed");
+  const automod = sum("automod");
+  const moderation = sum("moderation");
+  const peak = days.reduce((best, day) => ((day.tickets ?? 0) > (best.tickets ?? 0) ? day : best), days[0]);
+  const peakText =
+    (peak.tickets ?? 0) > 0
+      ? ` O dia de pico foi ${formatDate(peak.day)}, com ${peak.tickets} ticket(s) criado(s).`
+      : "";
+  return (
+    `Gráfico de atividade dos últimos ${period} dias. ` +
+    `No período: ${created} ticket(s) criado(s), ${closed} encerrado(s), ` +
+    `${automod} evento(s) de AutoMod e ${moderation} ação(ões) de moderação.${peakText}`
+  );
 }
 
 function formatDate(value: string | undefined) {

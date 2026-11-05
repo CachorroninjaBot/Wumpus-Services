@@ -30,6 +30,15 @@ export const Route = createRootRoute({
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
       { rel: "manifest", href: "/manifest.json" },
       { rel: "apple-touch-icon", href: "/favicon.svg" },
+      // As fontes estavam declaradas em styles.css (--font-sans / --font-mono)
+      // mas nunca eram baixadas: o app inteiro renderizava no fallback do
+      // sistema. preconnect primeiro para o DNS/TLS acontecer em paralelo.
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap",
+      },
     ],
   }),
   component: () => (

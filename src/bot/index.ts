@@ -105,6 +105,7 @@ import {
   setLockdown,
 } from "./security.ts";
 import { processOutbox, syncStaffRosterMember } from "./outbox-send.ts";
+import { runScheduledPermissionAudit } from "./security-audit.ts";
 import { writeBotHealth } from "../lib/wumpus/health.server.ts";
 import { handleMemberLeave, handleMemberWelcome, maintenanceNotice } from "./guild-events.ts";
 import {
@@ -2049,10 +2050,24 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     24 * 60 * 60_000,
   );
 
+  // Auditoria de permissoes por IA, uma vez por dia. O modulo em si so roda se
+  // a ultima auditoria tiver mais de 24h — restart nao dispara rajada de IA.
+  const auditTimer = setInterval(
+    () => {
+      void (async () => {
+        for (const guild of client.guilds.cache.values()) {
+          await runScheduledPermissionAudit(guild, log).catch(() => false);
+        }
+      })();
+    },
+    24 * 60 * 60_000,
+  );
+
   const stop = async (): Promise<void> => {
     clearInterval(slaTimer);
     clearInterval(pruneTimer);
     clearInterval(inactivityTimer);
+    clearInterval(auditTimer);
     clearInterval(outboxTimer);
     await flushPendingStatistics().catch((error) =>
       log.error("falha ao persistir estatísticas no encerramento", { error: String(error) }),

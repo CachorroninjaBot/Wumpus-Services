@@ -12,6 +12,7 @@ import {
   LockKeyhole,
   MessageSquareWarning,
   RefreshCw,
+  ScanSearch,
   Shield,
   ShieldAlert,
   ShieldCheck,
@@ -33,10 +34,14 @@ import {
   acknowledgeGuildSecurityIncident,
   getGuildProtectionReadiness,
   getGuildSecurityActionStatus,
+  getGuildSecurityAudits,
   getGuildSecurityIncidents,
   requestPanelPublish,
+  requestSecurityAudit,
+  requestSecurityFix,
   requestSecurityLockdown,
   requestSecurityRestore,
+  type SecurityAuditRecord,
 } from "@/lib/wumpus/runtime-store";
 import { useActiveGuild, useGuildMembers, useModule, useWumpus } from "@/lib/wumpus/store";
 import { formatRelative } from "@/lib/utils";
@@ -44,7 +49,7 @@ import { formatRelative } from "@/lib/utils";
 export const Route = createFileRoute("/app/protect")({ component: ProtectPage });
 
 type ProtectSection =
-  "overview" | "automod" | "ocr" | "entry" | "verification" | "antinuke" | "incidents";
+  "overview" | "automod" | "ocr" | "entry" | "verification" | "antinuke" | "audit" | "incidents";
 type SecurityEvent = Awaited<ReturnType<typeof getGuildSecurityIncidents>>[number];
 type PermissionKey =
   | "manageMessages"
@@ -82,6 +87,7 @@ const sections: Array<{ id: ProtectSection; label: string; icon: typeof Shield }
   { id: "entry", label: "Entradas e raid", icon: Siren },
   { id: "verification", label: "Verificação", icon: BadgeCheck },
   { id: "antinuke", label: "Anti-nuke", icon: ShieldAlert },
+  { id: "audit", label: "Auditoria", icon: ScanSearch },
   { id: "incidents", label: "Incidentes", icon: Activity },
 ];
 
@@ -156,6 +162,12 @@ function ProtectPage() {
   const [nukeTestCount, setNukeTestCount] = useState(6);
   const [raidTestResult, setRaidTestResult] = useState<string | null>(null);
   const [nukeTestResult, setNukeTestResult] = useState<string | null>(null);
+  const [audits, setAudits] = useState<SecurityAuditRecord[]>([]);
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [auditNote, setAuditNote] = useState<string | null>(null);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [fixBusy, setFixBusy] = useState(false);
+  const [fixNote, setFixNote] = useState<string | null>(null);
 
   useEffect(() => {
     setVerificationChannelId(asString(security.config.verificationChannelId));
@@ -199,6 +211,26 @@ function ProtectPage() {
     };
     void refresh();
     const timer = window.setInterval(() => void refresh(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [guildId]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshAudits = async () => {
+      const token = getStoredSessionToken();
+      if (!token || !guildId) return;
+      try {
+        const rows = await getGuildSecurityAudits({ data: { token, guildId, limit: 10 } });
+        if (active) setAudits(rows);
+      } catch {
+        if (active) setAuditError("Não foi possível carregar as auditorias deste servidor.");
+      }
+    };
+    void refreshAudits();
+    const timer = window.setInterval(() => void refreshAudits(), 30_000);
     return () => {
       active = false;
       window.clearInterval(timer);
@@ -260,6 +292,94 @@ function ProtectPage() {
       setEventError(
         error instanceof Error ? error.message : "Não foi possível marcar o alerta como revisado.",
       );
+    }
+  };
+
+  const runAudit = async () => {
+    if (!guildId) return;
+    setAuditBusy(true);
+    setAuditError(null);
+    setAuditNote("Enviando pedido de auditoria ao bot…");
+    try {
+      const { jobId } = await requestSecurityAudit({
+        data: { token: getStoredSessionToken(), guildId },
+      });
+      for (let attempt = 0; attempt < 45; attempt += 1) {
+        const status = await getGuildSecurityActionStatus({
+          data: { token: getStoredSessionToken(), guildId, jobId },
+        });
+        if (status.status === "done") {
+          setAuditNote(status.detail || "Auditoria concluída.");
+          setAuditBusy(false);
+          const rows = await getGuildSecurityAudits({
+            data: { token: getStoredSessionToken(), guildId, limit: 10 },
+          });
+          setAudits(rows);
+          return;
+        }
+        if (status.status === "failed") {
+          setAuditError(
+            status.detail || "O bot não conseguiu concluir a auditoria. Tente novamente.",
+          );
+          setAuditNote(null);
+          setAuditBusy(false);
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      }
+      setAuditNote("A auditoria continua na fila. O relatório aparece aqui quando o bot concluir.");
+      setAuditBusy(false);
+    } catch (error) {
+      setAuditError(
+        error instanceof Error ? error.message : "Não foi possível solicitar a auditoria.",
+      );
+      setAuditBusy(false);
+    }
+  };
+
+  const runFix = async (auditId: string, findingIndex?: number) => {
+    if (!guildId) return;
+    setFixBusy(true);
+    setFixNote("Enviando pedido de correção ao bot…");
+    try {
+      const { jobId } = await requestSecurityFix({
+        data: {
+          token: getStoredSessionToken(),
+          guildId,
+          auditId,
+          ...(findingIndex !== undefined ? { findingIndex } : {}),
+        },
+      });
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        const status = await getGuildSecurityActionStatus({
+          data: { token: getStoredSessionToken(), guildId, jobId },
+        });
+        if (status.status === "done") {
+          setFixNote(status.detail || "Correções aplicadas.");
+          setFixBusy(false);
+          const rows = await getGuildSecurityAudits({
+            data: { token: getStoredSessionToken(), guildId, limit: 10 },
+          });
+          setAudits(rows);
+          return;
+        }
+        if (status.status === "failed") {
+          setFixNote(null);
+          setAuditError(
+            status.detail || "O bot não conseguiu aplicar as correções. Tente novamente.",
+          );
+          setFixBusy(false);
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      }
+      setFixNote("As correções continuam na fila. Os resultados aparecem quando o bot concluir.");
+      setFixBusy(false);
+    } catch (error) {
+      setAuditError(
+        error instanceof Error ? error.message : "Não foi possível solicitar a correção.",
+      );
+      setFixBusy(false);
     }
   };
 
@@ -1627,6 +1747,116 @@ function ProtectPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="audit" className="mt-5 space-y-5">
+          {!planAllows(guild.plan, "ai") ? (
+            <header className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h2 className="m-0 text-xl font-semibold">Auditoria de permissões por IA</h2>
+                <p className="m-0 mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  A IA analisa cargos, canais, categorias, @everyone e a hierarquia do servidor, e
+                  devolve recomendações com severidade e correções concretas.
+                </p>
+              </div>
+              <ExclusiveButton />
+            </header>
+          ) : (
+            <header className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h2 className="m-0 text-xl font-semibold">Auditoria de permissões por IA</h2>
+                <p className="m-0 mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  A IA analisa cargos, canais, categorias, @everyone e a hierarquia do servidor, e
+                  devolve recomendações com severidade e correções concretas.
+                </p>
+              </div>
+              <span className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
+                Sob demanda + diária
+              </span>
+            </header>
+          )}
+          {!planAllows(guild.plan, "ai") ? (
+            <div className="rounded-lg bg-warn/10 px-3 py-2.5 text-sm" role="status">
+              A auditoria por IA é exclusiva dos planos Pro, Escala e Vitalício. A IA nunca aplica
+              mudanças: ela só recomenda, e quem decide é você.
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="m-0 text-lg font-semibold">Última auditoria</h2>
+              <p className="m-0 mt-1 text-sm text-muted-foreground">
+                Relatório gerado pelo bot lendo o servidor no Discord.
+              </p>
+            </div>
+            <Button
+              onClick={() => void runAudit()}
+              disabled={auditBusy || !planAllows(guild.plan, "ai")}
+            >
+              <ScanSearch className="size-4" />
+              {auditBusy ? "Auditando…" : "Rodar auditoria agora"}
+            </Button>
+          </div>
+          {auditNote ? (
+            <p className="m-0 rounded-lg bg-muted px-3 py-2 text-sm" role="status" aria-live="polite">
+              {auditNote}
+            </p>
+          ) : null}
+          {fixNote ? (
+            <p className="m-0 rounded-lg bg-muted px-3 py-2 text-sm" role="status" aria-live="polite">
+              {fixNote}
+            </p>
+          ) : null}
+          {auditError ? (
+            <p
+              className="m-0 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {auditError}
+            </p>
+          ) : null}
+          {audits[0] ? (
+            <AuditReport
+              audit={audits[0]}
+              onFix={runFix}
+              onRerun={runAudit}
+              fixBusy={fixBusy}
+              rerunBusy={auditBusy}
+              planAllowsAi={planAllows(guild.plan, "ai")}
+            />
+          ) : (
+            <p className="m-0 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+              Nenhuma auditoria ainda neste servidor. Clique em “Rodar auditoria agora” para gerar a
+              primeira.
+            </p>
+          )}
+          {audits.length > 1 ? (
+            <section aria-labelledby="audit-history-heading">
+              <h3 id="audit-history-heading" className="m-0 mb-2 text-base font-semibold">
+                Histórico
+              </h3>
+              <div className="divide-y divide-border rounded-xl border border-border bg-card">
+                {audits.slice(1, 6).map((audit) => (
+                  <div
+                    key={audit.id}
+                    className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm"
+                  >
+                    <span className="text-xs text-muted-foreground">
+                      {formatRelative(audit.at)}
+                    </span>
+                    <Badge tone={audit.trigger === "scheduled" ? "info" : "default"}>
+                      {audit.trigger === "scheduled" ? "Diária" : "Manual"}
+                    </Badge>
+                    <span className="flex-1">
+                      {audit.findings.length} achado(s) · risco {audit.risk}/100
+                    </span>
+                    {audit.source === "unavailable" ? (
+                      <Badge tone="warn">IA indisponível</Badge>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </TabsContent>
+
         <TabsContent value="incidents" className="mt-5 space-y-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -2274,6 +2504,342 @@ function channelLabel(channels: Array<{ id: string; name: string }>, id: string)
   return channels.find((channel) => channel.id === id || channel.name === id)?.name
     ? `Painel em #${channels.find((channel) => channel.id === id || channel.name === id)?.name}`
     : "Canal não encontrado na lista sincronizada";
+}
+
+function auditTone(severity: SecurityAuditRecord["findings"][number]["severity"]): "danger" | "warn" | "info" {
+  return severity === "urgent" ? "danger" : severity === "attention" ? "warn" : "info";
+}
+
+function auditSeverityLabel(severity: SecurityAuditRecord["findings"][number]["severity"]): string {
+  return severity === "urgent" ? "Crítico" : severity === "attention" ? "Atenção" : "Informativo";
+}
+
+function riskTone(risk: number): "ok" | "warn" | "danger" {
+  if (risk >= 60) return "danger";
+  if (risk >= 30) return "warn";
+  return "ok";
+}
+
+function auditStatusLabel(risk: number): { label: string; tone: "ok" | "warn" | "danger" } {
+  if (risk >= 60) return { label: "Requer atenção", tone: "danger" };
+  if (risk >= 30) return { label: "Alguns problemas para revisar", tone: "warn" };
+  return { label: "Servidor sob controle", tone: "ok" };
+}
+
+function auditDateTimeLabel(at: number): string {
+  return new Date(at).toLocaleString("pt-BR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function RiskGauge({ risk, tone }: { risk: number; tone: "ok" | "warn" | "danger" }) {
+  const radius = 34;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.min(100, Math.max(0, risk));
+  const offset = circumference * (1 - clamped / 100);
+  const color = tone === "danger" ? "text-destructive" : tone === "warn" ? "text-warn" : "text-ok";
+  return (
+    <div className="relative size-24 shrink-0" aria-hidden="true">
+      <svg viewBox="0 0 80 80" className="size-24 -rotate-90">
+        <circle
+          cx="40"
+          cy="40"
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="8"
+          className="text-muted/40"
+        />
+        <circle
+          cx="40"
+          cy="40"
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="8"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className={`${color} transition-all duration-500`}
+        />
+      </svg>
+      <div className="absolute inset-0 grid place-items-center">
+        <div className="text-center">
+          <div className="text-2xl font-semibold leading-none tracking-tight">{clamped}</div>
+          <div className="mt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            /100
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type SeverityFilter = "all" | "urgent" | "attention" | "info";
+
+function AuditReport({
+  audit,
+  onFix,
+  onRerun,
+  fixBusy,
+  rerunBusy,
+  planAllowsAi,
+}: {
+  audit: SecurityAuditRecord;
+  onFix: (auditId: string, findingIndex?: number) => void;
+  onRerun: () => void;
+  fixBusy: boolean;
+  rerunBusy: boolean;
+  planAllowsAi: boolean;
+}) {
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
+  const resolvedIndexes = new Set(
+    (audit.fixResults ?? [])
+      .filter(
+        (batch) => batch.outcomes.length > 0 && batch.outcomes.every((outcome) => outcome.ok),
+      )
+      .map((batch) => batch.findingIndex),
+  );
+  const openFindings = audit.findings.filter((_, index) => !resolvedIndexes.has(index));
+  const resolvedCount = audit.findings.length - openFindings.length;
+  const fixableCount = openFindings.filter((finding) => finding.fixes?.length).length;
+  const status = auditStatusLabel(audit.risk);
+  const statusColor =
+    status.tone === "danger" ? "text-destructive" : status.tone === "warn" ? "text-warn" : "text-ok";
+  const counts: Record<SeverityFilter, number> = {
+    all: openFindings.length,
+    urgent: openFindings.filter((finding) => finding.severity === "urgent").length,
+    attention: openFindings.filter((finding) => finding.severity === "attention").length,
+    info: openFindings.filter((finding) => finding.severity === "info").length,
+  };
+  const chips: Array<{ id: SeverityFilter; label: string }> = [
+    { id: "all", label: "Todos" },
+    { id: "urgent", label: "Crítico" },
+    { id: "attention", label: "Atenção" },
+    { id: "info", label: "Informativo" },
+  ];
+
+  return (
+    <section aria-labelledby="audit-report-heading" className="space-y-4">
+      <div className="rounded-xl border border-border bg-card p-5">
+        <div className="flex flex-wrap items-start gap-5">
+          <RiskGauge risk={audit.risk} tone={riskTone(audit.risk)} />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3
+                  id="audit-report-heading"
+                  className={`m-0 text-lg font-semibold ${statusColor}`}
+                >
+                  {status.label}
+                </h3>
+                <p className="m-0 mt-1 text-sm text-muted-foreground">
+                  {openFindings.length}{" "}
+                  {openFindings.length === 1 ? "problema aberto" : "problemas abertos"} ·{" "}
+                  {resolvedCount} {resolvedCount === 1 ? "corrigido" : "corrigidos"}
+                </p>
+                <p className="m-0 mt-1 text-xs text-muted-foreground">
+                  Última verificação {auditDateTimeLabel(audit.at)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {fixableCount > 0 ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onFix(audit.id)}
+                    disabled={fixBusy || rerunBusy || !planAllowsAi}
+                  >
+                    <ShieldCheck className="size-4" />
+                    {fixBusy ? "Corrigindo…" : "Corrigir tudo"}
+                  </Button>
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onRerun}
+                  disabled={rerunBusy || fixBusy || !planAllowsAi}
+                >
+                  <RefreshCw className={`size-4 ${rerunBusy ? "animate-spin" : ""}`} />
+                  {rerunBusy ? "Verificando…" : "Verificar novamente"}
+                </Button>
+              </div>
+            </div>
+            <p className="m-0 mt-4 text-xs text-muted-foreground">
+              Auditoria {audit.trigger === "scheduled" ? "diária" : "manual"} ·{" "}
+              {audit.snapshotSize} itens analisados · {(audit.durationMs / 1000).toFixed(1)}s
+              {audit.source === "unavailable" ? " · IA indisponível" : ""}
+            </p>
+            {audit.summary ? (
+              <p className="mb-0 mt-3 text-sm leading-6 text-muted-foreground">{audit.summary}</p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {audit.context ? (
+        <details className="group overflow-hidden rounded-xl border border-border bg-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium">
+            Contexto do servidor analisado
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+          </summary>
+          <pre className="m-0 max-h-96 overflow-auto whitespace-pre-wrap border-t border-border bg-muted/40 px-4 py-3 text-xs leading-5 text-muted-foreground">
+            {audit.context}
+          </pre>
+        </details>
+      ) : null}
+
+      {openFindings.length ? (
+        <div className="space-y-3">
+          {resolvedCount > 0 ? (
+            <p
+              className="m-0 flex items-start gap-2 rounded-lg bg-ok/10 px-3 py-2 text-sm text-ok"
+              role="status"
+            >
+              <CircleCheck className="mt-0.5 size-4 shrink-0" />
+              <span>
+                {resolvedCount} {resolvedCount === 1 ? "problema corrigido" : "problemas corrigidos"} com
+                sucesso — {resolvedCount === 1 ? "o bloco foi removido" : "os blocos foram removidos"} do
+                relatório.
+              </span>
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {chips.map((chip) => {
+              const active = severityFilter === chip.id;
+              return (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() => setSeverityFilter(chip.id)}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                    active
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {chip.label} {counts[chip.id]}
+                </button>
+              );
+            })}
+          </div>
+          <h4 className="m-0 text-sm font-semibold text-muted-foreground">
+            Recomendações da IA
+          </h4>
+          <ul className="m-0 space-y-3">
+            {audit.findings.map((finding, index) => {
+              if (resolvedIndexes.has(index)) return null;
+              if (severityFilter !== "all" && finding.severity !== severityFilter) return null;
+              const results = audit.fixResults?.find((batch) => batch.findingIndex === index)?.outcomes;
+              return (
+                <li
+                  key={`${audit.id}-${index}`}
+                  className="rounded-xl border border-border bg-card p-4"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone={auditTone(finding.severity)}>
+                      {auditSeverityLabel(finding.severity)}
+                    </Badge>
+                    <h5 className="m-0 flex-1 text-sm font-semibold">{finding.title}</h5>
+                    {finding.fixes?.length ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onFix(audit.id, index)}
+                        disabled={fixBusy || rerunBusy || !planAllowsAi}
+                      >
+                        <ShieldCheck className="size-4" />
+                        Corrigir
+                      </Button>
+                    ) : null}
+                  </div>
+                  {finding.scope ? (
+                    <p className="m-0 mt-2 text-xs text-muted-foreground">
+                      <strong className="font-medium">Escopo:</strong> {finding.scope}
+                    </p>
+                  ) : null}
+                  {finding.detail ? (
+                    <p className="m-0 mt-1 text-sm leading-6 text-muted-foreground">
+                      {finding.detail}
+                    </p>
+                  ) : null}
+                  {finding.suggestion ? (
+                    <p className="m-0 mt-2 rounded-lg bg-muted px-3 py-2 text-sm">
+                      <strong className="font-medium">Correção sugerida:</strong>{" "}
+                      {finding.suggestion}
+                    </p>
+                  ) : null}
+                  {results?.length ? (
+                    <ul className="m-0 mt-3 space-y-1.5">
+                      {results.map((outcome) => (
+                        <li
+                          key={outcome.fixIndex}
+                          className={`flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${
+                            outcome.ok && outcome.applied
+                              ? "bg-ok/10 text-ok"
+                              : outcome.ok
+                                ? "bg-warn/10 text-warn"
+                                : "bg-destructive/10 text-destructive"
+                          }`}
+                        >
+                          <span
+                            className={`mt-1.5 size-2 shrink-0 rounded-full ${
+                              outcome.ok && outcome.applied
+                                ? "bg-ok"
+                                : outcome.ok
+                                  ? "bg-warn"
+                                  : "bg-destructive"
+                            }`}
+                          />
+                          <span className="min-w-0">
+                            <span className="block font-medium">
+                              {outcome.ok && outcome.applied
+                                ? "Aplicado"
+                                : outcome.ok
+                                  ? "Sem mudança"
+                                  : "Recusado"}
+                            </span>
+                            <span className="text-muted-foreground">{outcome.detail}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
+            {!audit.findings.some(
+              (finding, index) =>
+                !resolvedIndexes.has(index) &&
+                (severityFilter === "all" || finding.severity === severityFilter),
+            ) ? (
+              <li className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+                Nenhum problema {severityFilter === "all" ? "aberto" : "nesta categoria"}.
+              </li>
+            ) : null}
+          </ul>
+        </div>
+      ) : resolvedCount > 0 ? (
+        <p
+          className="m-0 flex items-start gap-2 rounded-lg bg-ok/10 px-3 py-2 text-sm text-ok"
+          role="status"
+        >
+          <CircleCheck className="mt-0.5 size-4 shrink-0" />
+          <span>
+            Todos os problemas foram corrigidos com sucesso — os blocos foram removidos do relatório.
+          </span>
+        </p>
+      ) : audit.source === "ai" ? (
+        <p className="m-0 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+          Nada fora do normal detectado nesta auditoria.
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 export default ProtectPage;

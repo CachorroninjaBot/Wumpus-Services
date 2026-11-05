@@ -33,6 +33,8 @@ import {
 import { setupVerification, restoreVerification, setLockdown } from "./security.ts";
 import { id } from "./ids.ts";
 import { guildPlan } from "./config.ts";
+import { runPermissionAudit } from "./security-audit.ts";
+import { processSecurityFixJob } from "./security-fix.ts";
 import {
   createHumanSupportThread,
   failSupportChat,
@@ -382,6 +384,16 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
       }
       if (job.kind === "staff_roster") {
         const result = await refreshStaffRoster(guild, runtime, log);
+        outbox = settleActionJob(outbox, job.id, result);
+        continue;
+      }
+      if (job.kind === "security_audit") {
+        const result = await runPermissionAudit(guild, "manual", log);
+        outbox = settleActionJob(outbox, job.id, result);
+        continue;
+      }
+      if (job.kind === "security_fix") {
+        const result = await processSecurityFixJob(guild, job, log);
         outbox = settleActionJob(outbox, job.id, result);
         continue;
       }

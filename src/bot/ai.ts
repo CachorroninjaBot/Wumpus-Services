@@ -107,16 +107,28 @@ export async function groqChat(
       signal: controller.signal
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const errorBody = await res.text().catch(() => "");
+      console.warn(`[ai] groq recusou pedido`, {
+        status: res.status,
+        model,
+        detail: errorBody.slice(0, 300),
+      });
+      return null;
+    }
 
     const data = (await res.json()) as { choices?: GroqChoice[] };
     const text = data.choices?.[0]?.message?.content?.trim();
-    if (!text) return null;
+    if (!text) {
+      console.warn("[ai] groq respondeu sem texto", { model, status: res.status });
+      return null;
+    }
 
     if (!options.noCache) cacheSet(key, text);
     return text;
-  } catch {
+  } catch (error) {
     // Timeout, rede ou resposta invalida: indistinguiveis para quem chamou.
+    console.warn("[ai] groq erro", { model, error: String(error) });
     return null;
   } finally {
     clearTimeout(timer);
