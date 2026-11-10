@@ -115,6 +115,10 @@ export default defineConfig(({ command, isPreview }) => ({
       ? [
           nitro({
             preset: "node-server",
+            // Pré-comprime os assets estáticos; respostas dinâmicas (JSON/HTML)
+            // são comprimidas em runtime por src/server/compression.plugin.ts.
+            compressPublicAssets: true,
+            plugins: ["./src/server/compression.plugin.ts"],
           }),
         ]
       : []),

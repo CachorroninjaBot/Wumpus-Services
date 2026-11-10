@@ -16,7 +16,7 @@ import { bool, isEnabled, list, moduleConfig, num, str } from "./config.ts";
 import type { Logger } from "./logger.ts";
 import { buildLogPayload, type LogField } from "./panels.ts";
 import { resolveChannel, resolveRole, resolveRoles } from "./resolve.ts";
-import { mutate, nextId } from "./store.ts";
+import { flushBatchedMutations, mutate, mutateBatched, nextId } from "./store.ts";
 
 export type Severity = "info" | "warning" | "critical";
 
@@ -51,13 +51,18 @@ const CATEGORY_FLAG: Record<string, string> = {
 /**
  * Grava o evento no historico. Devolve o id para correlacionar com a mensagem.
  * Nunca lanca: auditoria nao pode derrubar a acao que esta sendo auditada.
+ *
+ * A escrita usa coalescencia (`mutateBatched`): eventos de auditoria chegam em
+ * rajada (cada mensagem, entrada, punicao) e cada `mutate` regravava a colecao
+ * inteira numa transacao. O id ja foi reservado por `nextId`, entao o retorno
+ * nao depende do flush.
  */
 export async function recordAudit(input: Omit<AuditEvent, "id" | "at">): Promise<number | null> {
   try {
     const id = await nextId("audit");
     const at = new Date().toISOString();
 
-    await mutate<AuditEvent>("audit", (rows) => {
+    await mutateBatched<AuditEvent>("audit", (rows) => {
       rows.push({ ...input, id, at });
       return rows;
     });
@@ -205,6 +210,9 @@ export async function pruneAudit(log: Logger, retentionDays?: number, guildId?: 
     const config = guildId ? await moduleConfig(guildId, "logs") : null;
     const days = Math.max(7, Math.trunc(retentionDays ?? num(config, "retentionDays", 180)) || 180);
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+
+    // Eventos ainda na fila de coalescencia precisam estar gravados antes da poda.
+    await flushBatchedMutations("audit");
 
     let removed = 0;
     await mutate<AuditEvent>("audit", (rows) => {

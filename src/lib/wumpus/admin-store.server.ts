@@ -107,8 +107,10 @@ const grantSchema = z.object({
 let writes: Promise<unknown> = Promise.resolve();
 let cache: { state: DashboardAdminState; at: number } | null = null;
 const CACHE_MS = 2_000;
+const SESSION_GUILDS_CACHE_MS = 45_000;
 const SESSION_IDLE_TIMEOUT_MS = 14 * 24 * 60 * 60_000;
 const SESSION_ABSOLUTE_TIMEOUT_MS = 30 * 24 * 60 * 60_000;
+const sessionGuildsCache = new Map<string, { guilds: SessionGuild[]; expiresAt: number }>();
 
 function storePath(): string {
   return process.env.WUMPUS_MEMBERS_PATH || join(process.cwd(), "data", "wumpus-dashboard-members.json");
@@ -246,9 +248,24 @@ export async function recordDashboardLogin(
 }
 
 export async function getDashboardSessionGuilds(sessionId: string, userId: string): Promise<SessionGuild[] | null> {
+  const now = Date.now();
+  const cached = sessionGuildsCache.get(sessionId);
+  if (cached && cached.expiresAt > now) return structuredClone(cached.guilds);
+
   const state = await readState();
   const session = state.sessions.find((row) => row.id === sessionId && row.userId === userId);
-  return session ? structuredClone(session.guilds) : null;
+  if (!session) return null;
+
+  // Cache curto por sessão: `verifySignedSession` relê esta lista em TODA
+  // chamada autenticada, e o estado administrativo inteiro era relido do banco
+  // só para recuperar os guilds gravados no login.
+  if (sessionGuildsCache.size > 1_000) {
+    for (const [key, entry] of sessionGuildsCache) {
+      if (entry.expiresAt <= now) sessionGuildsCache.delete(key);
+    }
+  }
+  sessionGuildsCache.set(sessionId, { guilds: session.guilds, expiresAt: now + SESSION_GUILDS_CACHE_MS });
+  return structuredClone(session.guilds);
 }
 
 export async function recordDashboardActivity(sessionId: string): Promise<void> {
@@ -268,6 +285,7 @@ export async function recordDashboardActivity(sessionId: string): Promise<void> 
 
 export async function closeDashboardSession(sessionId: string, revoked = false): Promise<void> {
   const safeId = z.string().uuid().parse(sessionId);
+  sessionGuildsCache.delete(safeId);
   await mutateState((state) => {
     const session = state.sessions.find((row) => row.id === safeId);
     if (!session) return;
@@ -290,6 +308,7 @@ export async function dashboardSessionIsUsable(sessionId: string, userId: string
   const absoluteExpired = now - session.startedAt >= SESSION_ABSOLUTE_TIMEOUT_MS;
   if (!idleExpired && !absoluteExpired) return true;
 
+  sessionGuildsCache.delete(sessionId);
   await mutateState((current) => {
     const expired = current.sessions.find((row) => row.id === sessionId && row.userId === userId);
     if (expired && !expired.endedAt) {
@@ -325,6 +344,14 @@ export async function manageDashboardUser(input: {
   }).strict().parse(input);
   if (data.actorId === data.userId) throw new Error("A administração não pode alterar a própria conta.");
 
+  const endedSessionIds: string[] = [];
+  const endSession = (session: DashboardSessionRecord, now: number): void => {
+    session.endedAt = now;
+    session.revokedAt = now;
+    session.guilds = [];
+    endedSessionIds.push(session.id);
+  };
+
   await mutateState((state) => {
     const member = state.members.find((row) => row.id === data.userId);
     if (!member) throw new Error("Esta conta ainda não apareceu nos acessos registrados.");
@@ -333,11 +360,7 @@ export async function manageDashboardUser(input: {
       member.suspended = true;
       member.suspensionReason = data.reason || "Acesso suspenso pelo administrador.";
       for (const session of state.sessions) {
-        if (session.userId === data.userId && !session.endedAt) {
-          session.endedAt = now;
-          session.revokedAt = now;
-          session.guilds = [];
-        }
+        if (session.userId === data.userId && !session.endedAt) endSession(session, now);
       }
       addEvent(state, data.actorId, data.action, data.userId, `Conta suspensa. ${member.suspensionReason}`);
     } else if (data.action === "restore") {
@@ -346,11 +369,7 @@ export async function manageDashboardUser(input: {
       addEvent(state, data.actorId, data.action, data.userId, "Acesso da conta restaurado.");
     } else if (data.action === "revoke-sessions") {
       for (const session of state.sessions) {
-        if (session.userId === data.userId && !session.endedAt) {
-          session.endedAt = now;
-          session.revokedAt = now;
-          session.guilds = [];
-        }
+        if (session.userId === data.userId && !session.endedAt) endSession(session, now);
       }
       addEvent(state, data.actorId, data.action, data.userId, "Sessões ativas revogadas.");
     } else if (data.action === "save-notes") {
@@ -358,11 +377,7 @@ export async function manageDashboardUser(input: {
       addEvent(state, data.actorId, data.action, data.userId, "Nota administrativa atualizada.");
     } else {
       for (const session of state.sessions) {
-        if (session.userId === data.userId && !session.endedAt) {
-          session.endedAt = now;
-          session.revokedAt = now;
-          session.guilds = [];
-        }
+        if (session.userId === data.userId && !session.endedAt) endSession(session, now);
       }
       let revokedGrants = 0;
       for (const grant of state.grants) {
@@ -381,6 +396,9 @@ export async function manageDashboardUser(input: {
       );
     }
   });
+
+  // Sessões encerradas/revogadas não podem continuar servindo guilds do cache.
+  for (const sessionId of endedSessionIds) sessionGuildsCache.delete(sessionId);
 }
 
 export async function recordDashboardAdminEvent(input: Omit<DashboardAdminEvent, "id" | "at">): Promise<void> {

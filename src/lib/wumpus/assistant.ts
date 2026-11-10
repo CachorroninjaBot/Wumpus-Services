@@ -144,6 +144,7 @@ export const deleteAssistantChat = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    enforceRequestLimit("assistant-chat-delete", 20, 60_000, session.userId);
     let deleted = false;
     await updateBotCollection<AssistantChatRecord>("assistant-chats", (chats) => chats.filter((chat) => {
       const ownedChat = chat.id === data.chatId && chat.guildId === data.guildId && chat.userId === session.userId;
@@ -168,6 +169,7 @@ export const saveAssistantChat = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    enforceRequestLimit("assistant-chat-save", 30, 60_000, session.userId);
     let savedId = "";
     let missing = false;
     await updateBotCollection<AssistantChatRecord>("assistant-chats", (chats) => {
@@ -323,6 +325,7 @@ export const deleteHumanSupportChat = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    enforceRequestLimit("support-chat-delete", 20, 60_000, session.userId);
     let deleted = false;
     let active = false;
     await updateBotCollection<SupportChatRecord>("support-chats", (chats) => chats.filter((chat) => {
@@ -389,6 +392,7 @@ export const rateHumanSupport = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildFeature(data.token, data.guildId, "ai");
+    enforceRequestLimit("support-rating", 10, 60_000, session.userId);
     const ratingsChannelId = process.env.WUMPUS_SUPPORT_RATINGS_CHANNEL_ID?.trim();
     if (!ratingsChannelId || !/^\d{17,20}$/.test(ratingsChannelId)) {
       throw new Error("O canal de avaliações do atendimento ainda não está configurado.");

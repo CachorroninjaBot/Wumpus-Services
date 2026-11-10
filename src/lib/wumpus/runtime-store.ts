@@ -107,16 +107,20 @@ export const getGuildSecurityIncidents = createServerFn({ method: "POST" })
     token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
     guildId: z.string().regex(/^\d{17,20}$/),
     limit: z.number().int().min(1).max(200).default(100),
+    offset: z.number().int().min(0).max(10_000).default(0),
+    days: z.number().int().min(1).max(3650).default(90),
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
     type AuditRecord = { id: number; guildId: string; module: string; eventType: string; actorId?: string; targetId?: string; channelId?: string; severity: string; at: string; data?: Record<string, unknown> };
     const [records, reviewedIds] = await Promise.all([readBotCollection<AuditRecord>("audit"), readReviewedSecurityEvents(data.guildId)]);
     const acknowledged = new Set(reviewedIds);
+    const cutoff = Date.now() - data.days * 24 * 60 * 60_000;
     return records
       .filter((row) => row.guildId === data.guildId && (row.module === "automod" || (row.eventType.startsWith("security_") && row.severity !== "info")))
+      .filter((row) => (Date.parse(row.at) || 0) >= cutoff)
       .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-      .slice(0, data.limit)
+      .slice(data.offset, data.offset + data.limit)
       .map((row) => ({
         id: row.id,
         module: row.module,
@@ -147,7 +151,8 @@ export const acknowledgeGuildSecurityIncident = createServerFn({ method: "POST" 
     eventId: z.number().int().positive(),
   }).strict().parse(input))
   .handler(async ({ data }) => {
-    await requireGuildAccess(data.token, data.guildId);
+    const session = await requireGuildAccess(data.token, data.guildId);
+    enforceRequestLimit("security-acknowledge", 30, 60_000, session.userId);
     const exists = (await readBotCollection<{ id: number; guildId: string }>("audit"))
       .some((event) => event.guildId === data.guildId && event.id === data.eventId);
     if (!exists) throw new Error("O alerta não existe mais no histórico deste servidor.");
@@ -173,7 +178,8 @@ export const getServerGroups = createServerFn({ method: "POST" })
 export const saveServerGroups = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/), groups: groupSchema }).strict().parse(input))
   .handler(async ({ data }) => {
-    await requireGuildAccess(data.token, data.guildId);
+    const session = await requireGuildAccess(data.token, data.guildId);
+    enforceRequestLimit("guild-config-write", 30, 60_000, session.userId);
     for (const group of data.groups) {
       if (!group.guildIds.includes(data.guildId)) throw new Error("Cada grupo precisa incluir o servidor atual.");
       for (const guildId of group.guildIds) await requireGuildAccess(data.token, guildId);
@@ -214,7 +220,8 @@ export const updateGuildKnowledgeFaqSuggestion = createServerFn({ method: "POST"
     status: z.enum(["dismissed", "converted"]),
   }).strict().parse(input))
   .handler(async ({ data }) => {
-    await requireGuildAccess(data.token, data.guildId);
+    const session = await requireGuildAccess(data.token, data.guildId);
+    enforceRequestLimit("knowledge-moderation", 20, 60_000, session.userId);
     const suggestions = await readBotCollection<KnowledgeFaqSuggestion>("knowledge-suggestions");
     const exists = suggestions.some((suggestion) =>
       suggestion.id === data.suggestionId &&
@@ -247,6 +254,7 @@ export const publishGuildRuntime = createServerFn({ method: "POST" })
   .validator((input: unknown) => publishInputSchema.parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildAccess(data.token, data.guildId);
+    enforceRequestLimit("publish-config", 30, 60_000, session.userId);
     const plan = session.entitlements.plan;
     const modules = structuredClone(data.modules);
 
@@ -311,7 +319,8 @@ export const requestPanelPublish = createServerFn({ method: "POST" })
     verificationRoleId: z.string().trim().min(1).max(100).optional(),
   }).strict().parse(input))
   .handler(async ({ data }) => {
-    await requireGuildAccess(data.token, data.guildId);
+    const session = await requireGuildAccess(data.token, data.guildId);
+    enforceRequestLimit("panel-publish", 10, 60_000, session.userId);
     const job: OutboxJob = {
       id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       guildId: data.guildId,
@@ -330,7 +339,8 @@ export const requestPanelPublish = createServerFn({ method: "POST" })
 export const requestSecurityRestore = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/) }).strict().parse(input))
   .handler(async ({ data }) => {
-    await requireGuildAccess(data.token, data.guildId);
+    const session = await requireGuildAccess(data.token, data.guildId);
+    enforceRequestLimit("security-action", 10, 60_000, session.userId);
     const job: OutboxJob = { id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, guildId: data.guildId, kind: "ticket_action", target: "security-verification", channelRef: "", action: "security_restore", createdAt: Date.now(), status: "queued" };
     await enqueueOutbox(job);
     return { ok: true as const, jobId: job.id };
@@ -339,7 +349,8 @@ export const requestSecurityRestore = createServerFn({ method: "POST" })
 export const requestSecurityLockdown = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH), guildId: z.string().regex(/^\d{17,20}$/), enabled: z.boolean() }).strict().parse(input))
   .handler(async ({ data }) => {
-    await requireGuildAccess(data.token, data.guildId);
+    const session = await requireGuildAccess(data.token, data.guildId);
+    enforceRequestLimit("security-action", 10, 60_000, session.userId);
     const job: OutboxJob = { id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, guildId: data.guildId, kind: "ticket_action", target: "security", channelRef: "", action: data.enabled ? "security_lockdown_on" : "security_lockdown_off", createdAt: Date.now(), status: "queued" };
     await enqueueOutbox(job);
     return { ok: true as const, jobId: job.id };
@@ -492,15 +503,22 @@ export const getGuildTickets = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({
     token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
     guildId: z.string().regex(/^\d{17,20}$/),
+    limit: z.number().int().min(1).max(500).default(500),
+    offset: z.number().int().min(0).max(10_000).default(0),
+    days: z.number().int().min(1).max(3650).default(90),
   }).strict().parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildAccess(data.token, data.guildId);
     const canReadTranscript = Boolean(session.entitlements.plan && planAllows(session.entitlements.plan, "transcripts"));
     const tickets = await readBotCollection<BotTicketRecord>("tickets");
+    // Corte temporal padrão: tickets encerrados há mais de `days` dias saem da
+    // listagem; abertos/em atendimento nunca são cortados.
+    const cutoff = Date.now() - data.days * 24 * 60 * 60_000;
     return tickets
       .filter((ticket) => ticket.guildId === data.guildId)
+      .filter((ticket) => ticket.status !== "closed" || (Date.parse(ticket.createdAt) || 0) >= cutoff)
       .sort((a, b) => b.id - a.id)
-      .slice(0, 500)
+      .slice(data.offset, data.offset + data.limit)
       .map((ticket) => ({
         id: String(ticket.id),
         guildId: ticket.guildId,
@@ -643,6 +661,7 @@ export const getGuildTicketMessages = createServerFn({ method: "POST" })
     token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
     guildId: z.string().regex(/^\d{17,20}$/),
     ticketId: z.number().int().positive(),
+    limit: z.number().int().min(1).max(1000).default(500),
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
@@ -652,7 +671,7 @@ export const getGuildTicketMessages = createServerFn({ method: "POST" })
 
     const messages = (await readBotCollection<BotTicketMessage>("ticket_messages"))
       .filter((message) => message.ticketId === ticket.id)
-      .slice(-500);
+      .slice(-data.limit);
     return {
       subject: ticket.subject?.slice(0, 80)
         || messages.find((message) => message.authorId === ticket.openerId)?.content.slice(0, 80)
@@ -711,6 +730,7 @@ export const requestFormReview = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildAccess(data.token, data.guildId);
+    enforceRequestLimit("form-review", 30, 60_000, session.userId);
     if (session.userId !== data.actorId) throw new Error("O revisor informado não corresponde à sessão.");
     const job: OutboxJob = {
       id: `form_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -761,6 +781,7 @@ export const requestTicketAction = createServerFn({ method: "POST" })
   }).parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildAccess(data.token, data.guildId);
+    enforceRequestLimit("ticket-action", 30, 60_000, session.userId);
     if (session.userId !== data.actorId) throw new Error("O atendente informado não corresponde à sessão.");
     const job: OutboxJob = {
       id: `ticket_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -947,15 +968,19 @@ export const getGuildAudit = createServerFn({ method: "POST" })
     token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
     guildId: z.string().regex(/^\d{17,20}$/),
     limit: z.number().int().min(1).max(500).default(200),
+    offset: z.number().int().min(0).max(10_000).default(0),
+    days: z.number().int().min(1).max(3650).default(90),
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
     type AuditRecord = { id: number; guildId: string; module: string; eventType: string; actorId?: string; targetId?: string; channelId?: string; severity: string; at: string; data?: Record<string, unknown> };
     const records = await readBotCollection<AuditRecord>("audit");
+    const cutoff = Date.now() - data.days * 24 * 60 * 60_000;
     return records
       .filter((row) => row.guildId === data.guildId)
+      .filter((row) => (Date.parse(row.at) || 0) >= cutoff)
       .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-      .slice(0, data.limit)
+      .slice(data.offset, data.offset + data.limit)
       .map((row) => ({
         id: row.id,
         category: row.module,

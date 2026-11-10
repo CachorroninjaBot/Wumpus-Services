@@ -304,7 +304,52 @@ function normalizeRuntime(parsed: Partial<RuntimeFile> | null): RuntimeFile {
   };
 }
 
+/**
+ * Cache curto em memória das coleções do bot.
+ *
+ * O painel lia a coleção JSON inteira do PostgreSQL a cada request; com o bot
+ * gravando com frequência (auditoria, mensagens, estatísticas), isso virou o
+ * maior custo por chamada. O TTL é curto o bastante para o painel refletir
+ * mudanças quase em tempo real (o processo do bot escreve direto no banco, sem
+ * invalidar este cache), e longo o bastante para amortizar reads repetidos no
+ * mesmo request ou em polls seguidos.
+ */
+const HOT_COLLECTION_TTL_MS = 8_000;
+const STATIC_COLLECTION_TTL_MS = 30_000;
+const RUNTIME_CACHE_TTL_MS = 5_000;
+
+/** Coleções que mudam pouco ou só por ação administrativa: TTL maior. */
+const STATIC_COLLECTIONS = new Set<BotCollectionName>([
+  "knowledge-faq-state",
+  "knowledge-suggestions",
+  "knowledge-suggestion-status",
+  "ocr-usage",
+  "security-audits",
+  "staff-rosters",
+]);
+
+const botCollectionCache = new Map<string, { rows: unknown[]; expiresAt: number }>();
+let runtimeCache: { value: RuntimeFile; expiresAt: number } | null = null;
+
+/** Invalida o cache de leitura deste processo; escritas sempre chamam ao final. */
+export function invalidateBotCollectionCache(name?: BotCollectionName): void {
+  if (name) botCollectionCache.delete(name);
+  else botCollectionCache.clear();
+}
+
+export function invalidateRuntimeCache(): void {
+  runtimeCache = null;
+}
+
 export async function readRuntime(): Promise<RuntimeFile> {
+  const now = Date.now();
+  if (runtimeCache && runtimeCache.expiresAt > now) return runtimeCache.value;
+  const value = await readRuntimeUncached();
+  runtimeCache = { value, expiresAt: now + RUNTIME_CACHE_TTL_MS };
+  return value;
+}
+
+async function readRuntimeUncached(): Promise<RuntimeFile> {
   if (isDatabaseConfigured()) {
     return normalizeRuntime(await readPersistentState<Partial<RuntimeFile>>("runtime"));
   }
@@ -319,19 +364,31 @@ export async function readRuntime(): Promise<RuntimeFile> {
 export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status" | "support-chats" | "assistant-chats" | "staff-rosters" | "security-audits";
 
 export async function readBotCollection<T>(name: BotCollectionName): Promise<T[]> {
+  const now = Date.now();
+  const cached = botCollectionCache.get(name);
+  if (cached && cached.expiresAt > now) return cached.rows as T[];
+
+  let rows: T[];
   if (isDatabaseConfigured()) {
-    return (await readPersistentState<T[]>(`bot-collection:${name}`)) ?? [];
+    rows = (await readPersistentState<T[]>(`bot-collection:${name}`)) ?? [];
+  } else {
+    try {
+      const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
+      const parsed: unknown = JSON.parse(await readFile(join(directory, `${name}.json`), "utf8"));
+      rows = Array.isArray(parsed) ? parsed as T[] : [];
+    } catch {
+      rows = [];
+    }
   }
-  try {
-    const directory = process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data");
-    const parsed: unknown = JSON.parse(await readFile(join(directory, `${name}.json`), "utf8"));
-    return Array.isArray(parsed) ? parsed as T[] : [];
-  } catch {
-    return [];
-  }
+  botCollectionCache.set(name, {
+    rows,
+    expiresAt: now + (STATIC_COLLECTIONS.has(name) ? STATIC_COLLECTION_TTL_MS : HOT_COLLECTION_TTL_MS),
+  });
+  return rows;
 }
 
 export async function writeBotCollection<T>(name: BotCollectionName, rows: T[]): Promise<void> {
+  invalidateBotCollectionCache(name);
   if (isDatabaseConfigured()) {
     await writePersistentState(`bot-collection:${name}`, rows);
     return;
@@ -348,6 +405,7 @@ export async function updateBotCollection<T>(
   name: BotCollectionName,
   update: (rows: T[]) => T[],
 ): Promise<T[]> {
+  invalidateBotCollectionCache(name);
   if (isDatabaseConfigured()) {
     return mutatePersistentState(`bot-collection:${name}`, () => [], update);
   }
@@ -394,13 +452,15 @@ export async function updateBotCollection<T>(
 
 export async function mutateRuntime(update: (current: RuntimeFile) => RuntimeFile | void): Promise<RuntimeFile> {
   if (isDatabaseConfigured()) {
-    return mutatePersistentState<RuntimeFile>("runtime", emptyRuntime, (current) => {
+    const next = await mutatePersistentState<RuntimeFile>("runtime", emptyRuntime, (current) => {
       const normalized = normalizeRuntime(current);
       const next = update(normalized) ?? normalized;
       return normalizeRuntime(next);
     });
+    invalidateRuntimeCache();
+    return next;
   }
-  const current = await readRuntime();
+  const current = await readRuntimeUncached();
   const next = update(current) ?? current;
   await writeRuntime(next);
   return next;
@@ -421,6 +481,7 @@ export async function enqueueOutbox(job: OutboxJob): Promise<void> {
 }
 
 export async function writeRuntime(next: RuntimeFile): Promise<void> {
+  invalidateRuntimeCache();
   if (isDatabaseConfigured()) {
     await writePersistentState("runtime", normalizeRuntime(next));
     return;

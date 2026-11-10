@@ -28,7 +28,7 @@ import type { Logger } from "./logger.ts";
 import { buildPanelPayload, defaultButtons } from "./panels.ts";
 import { resolveChannel, resolveRole, resolveRoles } from "./resolve.ts";
 import { bump } from "./statistics.ts";
-import { mutate, nextId, read } from "./store.ts";
+import { mutate, mutateBatched, nextId, read } from "./store.ts";
 import { generateTranscriptUrl } from "./transcript-api.ts";
 import { autoCloseCandidate, buildTranscript, slaState, slaNotice } from "./tickets-sla.ts";
 
@@ -148,7 +148,10 @@ export async function recordTicketMessage(message: Message): Promise<void> {
     return all;
   });
 
-  await mutate<TicketMessage>("ticket_messages", (messages) => {
+  // Mensagens de ticket chegam uma por evento de gateway; a coalescência
+  // agrupa a rajada numa única gravação da coleção. O ticket acima continua
+  // em `mutate` puro porque atualiza campos lidos logo em seguida.
+  await mutateBatched<TicketMessage>("ticket_messages", (messages) => {
     messages.push({
       ticketId: ticket.id,
       authorId: message.author.id,

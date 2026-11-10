@@ -117,3 +117,81 @@ export async function nextId(name: string): Promise<number> {
 
   return assigned;
 }
+
+/**
+ * Mutacoes agrupadas por coalescencia.
+ *
+ * `mutate` regrava a colecao inteira (transacao com `SELECT ... FOR UPDATE` no
+ * PostgreSQL) a cada chamada. Para eventos de alta frequencia — auditoria,
+ * mensagens de ticket — isso era uma transacao por evento. Aqui as mutacoes
+ * acumulam por um curto periodo e viram UMA escrita: os callbacks rodam em
+ * sequencia sobre as mesmas linhas, com a mesma semantica de `mutate`.
+ *
+ * So use para mutacoes sem leitura imediata posterior (read-after-write): o
+ * resultado so existe apos o flush. Chamadas que dependem de ordem com outras
+ * escritas devem continuar em `mutate` puro.
+ */
+type BatchedMutation = {
+  fn: (rows: unknown[]) => unknown[] | void;
+  resolve: (rows: unknown[]) => void;
+  reject: (reason: unknown) => void;
+};
+
+const BATCH_DELAY_MS = 2_000;
+const BATCH_MAX_PENDING = 50;
+const batchedQueues = new Map<string, BatchedMutation[]>();
+const batchedTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+export function mutateBatched<T>(name: string, fn: (rows: T[]) => T[] | void): Promise<T[]> {
+  return new Promise<T[]>((resolve, reject) => {
+    const queue = batchedQueues.get(name) ?? [];
+    queue.push({
+      fn: fn as (rows: unknown[]) => unknown[] | void,
+      resolve: resolve as (rows: unknown[]) => void,
+      reject,
+    });
+    batchedQueues.set(name, queue);
+
+    if (queue.length >= BATCH_MAX_PENDING) {
+      void flushBatchedMutations(name);
+      return;
+    }
+    if (!batchedTimers.has(name)) {
+      const timer = setTimeout(() => {
+        batchedTimers.delete(name);
+        void flushBatchedMutations(name);
+      }, BATCH_DELAY_MS);
+      timer.unref?.();
+      batchedTimers.set(name, timer);
+    }
+  });
+}
+
+/**
+ * Despeja imediatamente as mutacoes pendentes (de uma colecao ou de todas).
+ * Chamado no shutdown do bot e antes de operacoes que precisam ver o estado
+ * mais recente, como a poda da auditoria.
+ */
+export async function flushBatchedMutations(name?: string): Promise<void> {
+  const names = name ? [name] : [...batchedQueues.keys()];
+  for (const key of names) {
+    const timer = batchedTimers.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      batchedTimers.delete(key);
+    }
+    const queue = batchedQueues.get(key);
+    if (!queue?.length) continue;
+    batchedQueues.delete(key);
+    try {
+      const result = await mutate<unknown>(key, (rows) => {
+        let current = rows;
+        for (const item of queue) current = (item.fn(current) ?? current) as unknown[];
+        return current;
+      });
+      for (const item of queue) item.resolve(result);
+    } catch (error) {
+      for (const item of queue) item.reject(error);
+    }
+  }
+}

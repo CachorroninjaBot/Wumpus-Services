@@ -74,6 +74,7 @@ import { resolveRoles } from "./resolve.ts";
 import { applyDefaultRole, removeManagedRolesOnLeave } from "./roles.ts";
 import { checkInactivity, checkOverload } from "./staff.ts";
 import { bump, flushPendingStatistics, maybeSendDigest, pruneStatistics } from "./statistics.ts";
+import { flushBatchedMutations } from "./store.ts";
 import {
   claimTicket,
   checkSla,
@@ -2071,6 +2072,9 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     clearInterval(outboxTimer);
     await flushPendingStatistics().catch((error) =>
       log.error("falha ao persistir estatísticas no encerramento", { error: String(error) }),
+    );
+    await flushBatchedMutations().catch((error) =>
+      log.error("falha ao gravar mutações pendentes no encerramento", { error: String(error) }),
     );
     if (healthTimer) clearInterval(healthTimer);
     await reportHealth("offline").catch((error) =>
