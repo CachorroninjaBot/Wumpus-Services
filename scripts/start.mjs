@@ -17,7 +17,7 @@ if (process.env.NODE_ENV === "production" && !process.env.DATABASE_URL?.trim()) 
 }
 
 if (token) {
-  const bot = spawn(process.execPath, [join(root, "src", "bot", "index.ts")], {
+  const bot = spawn(process.execPath, ["--max-old-space-size=768", join(root, "src", "bot", "index.ts")], {
     stdio: "inherit",
     env: process.env,
     cwd: root,

@@ -87,6 +87,9 @@ function authPopupPlugin(): Plugin {
 
 export default defineConfig(({ command, isPreview }) => ({
   build: {
+    // O relatório de tamanhos gzipados re-comprime cada chunk só para o log;
+    // custa memória/tempo sem afetar o que é servido.
+    reportCompressedSize: false,
     rollupOptions: {
       output: {
         entryFileNames: `assets/[name]-[hash]-${buildId}.js`,
@@ -117,7 +120,9 @@ export default defineConfig(({ command, isPreview }) => ({
             preset: "node-server",
             // Pré-comprime os assets estáticos; respostas dinâmicas (JSON/HTML)
             // são comprimidas em runtime por src/server/compression.plugin.ts.
-            compressPublicAssets: true,
+            // Brotli e gzip cobrem os navegadores; zstd só adicionaria mais um
+            // passe de compressão por arquivo no build (Node 24+).
+            compressPublicAssets: { gzip: true, brotli: true },
             plugins: ["./src/server/compression.plugin.ts"],
           }),
         ]
