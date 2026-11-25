@@ -6,18 +6,18 @@ Painel da comunidade e vitrine dos planos WumPlus. A cobrança e o catálogo vê
 
 | Plano | O que libera |
 | --- | --- |
-| Essencial | 1 servidor, proteção, tickets e formulários. Sem IA. |
-| Pro | 5 servidores, transcrição, knowledge com IA e 500 OCR/mês. |
-| Escala | Servidores, IA e OCR sem teto. |
-| Vitalício | Pagamento único, mesmo acesso do Escala. |
+| Gratuito | 1 servidor, tickets, formulários, moderação, logs e AutoMod/anti-raid. Sem IA, OCR, transcrições ou webhooks. |
+| Pro | Servidores ilimitados, todos os módulos, IA e OCR sem teto, transcrições e webhooks. |
+| Vitalício | Pagamento único, mesmo acesso do Pro. |
 
 Os limites de servidor e recursos são revalidados pelo bot na ShardPay a cada
-5 minutos. Dashboard e bot compartilham o estado de licenças pelo PostgreSQL.
+5 minutos. Contas sem assinatura ativa caem automaticamente no Gratuito, com um
+servidor por conta. Dashboard e bot compartilham o estado de licenças pelo PostgreSQL.
 Uma instalação nova tem 15 minutos para ser ativada pela conta proprietária.
 Como a consulta MCP atual da ShardPay lista assinaturas recorrentes, compradores
 Vitalício precisam ser verificados na loja e incluídos em
 `WUMPUS_LIFETIME_DISCORD_IDS` (IDs Discord separados por vírgula). O Vitalício
-recebe os mesmos limites do Escala.
+recebe os mesmos limites do Pro.
 
 ## Rodar
 
@@ -26,7 +26,7 @@ npm install
 SHARDPAY_API_KEY=sua_chave npm run dev
 ```
 
-A chave nunca entra no repositório. Sem ela o painel mostra a vitrine salva dos quatro planos.
+A chave nunca entra no repositório. Sem ela o painel mostra a vitrine salva dos três planos.
 
 ## Persistência PostgreSQL
 

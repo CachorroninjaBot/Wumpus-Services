@@ -92,11 +92,16 @@ const eventSchema = z.object({
   targetId: z.string().min(1).max(64),
   summary: z.string().min(1).max(500),
 }).strict();
+/** Concessões antigas continuam válidas ao reler o estado; essencial/escala viram Pro. */
+const storedGrantPlanSchema = z.preprocess(
+  (value) => (value === "essencial" || value === "escala" ? "pro" : value),
+  z.enum(["pro", "vitalicio"]),
+);
 const grantSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().regex(/^\d{17,20}$/),
   username: z.string().min(1).max(100),
-  planId: z.enum(["essencial", "pro", "escala", "vitalicio"]),
+  planId: storedGrantPlanSchema,
   createdAt: z.number().finite(),
   expiresAt: z.number().finite().nullable(),
   createdBy: z.string().regex(/^\d{17,20}$/),
@@ -423,12 +428,12 @@ export async function grantDashboardAccess(input: {
     actorId: z.string().regex(/^\d{17,20}$/),
     userId: z.string().regex(/^\d{17,20}$/),
     username: z.string().trim().min(1).max(100),
-    planId: z.enum(["essencial", "pro", "escala", "vitalicio"]),
+    planId: z.enum(["pro", "vitalicio"]),
     durationDays: z.number().int().min(1).max(3650).nullable(),
     reason: z.string().trim().min(3).max(500),
   }).strict().superRefine((value, context) => {
     if ((value.planId === "vitalicio") !== (value.durationDays === null)) {
-      context.addIssue({ code: "custom", message: "O plano Vitalício não expira; os demais planos exigem duração." });
+      context.addIssue({ code: "custom", message: "O plano Vitalício não expira; o Pro exige duração." });
     }
   }).parse(input);
   if (data.actorId === data.userId) throw new Error("A administração não pode alterar a própria conta por esta ação.");
@@ -472,12 +477,12 @@ export async function addDashboardUserWithGrant(input: {
     actorId: z.string().regex(/^\d{17,20}$/),
     userId: z.string().regex(/^\d{17,20}$/),
     username: z.string().trim().min(1).max(100),
-    planId: z.enum(["essencial", "pro", "escala", "vitalicio"]),
+    planId: z.enum(["pro", "vitalicio"]),
     durationDays: z.number().int().min(1).max(3650).nullable(),
     reason: z.string().trim().min(3).max(500),
   }).strict().superRefine((value, context) => {
     if ((value.planId === "vitalicio") !== (value.durationDays === null)) {
-      context.addIssue({ code: "custom", message: "O plano Vitalício não expira; os demais planos exigem duração." });
+      context.addIssue({ code: "custom", message: "O plano Vitalício não expira; o Pro exige duração." });
     }
   }).parse(input);
   if (data.actorId === data.userId) throw new Error("A administração não pode cadastrar a própria conta por esta ação.");

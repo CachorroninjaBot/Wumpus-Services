@@ -65,7 +65,6 @@ export const getGuildPlanUsage = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const session = await requireGuildAccess(data.token, data.guildId);
     const plan = session.entitlements.plan;
-    if (!plan) throw new Error("Não há plano ativo para esta conta.");
     const accountId = session.userId;
     const month = new Date().toISOString().slice(0, 7);
     const rows = await readBotCollection<{ accountId: string; month: string; count: number }>("ocr-usage");
@@ -260,15 +259,15 @@ export const publishGuildRuntime = createServerFn({ method: "POST" })
 
     // A UI desabilitada nao e controle de acesso: recursos premium sao
     // removidos tambem no servidor antes da configuracao chegar ao bot.
-    if (!planAllows(plan ?? "essencial", "ai")) {
+    if (!planAllows(plan, "ai")) {
       if (modules.tickets) modules.tickets.aiSupportEnabled = false;
       if (modules.forms) modules.forms.useAiPreReview = false;
       if (modules.knowledge) modules.knowledge.useAi = false;
     }
-    if (!planAllows(plan ?? "essencial", "ocr")) {
+    if (!planAllows(plan, "ocr")) {
       if (modules.ocr) modules.ocr.enabled = false;
     }
-    if (!planAllows(plan ?? "essencial", "webhooks") && modules.integrations) {
+    if (!planAllows(plan, "webhooks") && modules.integrations) {
       modules.integrations.allowIncoming = false;
     }
 
@@ -383,7 +382,7 @@ export const requestSecurityAudit = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const session = await requireGuildAccess(data.token, data.guildId);
     const plan = session.entitlements.plan;
-    if (!plan || !planAllows(plan, "ai")) {
+    if (!planAllows(plan, "ai")) {
       throw new Error("A auditoria por IA exige o plano Pro ou superior.");
     }
     await enforceRequestLimit("ai-analysis", 20, 10 * 60_000, session.userId);
@@ -433,7 +432,7 @@ export const requestSecurityFix = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const session = await requireGuildAccess(data.token, data.guildId);
     const plan = session.entitlements.plan;
-    if (!plan || !planAllows(plan, "ai")) {
+    if (!planAllows(plan, "ai")) {
       throw new Error("As correções da auditoria exigem o plano Pro ou superior.");
     }
     await enforceRequestLimit("ai-analysis", 20, 10 * 60_000, session.userId);
@@ -509,7 +508,7 @@ export const getGuildTickets = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     const session = await requireGuildAccess(data.token, data.guildId);
-    const canReadTranscript = Boolean(session.entitlements.plan && planAllows(session.entitlements.plan, "transcripts"));
+    const canReadTranscript = planAllows(session.entitlements.plan, "transcripts");
     const tickets = await readBotCollection<BotTicketRecord>("tickets");
     // Corte temporal padrão: tickets encerrados há mais de `days` dias saem da
     // listagem; abertos/em atendimento nunca são cortados.

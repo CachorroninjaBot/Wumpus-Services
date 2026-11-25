@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { PlanId } from "./catalog.ts";
+import { isPaidPlan, normalizePlan } from "./catalog.ts";
 import { isDatabaseConfigured, mutatePersistentState, readPersistentState } from "./database.server.ts";
 
 export type GuildLicense = {
@@ -22,19 +23,28 @@ function licensePath(): string {
   return process.env.WUMPUS_LICENSE_PATH || join(process.env.WUMPUS_DATA_DIR || join(process.cwd(), "data"), "wumpus-entitlements.json");
 }
 
+/** Converte planos antigos gravados em disco para o catálogo atual. */
+function normalizeLicenses(byGuild: Record<string, GuildLicense> | undefined): Record<string, GuildLicense> {
+  if (!byGuild || typeof byGuild !== "object") return {};
+  return Object.fromEntries(Object.entries(byGuild).map(([guildId, license]) => [
+    guildId,
+    { ...license, planId: license.planId ? normalizePlan(license.planId) : null },
+  ]));
+}
+
 export async function readGuildLicenses(): Promise<LicenseFile> {
   if (isDatabaseConfigured()) {
     const parsed = await readPersistentState<Partial<LicenseFile>>("guild-licenses");
     return {
       updatedAt: Number(parsed?.updatedAt) || 0,
-      byGuild: parsed?.byGuild && typeof parsed.byGuild === "object" ? parsed.byGuild : {},
+      byGuild: normalizeLicenses(parsed?.byGuild),
     };
   }
   try {
     const parsed = JSON.parse(await readFile(licensePath(), "utf8")) as Partial<LicenseFile>;
     return {
       updatedAt: Number(parsed.updatedAt) || 0,
-      byGuild: parsed.byGuild && typeof parsed.byGuild === "object" ? parsed.byGuild : {},
+      byGuild: normalizeLicenses(parsed.byGuild),
     };
   } catch {
     return { updatedAt: 0, byGuild: {} };
@@ -94,7 +104,8 @@ export async function syncGuildEntitlements(input: {
     for (const [priority, guildId] of guildIds.entries()) {
       const currentOwner = current.byGuild[guildId]?.accountId;
       const currentLicense = current.byGuild[guildId];
-      if (currentOwner && currentOwner !== input.accountId && currentLicense?.status === "active") continue;
+      // Vínculo pago é preservado; vínculo gratuito pode ser assumido pelo dono atual.
+      if (currentOwner && currentOwner !== input.accountId && currentLicense?.status === "active" && isPaidPlan(currentLicense.planId)) continue;
       const active = allowed.has(guildId) && input.planId !== null;
       current.byGuild[guildId] = {
         status: active ? "active" : "inactive",

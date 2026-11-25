@@ -70,8 +70,9 @@ function SettingsPage() {
           <Badge tone="primary">{current.name}</Badge>
         </div>
         <p className="m-0 text-sm text-muted-foreground">
-          A cobrança é da {billing.data?.storeName ?? "Hub Express"} na ShardPay. Este servidor está em {current.price}.{" "}
-          {cap === null ? "Servidores ilimitados." : `Até ${cap} servidores.`}
+          A cobrança é da {billing.data?.storeName ?? "Hub Express"} na ShardPay.{" "}
+          {current.id === "gratuito" ? "Este servidor está no plano Gratuito." : `Este servidor está em ${current.price}.`}{" "}
+          {cap === null ? "Servidores ilimitados." : `Até ${cap} ${cap === 1 ? "servidor" : "servidores"}.`}
           {billing.loading ? " Lendo a loja…" : billing.data?.error ? ` ${billing.data.error}` : ""}
         </p>
         {usage ? (
@@ -80,7 +81,7 @@ function SettingsPage() {
               {usage.serversUsed}{usage.serverLimit === null ? " · sem limite" : ` de ${usage.serverLimit}`}
             </p>
             <p className="m-0"><span className="font-medium">OCR neste mês</span><br />
-              {usage.ocrLimit === null ? `${usage.ocrUsed} · ilimitado` : usage.ocrLimit === 0 ? "Incluído a partir do Pro" : `${usage.ocrUsed} de ${usage.ocrLimit}`}
+              {usage.ocrLimit === null ? `${usage.ocrUsed} · ilimitado` : usage.ocrLimit === 0 ? "Disponível no Pro" : `${usage.ocrUsed} de ${usage.ocrLimit}`}
             </p>
           </div>
         ) : null}
@@ -102,9 +103,13 @@ function SettingsPage() {
                   Aplicar
                 </Button>
               ) : null}
-              <a href={plan.checkoutUrl} target="_blank" rel="noreferrer" className="text-sm text-primary">
-                Assinar
-              </a>
+              {plan.checkoutUrl ? (
+                <a href={plan.checkoutUrl} target="_blank" rel="noreferrer" className="text-sm text-primary">
+                  Assinar
+                </a>
+              ) : (
+                <span className="text-sm text-muted-foreground">Incluído</span>
+              )}
             </div>
           ))}
         </div>

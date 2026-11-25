@@ -88,7 +88,7 @@ export const guilds: Guild[] = [
     tag: "NX",
     memberCount: 6204,
     online: 891,
-    plan: "escala",
+    plan: "pro",
     preset: "rp",
     installed: true,
     region: "Brasil",
@@ -657,7 +657,7 @@ export const licenses: License[] = [
   {
     id: "lic_2",
     guildName: "Nexus RP",
-    plan: "escala",
+    plan: "pro",
     seats: 8,
     expires: "2027-03-12",
     status: "active",

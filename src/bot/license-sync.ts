@@ -97,11 +97,11 @@ async function loadSubscriptions(): Promise<Subscription[] | null> {
   ];
 }
 
-function accountPlan(records: GuildLicense[], subscriptions: Subscription[]): PlanId | null {
+function accountPlan(records: GuildLicense[], subscriptions: Subscription[]): PlanId {
   const identity = [...records].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  if (!identity) return null;
-  if (isPlatformOwner(identity.accountId)) return "escala";
-  return planForUser(subscriptions, identity.accountId, identity.discordUsername)?.plan ?? null;
+  if (!identity) return "gratuito";
+  if (isPlatformOwner(identity.accountId)) return "pro";
+  return planForUser(subscriptions, identity.accountId, identity.discordUsername)?.plan ?? "gratuito";
 }
 
 /** Revalida pagamentos periodicamente para que cancelamento/upgrade chegue ao bot sem login novo. */
@@ -126,9 +126,9 @@ export async function syncBotPlanLicenses(log: Logger): Promise<void> {
       for (const entries of accounts.values()) {
         const plan = accountPlan(entries.map((entry) => entry.license), subscriptions);
         const ordered = entries.sort((a, b) => a.license.priority - b.license.priority);
-        const limit = plan ? serverLimit(plan) : 0;
+        const limit = serverLimit(plan);
         ordered.forEach(({ guildId, license }, index) => {
-          const active = Boolean(plan) && (limit === null || index < limit);
+          const active = limit === null || index < limit;
           const previous = current.byGuild[guildId] ?? license;
           if (previous.status !== (active ? "active" : "inactive") || previous.planId !== plan) changed = true;
           current.byGuild[guildId] = {
@@ -136,7 +136,7 @@ export async function syncBotPlanLicenses(log: Logger): Promise<void> {
             status: active ? "active" : "inactive",
             planId: plan,
             updatedAt: previous?.status === (active ? "active" : "inactive") && previous.planId === plan ? previous.updatedAt : now,
-            ...(active ? { reason: undefined } : { reason: plan ? "server_limit" : "no_subscription" }),
+            ...(active ? { reason: undefined } : { reason: "server_limit" }),
           };
         });
       }

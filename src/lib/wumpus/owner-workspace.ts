@@ -55,10 +55,9 @@ export function buildWorkspace(
   const allowed = new Set(entitlements.guildIds);
   const entitled = guilds.filter((g) => allowed.has(g.id));
 
-  // O plano aplicado a cada servidor e o plano REAL da assinatura. Sem
-  // assinatura (`plan === null`) nao ha servidor, entao o fallback so cobre o
-  // caso do dono, que ja vem com "escala" resolvido.
-  const plan = entitlements.plan ?? "essencial";
+  // O plano aplicado a cada servidor e o plano REAL da conta: assinatura ativa
+  // ou o Gratuito automatico, que cobre um servidor.
+  const plan = entitlements.plan;
 
   const list: Guild[] = entitled.map((g) => ({
     id: g.id,
@@ -156,7 +155,7 @@ export function buildWorkspace(
         category: "auth",
         summary: entitlements.isOwner
           ? "Entrou com Discord. Acesso de dono da plataforma."
-          : `Entrou com Discord. ${entitlements.planName ?? "Sem assinatura"} · ${list.length} servidor(es).`,
+          : `Entrou com Discord. ${entitlements.planName} · ${list.length} servidor(es).`,
       },
     ],
     modules,
@@ -176,5 +175,5 @@ export function buildWorkspace(
 
 /** Nome do plano para exibir, sem o prefixo comercial. */
 export function planLabel(entitlements: Entitlements): string {
-  return entitlements.plan ? planById(entitlements.plan).name : "Sem assinatura";
+  return planById(entitlements.plan).name;
 }

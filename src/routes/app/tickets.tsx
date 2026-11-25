@@ -235,7 +235,7 @@ function TicketsPage() {
               ))}
             </div>
             {templateNotice ? <p role="status" className="m-0 text-sm text-ok">{templateNotice}</p> : null}
-            {!canUseDepartments ? <div className="flex flex-wrap items-center justify-between gap-3"><p className="m-0 text-xs text-muted-foreground">Seu plano permite um tipo de atendimento. Os modelos serão aplicados com uma categoria; departamentos extras são exclusivos dos planos Escala e Vitalício.</p><ExclusiveButton /></div> : null}
+            {!canUseDepartments ? <div className="flex flex-wrap items-center justify-between gap-3"><p className="m-0 text-xs text-muted-foreground">Seu plano permite um tipo de atendimento. Os modelos serão aplicados com uma categoria; departamentos extras são exclusivos dos planos Pro e Vitalício.</p><ExclusiveButton /></div> : null}
           </section>
 
           <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(320px,.8fr)]">

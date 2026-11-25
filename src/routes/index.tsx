@@ -178,7 +178,7 @@ function Home() {
               A ShardPay está indisponível. Estes valores são a referência salva; confirme o preço atual no checkout.
             </p>
           ) : null}
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             {plans.map((plan) => (
               <article
                 key={plan.id}
@@ -196,11 +196,19 @@ function Home() {
                   ))}
                 </ul>
                 <div className="mt-5 flex flex-col gap-2">
-                  <a href={plan.checkoutUrl} target="_blank" rel="noreferrer">
-                    <Button variant={plan.highlight ? "default" : "outline"} className="w-full">
-                      Assinar na ShardPay
-                    </Button>
-                  </a>
+                  {plan.checkoutUrl ? (
+                    <a href={plan.checkoutUrl} target="_blank" rel="noreferrer">
+                      <Button variant={plan.highlight ? "default" : "outline"} className="w-full">
+                        Assinar na ShardPay
+                      </Button>
+                    </a>
+                  ) : (
+                    <a href={brand.invite} target="_blank" rel="noreferrer">
+                      <Button variant="outline" className="w-full">
+                        Começar grátis
+                      </Button>
+                    </a>
+                  )}
                 </div>
               </article>
             ))}

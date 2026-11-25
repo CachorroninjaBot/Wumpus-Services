@@ -500,7 +500,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       const numbers = state.tickets.filter((t) => t.guildId === state.activeGuildId).map((t) => t.number);
       const number = (numbers.length ? Math.max(...numbers) : 100) + 1;
       const welcome = String(tcfg.config.welcomeMessage ?? "");
-      const plan = state.guilds.find((g) => g.id === state.activeGuildId)?.plan ?? "pro";
+      const plan = state.guilds.find((g) => g.id === state.activeGuildId)?.plan ?? "gratuito";
       const departments = Array.isArray(tcfg.config.departments)
         ? tcfg.config.departments.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
         : [];
@@ -611,7 +611,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
         })
         .join("\n");
       const channelId = String(cfg("tickets").config.transcriptChannelId ?? "ch_transcripts");
-      const plan = state.guilds.find((g) => g.id === state.activeGuildId)?.plan ?? "pro";
+      const plan = state.guilds.find((g) => g.id === state.activeGuildId)?.plan ?? "gratuito";
       const withTranscript = planAllows(plan, "transcripts");
       const post: ChannelPost | null = withTranscript
         ? {
@@ -746,7 +746,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
       const state = get();
       const fcfg = cfg("forms");
       if (!fcfg.enabled) return { ok: false, error: "As candidaturas estão pausadas." };
-      const plan = state.guilds.find((g) => g.id === state.activeGuildId)?.plan ?? "pro";
+      const plan = state.guilds.find((g) => g.id === state.activeGuildId)?.plan ?? "gratuito";
       if (!planAllows(plan, "forms")) {
         return { ok: false, error: "O plano Comunidade não inclui candidaturas." };
       }
@@ -1157,7 +1157,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
 
     simulateNuke: (actions) => {
       const state = get();
-      const plan = state.guilds.find((g) => g.id === state.activeGuildId)?.plan ?? "pro";
+      const plan = state.guilds.find((g) => g.id === state.activeGuildId)?.plan ?? "gratuito";
       const security = cfg("security");
       const decision = evaluateNuke(actions, security.config, planAllows(plan, "antiNuke"));
       if (!decision.triggered) {
@@ -1192,8 +1192,8 @@ export const useWumpus = create<WumpusStore>((set, get) => {
     setPlan: (plan) => {
       const state = get();
       // Só o dono troca plano por aqui. O cliente muda de plano pagando na
-      // ShardPay — sem esta trava, o botao da tela de servidor dava Escala de
-      // graca a qualquer sessao.
+      // ShardPay — sem esta trava, o botao da tela de servidor dava o plano
+      // pago de graca a qualquer sessao.
       if (!state.sessionUser.isAdmin) return;
       write({
         guilds: state.guilds.map((g) => (g.id === state.activeGuildId ? { ...g, plan } : g)),
@@ -1225,7 +1225,7 @@ const NO_GUILD: Guild = {
   tag: "--",
   memberCount: 0,
   online: 0,
-  plan: "essencial",
+  plan: "gratuito",
   preset: "community",
   installed: false,
   region: "—",

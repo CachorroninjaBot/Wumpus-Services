@@ -89,11 +89,11 @@ test("nome de usuario nao diferencia caixa nem arroba", () => {
 
 test("entre varios planos ativos, vale o maior", () => {
   const found = planForUser(
-    [sub({ planId: "essencial" }), sub({ planId: "escala" }), sub({ planId: "pro" })],
+    [sub({ planId: "pro" }), sub({ planId: "vitalicio" })],
     ME.id,
     ME.username
   );
-  assert.equal(found?.plan, "escala");
+  assert.equal(found?.plan, "vitalicio");
 });
 
 /* ------------------------------------------------------------ servidores --- */
@@ -114,7 +114,7 @@ test("servidor vinculado na dashboard a outra conta não consome a cota do usuá
     ownedGuildIds: ["a", "b"],
     botGuildIds: ["a", "b"],
     guildAccountIds: { b: OTHER.id },
-    subscriptions: [sub({ planId: "essencial" })],
+    subscriptions: [],
   }));
   assert.deepEqual(result.guildIds, ["a"]);
   assert.deepEqual(result.overLimitGuildIds, []);
@@ -156,21 +156,22 @@ test("administrador sem ser dono fica de fora", () => {
   assert.equal(result.plan, "pro", "a assinatura continua valendo; so nao ha servidor dela");
 });
 
-test("sem assinatura, nenhum servidor e liberado", () => {
+test("sem assinatura, o gratuito libera um servidor e informa o excedente", () => {
   const result = resolveEntitlements(input({ ownedGuildIds: ["a", "b"], botGuildIds: ["a", "b"], subscriptions: [] }));
-  assert.deepEqual(result.guildIds, []);
-  assert.equal(result.reason, "no-subscription");
-  assert.equal(result.plan, null);
+  assert.deepEqual(result.guildIds, ["a"]);
+  assert.deepEqual(result.overLimitGuildIds, ["b"]);
+  assert.equal(result.reason, "free");
+  assert.equal(result.plan, "gratuito");
 });
 
 /* --------------------------------------------------------------- limites --- */
 
-test("essencial libera no maximo 1 servidor", () => {
+test("gratuito libera no maximo 1 servidor", () => {
   const result = resolveEntitlements(
     input({
       ownedGuildIds: ["a", "b", "c", "d"],
       botGuildIds: ["a", "b", "c", "d"],
-      subscriptions: [sub({ planId: "essencial" })],
+      subscriptions: [],
     })
   );
   assert.equal(result.guildIds.length, 1);
@@ -182,17 +183,17 @@ test("o excedente e informado, nao escondido", () => {
     input({
       ownedGuildIds: ["a", "b", "c"],
       botGuildIds: ["a", "b", "c"],
-      subscriptions: [sub({ planId: "essencial" })],
+      subscriptions: [],
     })
   );
   assert.deepEqual(result.guildIds, ["a"]);
   assert.deepEqual(result.overLimitGuildIds, ["b", "c"]);
 });
 
-test("escala nao tem teto de servidores", () => {
+test("pro nao tem teto de servidores", () => {
   const ids = ["a", "b", "c", "d", "e", "f"];
   const result = resolveEntitlements(
-    input({ ownedGuildIds: ids, botGuildIds: ids, subscriptions: [sub({ planId: "escala" })] })
+    input({ ownedGuildIds: ids, botGuildIds: ids, subscriptions: [sub({ planId: "pro" })] })
   );
   assert.equal(result.guildIds.length, 6);
   assert.equal(result.limit, null);
@@ -245,9 +246,9 @@ test("o dono da plataforma ve servidores que administra mesmo sem ser proprietar
 
 /* ------------------------------------------------------------ addServer --- */
 
-test("quem nao tem plano nao adiciona servidor", () => {
+test("conta gratuita pode adicionar o primeiro servidor", () => {
   const result = resolveEntitlements(input({ ownedGuildIds: [], botGuildIds: [], subscriptions: [] }));
-  assert.equal(canAddServer(result, 0), false);
+  assert.equal(canAddServer(result, 0), true);
 });
 
 test("limite do plano barra servidor adicional", () => {
@@ -255,7 +256,7 @@ test("limite do plano barra servidor adicional", () => {
     input({
       ownedGuildIds: ["a", "b"],
       botGuildIds: ["a", "b"],
-      subscriptions: [sub({ planId: "essencial" })],
+      subscriptions: [],
     })
   );
   assert.equal(canAddServer(result, 1), false);
@@ -263,12 +264,14 @@ test("limite do plano barra servidor adicional", () => {
 });
 
 test("recursos premium acompanham o nível do plano", () => {
-  assert.equal(planAllows("essencial", "ai"), false);
+  assert.equal(planAllows("gratuito", "forms"), true);
+  assert.equal(planAllows("gratuito", "ai"), false);
+  assert.equal(planAllows("gratuito", "webhooks"), false);
   assert.equal(planAllows("pro", "ai"), true);
-  assert.equal(planAllows("pro", "webhooks"), false);
-  assert.equal(planAllows("escala", "webhooks"), true);
-  assert.equal(monthlyOcrLimit("essencial"), 0);
-  assert.equal(monthlyOcrLimit("pro"), 500);
+  assert.equal(planAllows("pro", "webhooks"), true);
+  assert.equal(planAllows("vitalicio", "webhooks"), true);
+  assert.equal(monthlyOcrLimit("gratuito"), 0);
+  assert.equal(monthlyOcrLimit("pro"), null);
   assert.equal(monthlyOcrLimit("vitalicio"), null);
 });
 

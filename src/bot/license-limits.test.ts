@@ -23,7 +23,7 @@ test("servidores fora da cota recebem licença inativa", async () => {
   await syncGuildEntitlements({
     accountId: "owner-1",
     discordUsername: "cliente",
-    planId: "essencial",
+    planId: "gratuito",
     botGuildIds: ["g1", "g2"],
     ownedGuildIds: ["g1", "g2"],
     allowedGuildIds: ["g1"],
@@ -48,7 +48,7 @@ test("login de outra conta não substitui o vínculo de um servidor já atribuí
   await syncGuildEntitlements({
     accountId: "owner-2",
     discordUsername: "segundo",
-    planId: "escala",
+    planId: "vitalicio",
     botGuildIds: ["g3"],
     ownedGuildIds: ["g3"],
     allowedGuildIds: ["g3"],
@@ -84,16 +84,13 @@ test("servidor com vínculo inativo pode ser assumido pelo dono atual", async ()
   assert.equal(license?.planId, "pro");
 });
 
-test("OCR Pro conta 500 chamadas por conta e por mês, compartilhadas entre servidores", async () => {
+test("OCR do Gratuito fica bloqueado", async () => {
   resetStoreCacheForTests("ocr-usage");
-  for (let index = 0; index < 500; index += 1) {
-    assert.equal(await reserveOcrRequest("owner-2", 500), true);
-  }
-  assert.equal(await reserveOcrRequest("owner-2", 500), false);
-  assert.equal(await reserveOcrRequest("owner-3", 500), true);
+  assert.equal(await reserveOcrRequest("owner-free", 0), false);
 });
 
-test("OCR do Escala não tem limite mensal", async () => {
-  assert.equal(await reserveOcrRequest("owner-scale", null), true);
-  assert.equal(await reserveOcrRequest("owner-scale", null), true);
+test("OCR do Pro e do Vitalício não tem limite mensal", async () => {
+  assert.equal(await reserveOcrRequest("owner-pro", null), true);
+  assert.equal(await reserveOcrRequest("owner-pro", null), true);
+  assert.equal(await reserveOcrRequest("owner-life", null), true);
 });

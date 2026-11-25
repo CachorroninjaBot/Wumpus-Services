@@ -34,12 +34,12 @@ const grantSchema = z.object({
   token: z.string().min(1).max(SESSION_TOKEN_MAX_LENGTH),
   userId: z.string().regex(/^\d{17,20}$/),
   username: z.string().trim().min(1).max(100),
-  planId: z.enum(["essencial", "pro", "escala", "vitalicio"]),
+  planId: z.enum(["pro", "vitalicio"]),
   durationDays: z.number().int().min(1).max(3650).nullable(),
   reason: z.string().trim().min(3).max(500),
 }).strict().superRefine((value, context) => {
   if ((value.planId === "vitalicio") !== (value.durationDays === null)) {
-    context.addIssue({ code: "custom", message: "O plano Vitalício não expira; os demais planos exigem duração." });
+    context.addIssue({ code: "custom", message: "O plano Vitalício não expira; o Pro exige duração." });
   }
 });
 const revokeGrantSchema = z.object({

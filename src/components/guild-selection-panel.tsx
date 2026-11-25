@@ -90,12 +90,10 @@ export function GuildSelectionPanel() {
             <dd className="m-0 text-right font-medium">{diagnostics.eligibleGuildCount}</dd>
             <dt className="text-muted-foreground">Plano</dt>
             <dd className="m-0 text-right font-medium">
-              {diagnostics.planName ?? "Nenhum"}
-              {diagnostics.planLimit === null && diagnostics.planName
+              {diagnostics.planName}
+              {diagnostics.planLimit === null
                 ? " · sem limite"
-                : diagnostics.planLimit
-                  ? ` · até ${diagnostics.planLimit}`
-                  : ""}
+                : ` · até ${diagnostics.planLimit}`}
             </dd>
           </dl>
           <p className="m-0 text-sm leading-6">{diagnostics.recommendation}</p>
@@ -110,59 +108,53 @@ export function GuildSelectionPanel() {
                 </p>
                 <Button
                   size="sm"
-                  disabled={!dirtyRef.current || saving || !diagnostics.planName}
+                  disabled={!dirtyRef.current || saving}
                   onClick={() => void save()}
                 >
                   {saving ? "Salvando…" : "Salvar seleção"}
                 </Button>
               </div>
-              {!diagnostics.planName ? (
-                <p className="m-0 text-sm text-muted-foreground">
-                  Um plano ativo é necessário para escolher servidores.
-                </p>
-              ) : (
-                <ul className="m-0 max-h-64 space-y-1 overflow-y-auto p-0">
-                  {diagnostics.availableGuilds.map((guild) => {
-                    const checked = selectedGuildIds.includes(guild.id);
-                    const atLimit =
-                      diagnostics.planLimit !== null &&
-                      selectedGuildIds.length >= diagnostics.planLimit;
-                    const disabled = guild.linkedElsewhere || (!checked && atLimit);
-                    return (
-                      <li key={guild.id} className="list-none">
-                        <label
-                          className={cn(
-                            "flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm",
-                            disabled
-                              ? "cursor-not-allowed opacity-55"
-                              : "cursor-pointer hover:bg-muted/70",
-                          )}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={disabled}
-                            onChange={(event) => {
-                              const next = event.target.checked
-                                ? [...selectedGuildIds, guild.id]
-                                : selectedGuildIds.filter((id) => id !== guild.id);
-                              dirtyRef.current = true;
-                              setSelectedGuildIds(next);
-                            }}
-                            className="size-4 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                          />
-                          <span className="min-w-0 flex-1 truncate font-medium">{guild.name}</span>
-                          {guild.linkedElsewhere ? (
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              Vinculado a outra conta
-                            </span>
-                          ) : null}
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+              <ul className="m-0 max-h-64 space-y-1 overflow-y-auto p-0">
+                {diagnostics.availableGuilds.map((guild) => {
+                  const checked = selectedGuildIds.includes(guild.id);
+                  const atLimit =
+                    diagnostics.planLimit !== null &&
+                    selectedGuildIds.length >= diagnostics.planLimit;
+                  const disabled = guild.linkedElsewhere || (!checked && atLimit);
+                  return (
+                    <li key={guild.id} className="list-none">
+                      <label
+                        className={cn(
+                          "flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm",
+                          disabled
+                            ? "cursor-not-allowed opacity-55"
+                            : "cursor-pointer hover:bg-muted/70",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? [...selectedGuildIds, guild.id]
+                              : selectedGuildIds.filter((id) => id !== guild.id);
+                            dirtyRef.current = true;
+                            setSelectedGuildIds(next);
+                          }}
+                          className="size-4 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        />
+                        <span className="min-w-0 flex-1 truncate font-medium">{guild.name}</span>
+                        {guild.linkedElsewhere ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            Vinculado a outra conta
+                          </span>
+                        ) : null}
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
             </>
           ) : (
             <>

@@ -1,5 +1,6 @@
 import { dashboardSessionIsUsable, getDashboardGuildSelection, getDashboardSessionGuilds, listDashboardGrants, recordDashboardActivity } from "./admin-store.server";
 import { loadBotGuildIds } from "./bot-guilds";
+import { isPaidPlan } from "./catalog";
 import { planAllows, type PlanFeature } from "./engine";
 import { configuredLifetimeSubscriptions, resolveEntitlements, type Entitlements, type SubscriptionLite } from "./entitlements";
 import { isPlatformOwner } from "./owner";
@@ -83,7 +84,7 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
       botGuildIds,
       guildAccountIds: Object.fromEntries(
         Object.entries(licenseFile.byGuild)
-          .filter(([, license]) => license.status === "active")
+          .filter(([, license]) => license.status === "active" && isPaidPlan(license.planId))
           .map(([guildId, license]) => [guildId, license.accountId]),
       ),
       selectedGuildIds,
@@ -93,7 +94,7 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
   }
 
   if (!guildAccessCache.guildIds.has(guildId) && !isPlatformOwner(payload.userId)) {
-    throw new Error("Este servidor não está incluído na sua assinatura ou o Wumpus não está instalado.");
+    throw new Error("Este servidor não está incluído no seu plano ou o Wumpus não está instalado.");
   }
   if (!guildAccessCache.guildIds.has(guildId)) throw new Error("O Wumpus não está instalado neste servidor.");
   return { ...payload, entitlements: guildAccessCache.entitlements };
@@ -103,7 +104,7 @@ export async function requireGuildAccess(token: string, guildId: string): Promis
 export async function requireGuildFeature(token: string, guildId: string, feature: PlanFeature): Promise<SessionPayload> {
   const session = await requireGuildAccess(token, guildId);
   const plan = session.entitlements.plan;
-  if (!plan || !planAllows(plan, feature)) {
+  if (!planAllows(plan, feature)) {
     const names: Record<PlanFeature, string> = {
       forms: "formulários",
       ai: "recursos de IA",

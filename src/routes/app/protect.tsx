@@ -1164,7 +1164,7 @@ function ProtectPage() {
           )}
           {!planAllows(guild.plan, "ocr") ? (
             <div className="rounded-lg bg-warn/10 px-3 py-2.5 text-sm" role="status">
-              O OCR é exclusivo dos planos Pro, Escala e Vitalício. O estado desta configuração não ativa o
+              O OCR é exclusivo dos planos Pro e Vitalício. O estado desta configuração não ativa o
               serviço sem um plano compatível.
             </div>
           ) : null}
@@ -1738,7 +1738,7 @@ function ProtectPage() {
                 ) : null}
                 {!planAllows(guild.plan, "antiNuke") ? (
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-warn/10 px-3 py-2 text-sm text-muted-foreground">
-                    <p className="m-0">A contenção automática anti-nuke é exclusiva dos planos Escala e Vitalício. O plano atual registra o alerta.</p>
+                    <p className="m-0">A contenção automática anti-nuke é exclusiva dos planos Pro e Vitalício. O plano atual registra o alerta.</p>
                     <ExclusiveButton />
                   </div>
                 ) : null}
@@ -1775,7 +1775,7 @@ function ProtectPage() {
           )}
           {!planAllows(guild.plan, "ai") ? (
             <div className="rounded-lg bg-warn/10 px-3 py-2.5 text-sm" role="status">
-              A auditoria por IA é exclusiva dos planos Pro, Escala e Vitalício. A IA nunca aplica
+              A auditoria por IA é exclusiva dos planos Pro e Vitalício. A IA nunca aplica
               mudanças: ela só recomenda, e quem decide é você.
             </div>
           ) : null}

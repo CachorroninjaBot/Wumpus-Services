@@ -35,7 +35,7 @@ export async function authorizeIncoming(
 ): Promise<IncomingDecision> {
   const plan = await guildPlan(guildId);
   if (!plan || !planAllows(plan, "webhooks")) {
-    return { allowed: false, status: 403, reason: "Webhooks de entrada estão disponíveis no plano Escala." };
+    return { allowed: false, status: 403, reason: "Webhooks de entrada estão disponíveis nos planos Pro e Vitalício." };
   }
   const config = await moduleConfig(guildId, "integrations");
 

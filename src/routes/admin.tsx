@@ -54,12 +54,12 @@ function AdminPage() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  const [grantPlan, setGrantPlan] = useState<"essencial" | "pro" | "escala" | "vitalicio">("essencial");
+  const [grantPlan, setGrantPlan] = useState<"pro" | "vitalicio">("pro");
   const [grantDays, setGrantDays] = useState("30");
   const [grantReason, setGrantReason] = useState("");
   const [newUserId, setNewUserId] = useState("");
   const [newUsername, setNewUsername] = useState("");
-  const [newUserPlan, setNewUserPlan] = useState<"essencial" | "pro" | "escala" | "vitalicio">("essencial");
+  const [newUserPlan, setNewUserPlan] = useState<"pro" | "vitalicio">("pro");
   const [newUserDays, setNewUserDays] = useState("30");
   const [newUserReason, setNewUserReason] = useState("");
 
@@ -210,7 +210,7 @@ function AdminPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <label className="block text-sm font-medium">ID do usuário no Discord<input value={newUserId} onChange={(event) => setNewUserId(event.target.value.replace(/\D/g, ""))} inputMode="numeric" autoComplete="off" maxLength={20} placeholder="Ex.: 123456789012345678" className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm" /></label>
               <label className="block text-sm font-medium">Nome de usuário<input value={newUsername} onChange={(event) => setNewUsername(event.target.value)} maxLength={100} autoComplete="off" placeholder="Nome atual no Discord" className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label>
-              <label className="block text-sm font-medium">Plano<select value={newUserPlan} onChange={(event) => setNewUserPlan(event.target.value as typeof newUserPlan)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option value="essencial">Essencial</option><option value="pro">Pro</option><option value="escala">Escala</option><option value="vitalicio">Vitalício</option></select></label>
+              <label className="block text-sm font-medium">Plano<select value={newUserPlan} onChange={(event) => setNewUserPlan(event.target.value as typeof newUserPlan)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option value="pro">Pro</option><option value="vitalicio">Vitalício</option></select></label>
               {newUserPlan !== "vitalicio" ? <label className="block text-sm font-medium">Duração em dias<input type="number" min={1} max={3650} value={newUserDays} onChange={(event) => setNewUserDays(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label> : <p className="m-0 self-end rounded-lg bg-muted/50 px-3 py-2.5 text-sm text-muted-foreground">Acesso permanente, sem expiração.</p>}
               <label className="block text-sm font-medium sm:col-span-2">Motivo obrigatório<input value={newUserReason} onChange={(event) => setNewUserReason(event.target.value)} maxLength={500} placeholder="Ex.: cortesia aprovada" className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label>
             </div>
@@ -226,7 +226,7 @@ function AdminPage() {
             <label className="mt-4 block text-sm font-medium">Nota interna<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={2000} rows={4} placeholder="Contexto para futuras ações administrativas" className="mt-2 w-full rounded-lg border border-input bg-background p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" /></label>
             <Button className="mt-2 w-full" variant="outline" disabled={busy === `save-notes:${selectedMember.id}`} onClick={() => void manage(selectedMember, "save-notes")}>{busy === `save-notes:${selectedMember.id}` ? "Salvando…" : "Salvar nota"}</Button>
             <div className="mt-5 border-t border-border pt-4"><h3 className="m-0 text-sm font-semibold">Atribuir plano manualmente</h3><p className="mb-0 mt-1 text-xs text-muted-foreground">Concessão sem cobrança; Vitalício não expira.</p>
-              <label className="mt-3 block text-xs font-medium">Plano<select value={grantPlan} onChange={(event) => setGrantPlan(event.target.value as typeof grantPlan)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option value="essencial">Essencial</option><option value="pro">Pro</option><option value="escala">Escala</option><option value="vitalicio">Vitalício</option></select></label>
+              <label className="mt-3 block text-xs font-medium">Plano<select value={grantPlan} onChange={(event) => setGrantPlan(event.target.value as typeof grantPlan)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"><option value="pro">Pro</option><option value="vitalicio">Vitalício</option></select></label>
               {grantPlan !== "vitalicio" ? <label className="mt-3 block text-xs font-medium">Duração em dias<input type="number" min={1} max={3650} value={grantDays} onChange={(event) => setGrantDays(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label> : <p className="mb-0 mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">Acesso permanente, sem expiração.</p>}
               <label className="mt-3 block text-xs font-medium">Motivo obrigatório<input value={grantReason} onChange={(event) => setGrantReason(event.target.value)} maxLength={500} placeholder="Ex.: cortesia aprovada" className="mt-1 min-h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" /></label>
               <Button className="mt-3 w-full" disabled={Boolean(busy) || (grantPlan !== "vitalicio" && (Number(grantDays) < 1 || Number(grantDays) > 3650)) || grantReason.trim().length < 3} onClick={() => void grantAccess(selectedMember)}>{busy === `grant:${selectedMember.id}` ? "Concedendo…" : "Conceder plano"}</Button>
