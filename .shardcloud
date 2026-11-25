@@ -4,6 +4,6 @@ MAIN=.output/server/index.mjs
 MEMORY=2816
 VERSION=26.12.1
 LANGUAGE=node
-CUSTOM_COMMAND=npm run build && npm run db:migrate && npm run start
+CUSTOM_COMMAND=if [ ! -f .output/server/index.mjs ]; then npm run build || exit 1; fi; npm run db:migrate; npm run start
 SUBDOMAIN=wumpus-dashboard
 APPID=260cf682-83bf-46b2-a4ad-368dd288a5ca
