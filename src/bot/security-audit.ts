@@ -22,11 +22,16 @@ import {
   OverwriteType,
   PermissionFlagsBits,
   type Guild,
-  type GuildChannel,
-  type Permissions,
+  type GuildBasedChannel,
+  type PermissionsBitField,
   type Role,
-  type TextBasedChannel,
+  type TextChannel,
 } from "discord.js";
+
+type AuditedChannel = Extract<
+  GuildBasedChannel,
+  { type: ChannelType.GuildText | ChannelType.GuildVoice | ChannelType.GuildCategory }
+>;
 import { groqChat, qualityModel } from "./ai.ts";
 import { normalizeSeverity } from "./assistant.ts";
 import type { Logger } from "./logger.ts";
@@ -139,7 +144,7 @@ function labelForBit(bit: bigint): string | undefined {
   return PERMISSION_LABELS.find((entry) => entry.bit === bit)?.label;
 }
 
-function bitSet(permissions: Readonly<Permissions>): Set<bigint> {
+function bitSet(permissions: Readonly<PermissionsBitField>): Set<bigint> {
   const set = new Set<bigint>();
   for (const { bit } of PERMISSION_LABELS) {
     if (permissions.has(bit)) set.add(bit);
@@ -148,7 +153,7 @@ function bitSet(permissions: Readonly<Permissions>): Set<bigint> {
 }
 
 /** Resumo de permissões: as perigosas por nome + contagem das demais. Ex.: "PERMITE Administrador, Gerenciar cargos +45 outras". */
-function permissionSummary(permissions: Readonly<Permissions>): string {
+function permissionSummary(permissions: Readonly<PermissionsBitField>): string {
   const has = bitSet(permissions);
   const dangerous = DANGEROUS_PERMISSIONS.filter(({ bit }) => has.has(bit)).map(({ label }) => label);
   const extras = has.size - dangerous.length;
@@ -173,7 +178,7 @@ function roleLine(role: Role, botRoleId: string | null): string {
 }
 
 /** Só o que o overwrite MUDOU em relação às permissões base do cargo — sem repetir a lista inteira em todo canal. */
-function channelLine(channel: GuildChannel, everyoneId: string): string {
+function channelLine(channel: AuditedChannel, everyoneId: string): string {
   const parts: string[] = [];
   const everyone = channel.guild.roles.everyone;
   for (const overwrite of channel.permissionOverwrites.cache.values()) {
@@ -206,8 +211,8 @@ function channelLine(channel: GuildChannel, everyoneId: string): string {
           ? "categoria"
           : "outro";
   const topic =
-    channel.type === ChannelType.GuildText && channel.topic
-      ? ` | topico: ${channel.topic.replace(/\s+/g, " ").trim().slice(0, 140)}`
+    channel.type === ChannelType.GuildText && (channel as TextChannel).topic
+      ? ` | topico: ${(channel as TextChannel).topic!.replace(/\s+/g, " ").trim().slice(0, 140)}`
       : "";
   const parent = channel.parent ? ` | categoria: ${channel.parent.name}` : "";
   return `- ${channel.name} [${type}${parent}${topic}]${parts.length ? ` { ${parts.join("; ")} }` : ""}`;
@@ -246,10 +251,10 @@ const TIER_LABELS: Record<number, string> = {
  * simplesmente ignorado.
  */
 async function importantChannelMessages(guild: Guild): Promise<string[]> {
-  const chosen: TextBasedChannel[] = [];
+  const chosen: TextChannel[] = [];
   const seen = new Set<string>();
-  const tryAdd = (channel: GuildChannel | null | undefined) => {
-    if (!channel || !channel.isTextBased() || seen.has(channel.id)) return;
+  const tryAdd = (channel: GuildBasedChannel | null | undefined) => {
+    if (!channel || channel.type !== ChannelType.GuildText || seen.has(channel.id)) return;
     seen.add(channel.id);
     chosen.push(channel);
   };
@@ -318,10 +323,10 @@ export async function buildPermissionSnapshot(guild: Guild): Promise<PermissionS
 
   const channels = [...guild.channels.cache.values()]
     .filter(
-      (channel): channel is GuildChannel =>
-        [ChannelType.GuildText, ChannelType.GuildVoice, ChannelType.GuildCategory].includes(
-          channel.type,
-        ),
+      (channel): channel is AuditedChannel =>
+        channel.type === ChannelType.GuildText ||
+        channel.type === ChannelType.GuildVoice ||
+        channel.type === ChannelType.GuildCategory,
     )
     .slice(0, CHANNEL_LIMIT);
   lines.push(`Canais (${channels.length}):`);

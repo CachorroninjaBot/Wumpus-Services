@@ -109,6 +109,7 @@ function makeFields(template: (typeof templates)[number]): FormFieldConfig[] {
 
 function FormsPage() {
   const gid = useWumpus((state) => state.activeGuildId);
+  const { busy: publishBusy, message: publishNotice, publish: publishPanel } = usePublishPanel(gid);
   const questionsMap = useWumpus((state) => state.formQuestions);
   const legacyQuestions = questionsMap[gid] ?? [];
   const members = useGuildMembers();
@@ -148,8 +149,6 @@ function FormsPage() {
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiNotes, setAiNotes] = useState<Record<string, string>>({});
-  const [publishBusy, setPublishBusy] = useState(false);
-  const [publishNotice, setPublishNotice] = useState<string | null>(null);
   const [builderNotice, setBuilderNotice] = useState<string | null>(null);
 
   async function refreshSubmissions(showLoading = false) {
@@ -320,11 +319,7 @@ function FormsPage() {
   }
 
   async function publishFormPanel() {
-    const channelRef = asString(fcfg.config.panelChannelId).trim();
-    if (!channelRef) { setPublishNotice("Escolha o canal onde o painel deve aparecer."); return; }
-    setPublishNotice(null);
-    const result = await publishPanel("forms", channelRef);
-    if (result) setPublishNotice(result.status === "done" ? "Publicado." : "Pedido enviado.");
+    await publishPanel("forms", asString(fcfg.config.panelChannelId));
   }
 
   return (

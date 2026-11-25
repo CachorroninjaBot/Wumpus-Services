@@ -70,12 +70,12 @@ import {
 } from "./logs.ts";
 import { renderAuditDiff } from "./log-diff.ts";
 import { renderLogEvent } from "./log-render.ts";
-import { resolveRoles } from "./resolve.ts";
 import { applyDefaultRole, removeManagedRolesOnLeave } from "./roles.ts";
 import { checkInactivity, checkOverload } from "./staff.ts";
 import { bump, flushPendingStatistics, maybeSendDigest, pruneStatistics } from "./statistics.ts";
 import { flushBatchedMutations } from "./store.ts";
 import {
+  canManageTickets as canManageTicket,
   claimTicket,
   checkSla,
   closeTicket,
@@ -724,6 +724,36 @@ async function handleDepartmentSelect(
   await beginTicketOpen(interaction, department, log);
 }
 
+/** Fecha pelo cabeçalho: equipe ou quem abriu, com motivo opcional. */
+async function promptTicketClose(
+  interaction: ButtonInteraction,
+  guild: Guild,
+  ticketId: number,
+): Promise<void> {
+  const ticket = await getTicket(guild.id, ticketId);
+  if (!ticket || ticket.status === "closed" || ticket.channelId !== interaction.channelId) {
+    await interaction.reply({ content: "Este atendimento não está mais disponível.", ephemeral: true });
+    return;
+  }
+  if (ticket.openerId !== interaction.user.id && !(await canManageTicket(guild, interaction.user.id))) {
+    await interaction.reply({ content: "Somente quem abriu o atendimento ou a equipe pode encerrá-lo.", ephemeral: true });
+    return;
+  }
+
+  const modal = new ModalBuilder()
+    .setCustomId(id("ticket", "close_reason_submit", ticketId))
+    .setTitle(`Encerrar atendimento #${ticketId}`);
+  const reason = new TextInputBuilder()
+    .setCustomId("motivo")
+    .setLabel("Motivo do encerramento (opcional)")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setMaxLength(500)
+    .setPlaceholder("Ex.: dúvida resolvida, pedido entregue…");
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
+  await interaction.showModal(modal);
+}
+
 async function handleButton(interaction: ButtonInteraction, log: Logger): Promise<void> {
   const parsed = parseId(interaction.customId);
   if (!parsed) return;
@@ -1102,50 +1132,13 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
   }
 
   if (kind === "ticket" && action === "close") {
-    const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) {
-      await interaction.reply({
-        content: "Somente a equipe de atendimento pode encerrar tickets.",
-        ephemeral: true,
-      });
-      return;
-    }
-    const modal = new ModalBuilder()
-      .setCustomId(id("ticket", "close_reason_submit", ticketId))
-      .setTitle(`Encerrar atendimento #${ticketId}`);
-    const reason = new TextInputBuilder()
-      .setCustomId("motivo")
-      .setLabel("Motivo do encerramento")
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(true)
-      .setMaxLength(500)
-      .setPlaceholder("Ex.: dúvida resolvida, solicitação concluída…");
-    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
-    await interaction.showModal(modal);
+    await promptTicketClose(interaction, guild, Number(args[0]));
     return;
   }
 
   if (kind === "ticket" && action === "close_reason") {
-    const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) {
-      await interaction.reply({
-        content: "Somente a equipe de atendimento pode encerrar tickets.",
-        ephemeral: true,
-      });
-      return;
-    }
-    const modal = new ModalBuilder()
-      .setCustomId(id("ticket", "close_reason_submit", ticketId))
-      .setTitle(`Encerrar atendimento #${ticketId}`);
-    const reason = new TextInputBuilder()
-      .setCustomId("motivo")
-      .setLabel("Motivo do encerramento")
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(true)
-      .setMaxLength(500)
-      .setPlaceholder("Ex.: dúvida resolvida, solicitação concluída…");
-    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
-    await interaction.showModal(modal);
+    // Botões antigos ainda carregam este custom_id; mesma confirmação.
+    await promptTicketClose(interaction, guild, Number(args[0]));
     return;
   }
 
@@ -1416,20 +1409,27 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
 
   if (kind === "ticket" && action === "close_reason_submit") {
     const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) {
+    const ticket = await getTicket(guild.id, ticketId);
+    if (!ticket || ticket.status === "closed" || ticket.channelId !== interaction.channelId) {
+      await interaction.reply({ content: "Este atendimento não está mais disponível.", ephemeral: true });
+      return;
+    }
+    if (ticket.openerId !== interaction.user.id && !(await canManageTicket(guild, interaction.user.id))) {
       await interaction.reply({
-        content: "Somente a equipe de atendimento pode encerrar tickets.",
+        content: "Somente quem abriu o atendimento ou a equipe pode encerrá-lo.",
         ephemeral: true,
       });
       return;
     }
 
-    const reason = interaction.fields.getTextInputValue("motivo").trim();
+    const reason = interaction.fields.getTextInputValue("motivo").trim() || null;
     await interaction.deferReply({ ephemeral: true });
     const result = await closeTicket(guild, ticketId, interaction.user.id, log, reason);
     await interaction.editReply(
       result.ok
-        ? `Atendimento encerrado. Motivo: ${reason.slice(0, 400)}`
+        ? reason
+          ? `Atendimento encerrado. Motivo: ${reason.slice(0, 400)}`
+          : "Atendimento encerrado."
         : "Este atendimento já estava encerrado ou não existe.",
     );
     return;
@@ -1555,21 +1555,6 @@ async function handleTicketPrioritySelect(
     content: updated ? `Prioridade de #${ticketId} alterada para **${priority}**.` : "A prioridade já estava selecionada ou o ticket foi encerrado.",
     ephemeral: true,
   });
-}
-
-async function canManageTicket(guild: Guild, userId: string): Promise<boolean> {
-  const [member, tickets, staff] = await Promise.all([
-    guild.members.fetch(userId).catch(() => null),
-    moduleConfig(guild.id, "tickets"),
-    moduleConfig(guild.id, "staff"),
-  ]);
-  if (!member) return false;
-  if (member.permissions.has("ManageGuild")) return true;
-  const roles = resolveRoles(guild, [
-    ...list(tickets, "staffRoleIds"),
-    ...list(staff, "staffRoleIds"),
-  ]);
-  return roles.some((role) => member.roles.cache.has(role.id));
 }
 
 export function createBot(token: string, log: Logger = consoleLogger): BotHandle {

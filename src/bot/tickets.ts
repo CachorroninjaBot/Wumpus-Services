@@ -30,7 +30,7 @@ import { resolveChannel, resolveRole, resolveRoles } from "./resolve.ts";
 import { bump } from "./statistics.ts";
 import { mutate, mutateBatched, nextId, read } from "./store.ts";
 import { generateTranscriptUrl } from "./transcript-api.ts";
-import { autoCloseCandidate, buildTranscript, slaState, slaNotice } from "./tickets-sla.ts";
+import { autoCloseCandidate, buildTranscript, buildTranscriptHtml, slaState, slaNotice } from "./tickets-sla.ts";
 
 export type TicketStatus = "open" | "claimed" | "closed";
 
@@ -42,6 +42,8 @@ export type Ticket = {
   guildId: string;
   channelId: string;
   openerId: string;
+  /** Nome no momento da abertura — evita uma chamada ao Discord por linha na dashboard. */
+  openerName?: string | null;
   subject?: string;
   department: string | null;
   status: TicketStatus;
@@ -51,6 +53,8 @@ export type Ticket = {
   claimedAt: string | null;
   closedAt: string | null;
   closedBy: string | null;
+  /** Mensagem fixada com status e botões do atendimento. */
+  headerMessageId?: string | null;
   /** Nivel de urgencia — mesmo vocabulario da dashboard. */
   priority: TicketPriority;
   /** Primeira resposta da equipe — base do SLA e das metricas por atendente. */
@@ -99,9 +103,91 @@ export async function getTicketMessages(ticketId: number): Promise<TicketMessage
   return (await read<TicketMessage>("ticket_messages")).filter((message) => message.ticketId === ticketId);
 }
 
+/** Equipe autorizada: Gerenciar servidor ou um dos cargos de atendimento configurados. */
+export async function canManageTickets(guild: Guild, userId: string): Promise<boolean> {
+  const [member, tickets, staff] = await Promise.all([
+    guild.members.fetch(userId).catch(() => null),
+    moduleConfig(guild.id, "tickets"),
+    moduleConfig(guild.id, "staff"),
+  ]);
+  if (!member) return false;
+  if (member.permissions.has(PermissionFlagsBits.ManageGuild)) return true;
+  const staffRoles = resolveRoles(guild, [
+    ...list(tickets, "staffRoleIds"),
+    ...list(staff, "staffRoleIds"),
+  ]);
+  return staffRoles.some((role) => member.roles.cache.has(role.id));
+}
+
+const PRIORITY_LABELS: Record<TicketPriority, string> = {
+  low: "Baixa",
+  normal: "Normal",
+  high: "Alta",
+  urgent: "Urgente",
+};
+
+/** Texto do cabeçalho fixado — sempre reflete o estado atual do ticket. */
+function ticketHeaderText(ticket: Ticket): string {
+  const status = ticket.waitingOn === "user"
+    ? "Aguardando usuário"
+    : ticket.waitingOn === "staff"
+      ? "Aguardando equipe"
+      : ticket.claimedBy || ticket.firstResponseAt
+        ? "Em atendimento"
+        : "Aguardando equipe";
+  const owner = ticket.claimedBy ? ` · Responsável: <@${ticket.claimedBy}>` : "";
+  return [
+    `<@${ticket.openerId}> · atendimento **#${ticket.id}**${ticket.department ? ` · **${ticket.department}**` : ""}`,
+    `Status: **${status}**${owner} · Prioridade: **${PRIORITY_LABELS[ticket.priority] ?? "Normal"}**`,
+  ].join("\n");
+}
+
+function ticketHeaderComponents(ticket: Ticket) {
+  const claimed = Boolean(ticket.claimedBy);
+  return [{
+    type: 1,
+    components: [
+      claimed
+        ? { type: 2, style: 3, label: "Assumido", custom_id: id("ticket", "claim", ticket.id), disabled: true }
+        : { type: 2, style: 2, label: "Assumir", custom_id: id("ticket", "claim", ticket.id) },
+      { type: 2, style: 2, label: "Transferir", custom_id: id("ticket", "transfer_pick", ticket.id) },
+      { type: 2, style: 2, label: "Gerenciar", emoji: { name: "⚙️" }, custom_id: id("ticket", "manage", ticket.id) },
+      { type: 2, style: 4, label: "Fechar", custom_id: id("ticket", "close", ticket.id) },
+    ],
+  }];
+}
+
+/** Atualiza tópico e cabeçalho fixado. Nunca lança: um erro de API não pode derrubar a ação principal. */
+export async function syncTicketHeader(guild: Guild, ticketId: number, log?: Logger): Promise<void> {
+  const ticket = await getTicket(guild.id, ticketId);
+  if (!ticket || ticket.status === "closed") return;
+  const channel = await guild.channels.fetch(ticket.channelId).catch(() => null);
+  if (!channel?.isTextBased()) return;
+
+  if ("setTopic" in channel) {
+    await channel
+      .setTopic(
+        `Atendimento #${ticket.id} · ${ticket.department ?? "Geral"} · ${ticket.claimedBy ? "assumido" : "aguardando equipe"}`.slice(0, 1024),
+      )
+      .catch((error: unknown) => log?.warn("falha ao atualizar tópico do ticket", {
+        guildId: guild.id, ticketId, error: String(error).slice(0, 200),
+      }));
+  }
+
+  if (!ticket.headerMessageId || !("messages" in channel)) return;
+  const message = await channel.messages.fetch(ticket.headerMessageId).catch(() => null);
+  if (!message) return;
+  await message.edit({
+    content: ticketHeaderText(ticket),
+    components: ticketHeaderComponents(ticket),
+  } as never).catch((error: unknown) => log?.warn("falha ao atualizar cabeçalho do ticket", {
+    guildId: guild.id, ticketId, error: String(error).slice(0, 200),
+  }));
+}
+
 /** Grava a mensagem do canal de atendimento — base da transcricao e da IA. */
 export async function recordTicketMessage(message: Message): Promise<void> {
-  if (!message.guild || message.author.bot || !message.content) return;
+  if (!message.guild || message.author.bot) return;
 
   const rows = await read<Ticket>("tickets");
   const ticket = rows.find(
@@ -109,14 +195,21 @@ export async function recordTicketMessage(message: Message): Promise<void> {
   );
   if (!ticket) return;
 
+  // Anexos entram como link no histórico: sem isso a evidência que motivou o
+  // ticket (print, comprovante) desaparecia da transcrição.
+  const attachments = [...message.attachments.values()]
+    .slice(0, 5)
+    .map((attachment) => `[anexo] ${attachment.name}: ${attachment.url}`);
+  const content = [message.content.trim(), ...attachments].filter(Boolean).join("\n").slice(0, 4000);
+  if (!content) return;
+
   const at = new Date().toISOString();
 
   // Primeira resposta da equipe: o SLA mede ate aqui, nao ate o claim. Um
   // claim sem resposta nenhuma nao tira o ticket do estado de espera.
-  const isStaff = ticket.claimedBy === message.author.id;
-  let isStaffReply = isStaff;
+  let isStaffReply = ticket.claimedBy === message.author.id;
   const member = message.member;
-  if (ticket.waitingOn === "staff" && !isStaffReply && member) {
+  if (!isStaffReply && member && (!ticket.firstResponseAt || ticket.waitingOn === "staff")) {
     const [ticketConfig, staffConfig] = await Promise.all([
       moduleConfig(message.guild.id, "tickets"),
       moduleConfig(message.guild.id, "staff"),
@@ -128,7 +221,7 @@ export async function recordTicketMessage(message: Message): Promise<void> {
     isStaffReply = member.permissions.has(PermissionFlagsBits.ManageGuild)
       || staffRoles.some((role) => member.roles.cache.has(role.id));
   }
-  const firstResponse = isStaff && !ticket.firstResponseAt ? at : null;
+  const firstResponse = isStaffReply && !ticket.firstResponseAt ? at : null;
 
   await mutate<Ticket>("tickets", (all) => {
     const row = all.find((entry) => entry.id === ticket.id && entry.guildId === ticket.guildId);
@@ -143,7 +236,7 @@ export async function recordTicketMessage(message: Message): Promise<void> {
       row.firstRespondedBy = message.author.id;
     }
     if (message.author.id === ticket.openerId && !row.subject) {
-      row.subject = message.content.trim().slice(0, 80);
+      row.subject = content.trim().slice(0, 80);
     }
     return all;
   });
@@ -155,8 +248,8 @@ export async function recordTicketMessage(message: Message): Promise<void> {
     messages.push({
       ticketId: ticket.id,
       authorId: message.author.id,
-      authorName: message.author.username,
-      content: message.content.slice(0, 4000),
+      authorName: message.member?.displayName ?? message.author.globalName ?? message.author.username,
+      content,
       at
     });
     return messages;
@@ -194,13 +287,16 @@ export async function sendTicketReply(
     if (row) {
       row.lastActivityAt = at;
       row.waitingOn = null;
-      if (row.claimedBy === actorId && !row.firstResponseAt) {
+      // Resposta pela dashboard é resposta da equipe mesmo sem claim: o SLA
+      // precisa medir a primeira resposta real, não exigir "Assumir" antes.
+      if (!row.firstResponseAt) {
         row.firstResponseAt = at;
         row.firstRespondedBy = actorId;
       }
     }
     return rows;
   });
+  await syncTicketHeader(guild, ticketId, log);
   return { ok: true };
 }
 
@@ -215,6 +311,7 @@ export async function openTicket(
   department: string | null,
   log: Logger,
   intakeAnswers: Array<{ question: string; answer: string }> = [],
+  subjectOverride?: string,
 ): Promise<{ ok: true; ticket: Ticket; channelId: string } | { ok: false; error: string }> {
   const config = await moduleConfig(guild.id, "tickets");
   if (!config) return { ok: false, error: "O atendimento ainda nao foi configurado neste servidor." };
@@ -255,7 +352,9 @@ export async function openTicket(
   );
 
   const pattern = str(config, "namingPattern", "atendimento-{user}");
-  const username = (await guild.client.users.fetch(userId).catch(() => null))?.username ?? "membro";
+  const opener = await guild.client.users.fetch(userId).catch(() => null);
+  const username = opener?.username ?? "membro";
+  const openerName = opener?.globalName ?? opener?.username ?? "membro";
   const departmentSlug = (department ?? "atendimento")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -277,7 +376,7 @@ export async function openTicket(
       name,
       type: ChannelType.GuildText,
       parent: category?.type === ChannelType.GuildCategory ? category.id : undefined,
-      topic: `Atendimento de <@${userId}> · Wumpus`,
+      topic: `Atendimento #${ticketId} · ${department ?? "Geral"} · aguardando equipe`.slice(0, 1024),
       permissionOverwrites: [
         { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
         {
@@ -317,7 +416,8 @@ export async function openTicket(
       guildId: guild.id,
       channelId: channel.id,
       openerId: userId,
-      subject: intakeAnswers[0]?.answer.trim().slice(0, 80),
+      openerName,
+      subject: subjectOverride?.trim().slice(0, 80) ?? intakeAnswers[0]?.answer.trim().slice(0, 80),
       department,
       status: "open",
       claimedBy: null,
@@ -332,7 +432,8 @@ export async function openTicket(
       closeReason: null,
       feedback: null,
       feedbackAt: null,
-      feedbackStaffId: null
+      feedbackStaffId: null,
+      headerMessageId: null,
     };
 
     await mutate<Ticket>("tickets", (rows) => {
@@ -345,23 +446,19 @@ export async function openTicket(
       ? staffRoles.map((role) => `<@&${role.id}>`).join(" ")
       : "";
 
-    await channel.send({
-      content: [
-        `<@${userId}> · atendimento **#${ticketId}**${department ? ` · **${department}**` : ""}`,
-        ping
-      ].filter(Boolean).join("\n"),
-      components: [
-        {
-          type: 1,
-          components: [
-            { type: 2, style: 2, label: "Assumir", custom_id: id("ticket", "claim", ticketId) },
-            { type: 2, style: 4, label: "Encerrar", custom_id: id("ticket", "close_reason", ticketId) },
-            { type: 2, style: 2, label: "Transferir", custom_id: id("ticket", "transfer_pick", ticketId) },
-            { type: 2, style: 2, emoji: { name: "⚙️" }, custom_id: id("ticket", "manage", ticketId) },
-          ]
-        }
-      ]
+    const header = await channel.send({
+      content: [ticketHeaderText(ticket), ping].filter(Boolean).join("\n"),
+      components: ticketHeaderComponents(ticket),
+    } as never);
+    await mutate<Ticket>("tickets", (rows) => {
+      const row = rows.find((entry) => entry.guildId === guild.id && entry.id === ticketId);
+      if (row) row.headerMessageId = header.id;
+      return rows;
     });
+    // Fixado: em ticket movimentado, o estado e os botões somem no meio da conversa.
+    await header.pin().catch((error: unknown) => log.warn("nao foi possivel fixar o cabecalho do ticket", {
+      guildId: guild.id, ticketId, error: String(error).slice(0, 200),
+    }));
 
     for (const { question, answer } of intakeAnswers.slice(0, 5)) {
       const content = `**${question.slice(0, 45)}**\n${answer.slice(0, 1000)}`;
@@ -471,6 +568,16 @@ export async function claimTicket(
   );
 
   log.info("atendimento assumido", { guildId: guild.id, ticketId, staffId });
+
+  const ticket = await getTicket(guild.id, ticketId);
+  const channel = ticket ? guild.channels.cache.get(ticket.channelId) : null;
+  if (channel?.isTextBased() && "send" in channel) {
+    await channel.send({
+      content: `<@${staffId}> assumiu este atendimento.`,
+      allowedMentions: { users: [staffId], parse: [] },
+    }).catch(() => undefined);
+  }
+  await syncTicketHeader(guild, ticketId, log);
   return { ok: true };
 }
 
@@ -503,6 +610,7 @@ export async function setTicketWaiting(
     description: `<@${actorId}> marcou o atendimento como ${labels[label]}.`,
     data: { ticketId, waitingOn },
   }, log);
+  await syncTicketHeader(guild, ticketId, log);
   return true;
 }
 
@@ -668,6 +776,7 @@ export async function transferTicket(
   }, log);
   const channel = await guild.channels.fetch(ticket.channelId).catch(() => null);
   if (channel?.isTextBased() && "send" in channel) await channel.send({ content: `Atendimento transferido para <@${targetStaffId}>.`, allowedMentions: { users: [targetStaffId], parse: [] } }).catch(() => undefined);
+  await syncTicketHeader(guild, ticketId, log);
   log.info("atendimento transferido", { guildId: guild.id, ticketId, actorId, targetStaffId });
   return { ok: true };
 }
@@ -695,11 +804,16 @@ export async function closeTicket(
   const config = await moduleConfig(guild.id, "tickets");
   const messages = (await read<TicketMessage>("ticket_messages")).filter((row) => row.ticketId === ticketId && !row.internal);
 
-  // Quem encerra e o atendente quando existe — "encerrado por: bot" nao ajuda
-  // ninguem a ler o historico. O actor real fica no registro de auditoria.
+  // O actor real assina o transcript; "encerrado por: bot" nao ajuda ninguem.
+  // Na limpeza automatica, credita quem assumiu o atendimento.
+  const [openerName, claimedName] = await Promise.all([
+    displayName(guild, ticket.openerId),
+    ticket.claimedBy ? displayName(guild, ticket.claimedBy) : Promise.resolve(null),
+  ]);
+  // Encerramento automático roda como o bot: aí vale creditar quem assumiu.
   const closerName =
-    ticket.claimedBy && ticket.claimedBy !== actorId
-      ? await displayName(guild, ticket.claimedBy)
+    actorId === guild.client.user?.id && ticket.claimedBy
+      ? claimedName ?? ticket.claimedBy
       : await displayName(guild, actorId);
   const closedAt = new Date().toISOString();
 
@@ -708,12 +822,27 @@ export async function closeTicket(
       id: ticket.id,
       createdAt: ticket.createdAt,
       department: ticket.department,
-      claimedBy: ticket.claimedBy ? await displayName(guild, ticket.claimedBy) : null,
+      openedBy: openerName,
+      claimedBy: claimedName,
       closedBy: closerName,
       closedAt
     },
     guildName: guild.name,
     messages
+  });
+  const transcriptHtml = buildTranscriptHtml({
+    ticket: {
+      id: ticket.id,
+      subject: ticket.subject,
+      createdAt: ticket.createdAt,
+      department: ticket.department,
+      openedBy: openerName,
+      claimedBy: claimedName,
+      closedBy: closerName,
+      closedAt,
+    },
+    guildName: guild.name,
+    messages,
   });
 
   if (!(await saveTicketTranscript(guild.id, ticketId, transcript))) {
@@ -763,8 +892,8 @@ export async function closeTicket(
       const transcriptMessage = await transcriptChannel.send(transcriptUrl
         ? { content: `Transcrição do atendimento **#${ticketId}**: ${transcriptUrl}` }
         : {
-            content: `Transcricao local do atendimento **#${ticketId}** (${messages.length} mensagem(ns))`,
-            files: [{ attachment: Buffer.from(transcript, "utf8"), name: `atendimento-${ticketId}.txt` }]
+            content: `Transcrição do atendimento **#${ticketId}** (${messages.length} mensagem(ns))`,
+            files: [{ attachment: Buffer.from(transcriptHtml, "utf8"), name: `atendimento-${ticketId}.html` }]
           });
       transcriptChannelId = transcriptChannel.id;
       await mutate<Ticket>("tickets", (rows) => {
@@ -787,6 +916,7 @@ export async function closeTicket(
       row.closedAt = closedAt;
       row.closedBy = actorId;
       row.closeReason = reason;
+      row.waitingOn = null;
       row.transcript = transcript;
       if (ticket.firstResponseAt) row.firstResponseAt = ticket.firstResponseAt;
       row.lastActivityAt = ticket.lastActivityAt || closedAt;
@@ -1135,6 +1265,7 @@ export async function setTicketPriority(
       .send({ content: `Prioridade alterada para **${wanted}** por <@${actorId}>.` })
       .catch(() => undefined);
   }
+  await syncTicketHeader(guild, ticketId, log);
 
   await auditAndLog(
     guild,
@@ -1178,10 +1309,13 @@ export async function reopenClosedTicket(
   if (!previous || previous.status !== "closed") {
     return { ok: false, error: "Este atendimento nao esta encerrado ou nao existe." };
   }
+  if (actorId !== previous.openerId && !(await canManageTickets(guild, actorId))) {
+    return { ok: false, error: "Somente quem abriu o atendimento ou a equipe pode reabri-lo." };
+  }
 
   // openTicket aplica TODAS as regras de sempre: limite por usuario,
   // namingPattern, categoria, permissoes, ping de staff e auditoria.
-  const opened = await openTicket(guild, previous.openerId, previous.department, log);
+  const opened = await openTicket(guild, previous.openerId, previous.department, log, [], previous.subject);
   if (!opened.ok) return opened;
 
   await auditAndLog(
@@ -1214,17 +1348,24 @@ export async function reopenClosedTicket(
 
   // O histórico é exportado como anexo apenas quando o plano inclui transcrições.
   const messages = (await read<TicketMessage>("ticket_messages")).filter((row) => row.ticketId === ticketId && !row.internal);
-  const transcript = buildTranscript({
+  const [openedBy, claimedBy, closedBy] = await Promise.all([
+    displayName(guild, previous.openerId),
+    previous.claimedBy ? displayName(guild, previous.claimedBy) : Promise.resolve(null),
+    previous.closedBy ? displayName(guild, previous.closedBy) : Promise.resolve(null),
+  ]);
+  const transcriptHtml = buildTranscriptHtml({
     ticket: {
       id: ticketId,
+      subject: previous.subject,
       createdAt: previous.createdAt,
       department: previous.department,
-      claimedBy: previous.claimedBy,
-      closedBy: previous.closedBy,
-      closedAt: previous.closedAt
+      openedBy,
+      claimedBy,
+      closedBy,
+      closedAt: previous.closedAt,
     },
     guildName: guild.name,
-    messages
+    messages,
   });
 
   const channel = guild.channels.cache.get(opened.channelId);
@@ -1233,7 +1374,7 @@ export async function reopenClosedTicket(
       ? { content: `**Histórico do atendimento #${ticketId}:** ${previous.transcriptUrl}` }
       : {
           content: `**Reaberto do atendimento #${ticketId}** — historico em anexo.`,
-          files: [{ attachment: Buffer.from(transcript, "utf8"), name: `atendimento-${ticketId}.txt` }]
+          files: [{ attachment: Buffer.from(transcriptHtml, "utf8"), name: `atendimento-${ticketId}.html` }]
         }).catch(() => undefined);
   }
 

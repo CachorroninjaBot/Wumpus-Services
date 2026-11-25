@@ -154,6 +154,7 @@ export type BotTicketRecord = {
   guildId: string;
   channelId: string;
   openerId: string;
+  openerName?: string | null;
   subject?: string;
   department: string | null;
   status: "open" | "claimed" | "closed";
@@ -168,6 +169,7 @@ export type BotTicketRecord = {
   priority: "low" | "normal" | "high" | "urgent";
   firstResponseAt: string | null;
   firstRespondedBy?: string | null;
+  headerMessageId?: string | null;
   feedback: { rating: number; comment: string | null } | null;
   feedbackAt?: string | null;
   feedbackStaffId?: string | null;

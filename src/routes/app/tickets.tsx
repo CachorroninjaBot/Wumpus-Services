@@ -1,32 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ArrowDown,
-  ArrowUp,
-  ExternalLink,
-  Inbox,
-  Plus,
-  Search,
-  Trash2,
-} from "lucide-react";
+import { useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Notice } from "@/components/ui/notice";
 import { Badge } from "@/components/ui/badge";
 import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { asList, asString, planAllows } from "@/lib/wumpus/engine";
 import { useActiveGuild, useModule, useWumpus } from "@/lib/wumpus/store";
 import { usePublishPanel } from "@/lib/wumpus/use-publish-panel";
-import { getGuildTickets } from "@/lib/wumpus/runtime-store";
-import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 import { ExclusiveButton } from "@/components/exclusive-button";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { DiscordPanel, DiscordModalPreview } from "@/components/discord-panel";
+import { TicketConsole } from "@/components/tickets/ticket-console";
 import type { TicketDepartmentConfig } from "@/lib/wumpus/types";
-import { cn, formatRelative } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
-import { EmptyState } from "@/components/empty-state";
 import { NumberField } from "@/components/protect/helpers";
 
 export const Route = createFileRoute("/app/tickets")({ component: TicketsPage });
@@ -37,22 +25,6 @@ const discordButtonStyles = [
   { value: 3, label: "Verde", preview: "success" as const },
   { value: 4, label: "Vermelho", preview: "danger" as const },
 ];
-
-const statusLabel: Record<string, string> = {
-  open: "Aberto",
-  claimed: "Em atendimento",
-  closed: "Encerrado",
-  archived: "Arquivado",
-};
-
-type ArchiveTicket = {
-  id: string;
-  number: number;
-  subject: string;
-  department: string;
-  status: string;
-  createdAt: number;
-};
 
 const ticketTemplates: Record<string, { label: string; description: string; config: Partial<Record<string, unknown>> }> = {
   support: {
@@ -211,61 +183,11 @@ function TicketsPage() {
     }
   }
 
-  // Registro de consulta: as conversas acontecem no Discord; aqui listamos e linkamos.
-  const [archive, setArchive] = useState<ArchiveTicket[]>([]);
-  const [archiveQuery, setArchiveQuery] = useState("");
-  const [archiveStatus, setArchiveStatus] = useState("open");
-  const [archiveError, setArchiveError] = useState<string | null>(null);
-  const [archiveLoading, setArchiveLoading] = useState(false);
-  const [archiveLoadedFor, setArchiveLoadedFor] = useState<string | null>(null);
-
-  const loadArchive = useCallback(async () => {
-    const token = getStoredSessionToken();
-    if (!token || !gid) {
-      setArchiveError("Entre com Discord para consultar o registro de atendimentos.");
-      setArchiveLoadedFor(gid);
-      return;
-    }
-    setArchiveLoading(true);
-    setArchiveError(null);
-    try {
-      const rows = await getGuildTickets({ data: { token, guildId: gid } });
-      setArchive(rows.map((row) => ({
-        id: row.channelName || row.id,
-        number: row.number,
-        subject: row.subject,
-        department: row.department ?? "Geral",
-        status: row.status,
-        createdAt: row.createdAt,
-      })));
-    } catch (error) {
-      setArchiveError(error instanceof Error ? error.message : "Não foi possível carregar o registro de atendimentos.");
-    } finally {
-      setArchiveLoading(false);
-      setArchiveLoadedFor(gid);
-    }
-  }, [gid]);
-
-  useEffect(() => {
-    setArchive([]);
-    setArchiveLoadedFor(null);
-    setArchiveError(null);
-  }, [gid]);
-
-  const visibleArchive = useMemo(() => {
-    const needle = archiveQuery.trim().toLocaleLowerCase("pt-BR");
-    return archive
-      .filter((t) => archiveStatus === "all" || t.status === archiveStatus)
-      .filter((t) => !needle || `#${t.number} ${t.subject} ${t.department}`.toLocaleLowerCase("pt-BR").includes(needle))
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, 50);
-  }, [archive, archiveQuery, archiveStatus]);
-
   return (
     <div key={gid} className="mx-auto flex max-w-7xl flex-col gap-8">
       <PageHeader
         title="Atendimento"
-        description="Monte o painel que recebe pedidos de ajuda. As conversas acontecem no Discord, em canais privados — aqui você só cria o painel e acompanha o histórico."
+        description="Monte o painel que recebe pedidos de ajuda e acompanhe os atendimentos no Discord. Na aba Atendimentos você lê a conversa, responde, assume e encerra sem sair do painel."
       />
 
       <div className="flex flex-wrap items-center gap-1 rounded-xl border border-border bg-card p-1 w-fit" role="tablist" aria-label="Área de atendimento">
@@ -280,59 +202,7 @@ function TicketsPage() {
       </div>
 
       {activeView === "archive" ? (
-        <Card className="space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="m-0 text-lg font-semibold tracking-tight">Registro de atendimentos</h2>
-              <p className="m-0 mt-1 max-w-2xl text-sm text-muted-foreground">
-                Cada ticket vive no Discord, no canal privado criado para a pessoa. Abra o canal para responder — a conversa inteira acontece lá.
-              </p>
-            </div>
-            <Button variant="outline" disabled={archiveLoading} onClick={() => void loadArchive()}>
-              {archiveLoading ? "Buscando…" : archiveLoadedFor === gid ? "Atualizar" : "Carregar atendimentos"}
-            </Button>
-          </div>
-          {archiveError ? <Notice tone="warning" className="m-0">{archiveError}</Notice> : null}
-          <div className="grid gap-2 rounded-xl border border-border bg-muted/30 p-3 sm:grid-cols-[minmax(200px,1fr)_180px]">
-            <div className="relative">
-              <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input aria-label="Buscar atendimentos" className="pl-9" value={archiveQuery} onChange={(event) => setArchiveQuery(event.target.value)} placeholder="Buscar por assunto ou número" />
-            </div>
-            <NativeSelect aria-label="Filtrar por status" value={archiveStatus} onChange={(event) => setArchiveStatus(event.target.value)}>
-              <option value="open">Abertos</option>
-              <option value="claimed">Em atendimento</option>
-              <option value="closed">Encerrados</option>
-              <option value="all">Todos</option>
-            </NativeSelect>
-          </div>
-          {visibleArchive.length === 0 ? (
-            <EmptyState
-              icon={<Inbox aria-hidden="true" className="size-8 text-muted-foreground" />}
-              title={archiveLoading ? "Carregando…" : "Nenhum atendimento nesta vista"}
-              description="Publique o painel para receber os primeiros tickets ou ajuste os filtros. Cada linha abre o canal no Discord."
-            />
-          ) : (
-            <ul className="m-0 divide-y divide-border p-0">
-              {visibleArchive.map((t) => (
-                <li key={t.id} className="flex flex-wrap items-center gap-3 py-3">
-                  <span className="font-mono-num text-sm font-semibold">#{t.number}</span>
-                  <span className="min-w-0 flex-1 truncate text-sm">{t.subject}</span>
-                  <Badge tone="default">{t.department}</Badge>
-                  <Badge tone={t.status === "open" ? "ok" : t.status === "claimed" ? "info" : "default"}>{statusLabel[t.status] ?? t.status}</Badge>
-                  <span className="hidden text-xs text-muted-foreground sm:inline">{formatRelative(t.createdAt)}</span>
-                  <a
-                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-primary hover:underline"
-                    href={`https://discord.com/channels/${gid}/${t.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Abrir no Discord <ExternalLink aria-hidden="true" className="size-3.5" />
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        <TicketConsole guildId={gid} />
       ) : (
         <div className="space-y-8">
           <div className="flex flex-wrap items-start justify-between gap-3">

@@ -164,7 +164,7 @@ export function defaultButtons(module: string, config?: Record<string, unknown>)
       label: (label || "Abrir atendimento").slice(0, 80),
       customId: id("ticket", "open"),
       style,
-      ...(emoji ? { emoji } : { emoji: "🎫" }),
+      ...(emoji ? { emoji } : {}),
     }];
   }
   if (module === "forms") {

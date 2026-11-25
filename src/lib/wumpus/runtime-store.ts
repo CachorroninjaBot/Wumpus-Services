@@ -516,7 +516,13 @@ export const getGuildTickets = createServerFn({ method: "POST" })
     const cutoff = Date.now() - data.days * 24 * 60 * 60_000;
     return tickets
       .filter((ticket) => ticket.guildId === data.guildId)
-      .filter((ticket) => ticket.status !== "closed" || (Date.parse(ticket.createdAt) || 0) >= cutoff)
+      .filter((ticket) => {
+        if (ticket.status !== "closed") return true;
+        // O corte de arquivo é pelo fechamento, não pela abertura: um ticket
+        // aberto há 100 dias e encerrado ontem ainda é histórico recente.
+        const closedAt = Date.parse(ticket.closedAt ?? "") || Date.parse(ticket.createdAt) || 0;
+        return closedAt >= cutoff;
+      })
       .sort((a, b) => b.id - a.id)
       .slice(data.offset, data.offset + data.limit)
       .map((ticket) => ({
@@ -524,6 +530,7 @@ export const getGuildTickets = createServerFn({ method: "POST" })
         guildId: ticket.guildId,
         number: ticket.id,
         openerId: ticket.openerId,
+        openerName: ticket.openerName ?? null,
         claimedBy: ticket.claimedBy,
         department: ticket.department ?? "Geral",
         subject: ticket.subject?.slice(0, 80) || `Atendimento #${ticket.id}`,
@@ -531,10 +538,14 @@ export const getGuildTickets = createServerFn({ method: "POST" })
         waitingOn: ticket.waitingOn ?? null,
         priority: ticket.priority,
         tags: [] as string[],
+        channelId: ticket.channelId,
         channelName: ticket.channelId,
         createdAt: Date.parse(ticket.createdAt) || 0,
+        lastActivityAt: ticket.lastActivityAt ? Date.parse(ticket.lastActivityAt) || null : null,
         firstResponseAt: ticket.firstResponseAt ? Date.parse(ticket.firstResponseAt) || null : null,
         closedAt: ticket.closedAt ? Date.parse(ticket.closedAt) || null : null,
+        closedBy: ticket.closedBy ?? null,
+        closeReason: ticket.closeReason ?? null,
         feedback: ticket.feedback,
         transcript: canReadTranscript ? ticket.transcript ?? null : null,
         transcriptUrl: ticket.transcriptUrl ?? null,
