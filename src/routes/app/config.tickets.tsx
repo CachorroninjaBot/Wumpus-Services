@@ -960,9 +960,11 @@ function TicketPanelSettings() {
                 {readiness?.status === "online" ? (
                   <p className="m-0 text-xs text-muted-foreground">
                     {readiness.pingMs != null ? `${readiness.pingMs} ms de ping. ` : ""}
-                    {missingPermissions.length
-                      ? `Faltam permissões: ${missingPermissions.join(", ")}.`
-                      : "Permissões essenciais concedidas para abrir e organizar tickets."}
+                    {!readiness.permissions
+                      ? "Não foi possível ler as permissões do bot neste servidor."
+                      : missingPermissions.length
+                        ? `Faltam permissões: ${missingPermissions.join(", ")}.`
+                        : "Permissões essenciais concedidas para abrir e organizar tickets."}
                   </p>
                 ) : readiness?.status === "not_installed" ? (
                   <p className="m-0 text-xs text-muted-foreground">Adicione o bot ao servidor antes de publicar o painel.</p>

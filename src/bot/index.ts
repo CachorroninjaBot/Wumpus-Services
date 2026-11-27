@@ -1624,11 +1624,16 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   // A varredura de canais/cargos de todos os servidores é o ponto mais caro do
   // heartbeat. Ela só muda quando a estrutura muda, então fica em cache e é
   // refeita no próximo envio depois de um evento relevante.
-  let guildResources = buildGuildResources();
+  //
+  // Começa em `null` de propósito: este trecho roda antes do login, quando o
+  // cache de servidores ainda está vazio. Construir aqui gravaria um snapshot
+  // vazio que só seria refeito num evento de canal/cargo — foi o que deixou os
+  // seletores de canal e cargo da dashboard sem opções em produção.
+  let guildResources: ReturnType<typeof buildGuildResources> | null = null;
   let resourcesDirty = false;
 
   const reportHealth = (status: "online" | "offline") => {
-    if (resourcesDirty) {
+    if (resourcesDirty || guildResources === null) {
       guildResources = buildGuildResources();
       resourcesDirty = false;
     }
@@ -1654,6 +1659,9 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   client.on(Events.GuildRoleDelete, markResourcesDirty);
   client.on(Events.GuildRoleUpdate, markResourcesDirty);
   client.on(Events.GuildUpdate, markResourcesDirty);
+  client.on(Events.GuildCreate, markResourcesDirty);
+  client.on(Events.GuildDelete, markResourcesDirty);
+  client.on(Events.GuildUnavailable, markResourcesDirty);
 
   client.once(Events.ClientReady, async () => {
     log.info("bot conectado ao Discord", { servidores: client.guilds.cache.size });

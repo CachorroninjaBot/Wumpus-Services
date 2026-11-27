@@ -319,12 +319,18 @@ export const useWumpus = create<WumpusStore>((set, get) => {
     }
   };
 
-  const refreshGuildResources = async (guildId: string) => {
+  const refreshGuildResources = async (guildId: string, attempt = 0) => {
     const token = getStoredSessionToken();
     if (!token || !guildId) return;
     try {
       const resources = await getDiscordGuildResources({ data: { token, guildId } });
       if (get().activeGuildId !== guildId) return;
+      // Resposta vazia = bot offline ou sem snapshot daquele servidor. Não apaga
+      // o que já estava sincronizado e tenta mais uma vez antes de desistir.
+      if (!resources.channels.length && !resources.roles.length) {
+        if (attempt < 1) setTimeout(() => { if (get().activeGuildId === guildId) void refreshGuildResources(guildId, attempt + 1); }, 20_000);
+        return;
+      }
       const current = get();
       const channels = resources.channels.map((channel) => ({ ...channel, parentId: null }));
       const roles = resources.roles.map((role) => ({ ...role, staff: false }));

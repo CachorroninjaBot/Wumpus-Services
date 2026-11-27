@@ -137,6 +137,13 @@ Não dá para testar OAuth nem enviar mensagem no Discord por script. O caminho 
   bloqueiam a integração. O deploy executa apenas build, migrações e start.
 - Vários restarts seguidos colidem ("graceful restart already in progress").
   Esperar.
+- **Snapshot de recursos antes do ready**: `buildGuildResources()` rodava na
+  inicialização, com o cache de servidores ainda vazio, e o resultado ficava em
+  cache até algum evento de canal/cargo. Em produção o heartbeat publicava
+  `guildResources: {}` para sempre — todos os seletores de canal/cargo da
+  dashboard ficavam vazios e as permissões apareciam como "concedidas" por serem
+  `null`. Agora o snapshot é preguiçoso (`null` = refaz no próximo heartbeat) e
+  `GuildCreate/GuildDelete/GuildUnavailable` também marcam sujo.
 
 ## Pendências fora do escopo de tickets
 

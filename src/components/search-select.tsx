@@ -5,10 +5,10 @@ import { cn } from "@/lib/utils";
 export type SearchOption = { id: string; label: string; description?: string; icon?: ReactNode };
 
 export function SearchSelect({
-  id, value, options, placeholder, eyebrow, onChange, className, disabled = false,
+  id, value, options, placeholder, eyebrow, onChange, className, disabled = false, emptyText = "Nenhuma opção disponível.",
 }: {
   id?: string; value: string; options: SearchOption[]; placeholder: string; eyebrow?: string;
-  onChange: (value: string) => void; className?: string; disabled?: boolean;
+  onChange: (value: string) => void; className?: string; disabled?: boolean; emptyText?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -71,7 +71,7 @@ export function SearchSelect({
           {option.icon ? <span className="shrink-0">{option.icon}</span> : null}
           <span className="min-w-0 flex-1"><span className="block truncate font-medium">{option.label}</span>{option.description ? <span className="block truncate text-xs text-muted-foreground">{option.description}</span> : null}</span>
           {option.id === value ? <Check aria-hidden="true" className="size-4 shrink-0 text-primary" /> : null}
-        </button>) : <p className="m-0 px-3 py-5 text-center text-sm text-muted-foreground">Nenhum resultado para “{query}”.</p>}
+        </button>) : <p className="m-0 px-3 py-5 text-center text-sm text-muted-foreground">{options.length ? `Nenhum resultado para “${query}”.` : emptyText}</p>}
       </div>
       <p className="m-0 border-t border-border px-3 py-2 text-xs text-muted-foreground">{filtered.length} {filtered.length === 1 ? "opção" : "opções"}</p>
     </div> : null}

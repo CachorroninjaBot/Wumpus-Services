@@ -25,7 +25,10 @@ export function DiscordSelect({ id, value, onChange, kind, placeholder = "Seleci
         }));
 
   const selected = options.find((option) => option.id === value || option.name.replace(/^[#▰@ ]+/, "") === value.replace(/^[#▰@ ]+/, ""));
-  return <SearchSelect id={id} value={selected?.id ?? ""} options={options.map((option) => ({ id: option.id, label: option.name }))} onChange={onChange} placeholder={placeholder} className={className} />;
+  const emptyText = kind === "role"
+    ? "Nenhum cargo sincronizado. O bot precisa estar online no servidor."
+    : "Nenhum canal sincronizado. O bot precisa estar online no servidor.";
+  return <SearchSelect id={id} value={selected?.id ?? ""} options={options.map((option) => ({ id: option.id, label: option.name }))} onChange={onChange} placeholder={placeholder} className={className} emptyText={emptyText} />;
 }
 
 export function DiscordMultiSelect({ value, onChange, kind = "role", placeholder }: {
