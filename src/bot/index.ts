@@ -965,21 +965,7 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
       await interaction.reply({ content: "Este atendimento não está disponível.", ephemeral: true });
       return;
     }
-    const controls: ActionRowBuilder<StringSelectMenuBuilder | UserSelectMenuBuilder>[] = [];
-    const ticketConfig = await moduleConfig(guild.id, "tickets");
-    if (bool(ticketConfig, "priorityEnabled", true)) {
-      const priority = new StringSelectMenuBuilder()
-        .setCustomId(id("ticket", "manage_priority", ticketId))
-        .setPlaceholder(`Prioridade atual: ${ticket.priority}`)
-        .addOptions(
-          { label: "Baixa", value: "low", default: ticket.priority === "low" },
-          { label: "Normal", value: "normal", default: ticket.priority === "normal" },
-          { label: "Alta", value: "high", default: ticket.priority === "high" },
-          { label: "Urgente", value: "urgent", default: ticket.priority === "urgent" },
-        );
-      controls.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(priority));
-    }
-    controls.push(
+    const controls: ActionRowBuilder<UserSelectMenuBuilder>[] = [
       new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
         new UserSelectMenuBuilder()
           .setCustomId(id("ticket", "manage_add_member", ticketId))
@@ -994,7 +980,7 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
           .setMinValues(1)
           .setMaxValues(1),
       ),
-    );
+    ];
     await interaction.reply({
       content: `Controles da equipe · atendimento #${ticketId}`,
       components: [
@@ -1002,40 +988,11 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
         {
           type: 1,
           components: [
-            { type: 2, style: 2, label: "Resposta com IA", custom_id: id("ticket", "manage_ai", ticketId) },
-            { type: 2, style: 2, label: "Aguardar usuário", custom_id: id("ticket", "manage_wait_user", ticketId) },
-            { type: 2, style: 2, label: "Aguardar equipe", custom_id: id("ticket", "manage_wait_staff", ticketId) },
-            { type: 2, style: 2, label: "Retomar", custom_id: id("ticket", "manage_resume", ticketId) },
-            { type: 2, style: 2, label: "Transferir", custom_id: id("ticket", "transfer_pick", ticketId) },
+            { type: 2, style: 2, label: "Resposta com IA", emoji: { name: "✨" }, custom_id: id("ticket", "manage_ai", ticketId) },
+            { type: 2, style: 2, label: "Transferir", emoji: { name: "🔄️" }, custom_id: id("ticket", "transfer_pick", ticketId) },
           ],
         },
       ] as never,
-      ephemeral: true,
-    });
-    return;
-  }
-
-  if (kind === "ticket" && ["manage_wait_user", "manage_wait_staff", "manage_resume"].includes(action)) {
-    const ticketId = Number(args[0]);
-    if (!(await canManageTicket(guild, interaction.user.id))) {
-      await interaction.reply({ content: "Somente a equipe pode atualizar este atendimento.", ephemeral: true });
-      return;
-    }
-    const ticket = await getTicket(guild.id, ticketId);
-    if (!ticket || ticket.channelId !== interaction.channelId) {
-      await interaction.reply({ content: "Este atendimento não está disponível neste canal.", ephemeral: true });
-      return;
-    }
-    const waitingOn = action === "manage_wait_user" ? "user" : action === "manage_wait_staff" ? "staff" : null;
-    const updated = await setTicketWaiting(guild, ticketId, interaction.user.id, waitingOn, log);
-    await interaction.reply({
-      content: updated
-        ? waitingOn === "user"
-          ? "Atendimento marcado como aguardando o usuário. O SLA continua contando."
-          : waitingOn === "staff"
-            ? "Atendimento marcado como aguardando a equipe. O SLA continua contando."
-            : "Atendimento retomado."
-        : "O estado já estava assim ou o atendimento foi encerrado.",
       ephemeral: true,
     });
     return;
@@ -1531,37 +1488,6 @@ async function handleTicketTransferSelect(
   );
 }
 
-async function handleTicketPrioritySelect(
-  interaction: StringSelectMenuInteraction,
-  log: Logger,
-): Promise<void> {
-  const parsed = parseId(interaction.customId);
-  const guild = interaction.guild;
-  if (!guild || parsed?.kind !== "ticket" || parsed.action !== "manage_priority") return;
-  if (!(await canManageTicket(guild, interaction.user.id))) {
-    await interaction.reply({ content: "Somente a equipe pode alterar a prioridade.", ephemeral: true });
-    return;
-  }
-  const ticketId = Number(parsed.args[0]);
-  const ticket = await getTicket(guild.id, ticketId);
-  const priorityValues: Record<string, TicketPriority> = {
-    low: "low",
-    normal: "normal",
-    high: "high",
-    urgent: "urgent",
-  };
-  const priority = priorityValues[interaction.values[0] ?? ""];
-  if (!ticket || ticket.channelId !== interaction.channelId || !priority) {
-    await interaction.reply({ content: "Este atendimento ou prioridade não está disponível.", ephemeral: true });
-    return;
-  }
-  const updated = await setTicketPriority(guild, ticketId, priority, interaction.user.id, log);
-  await interaction.reply({
-    content: updated ? `Prioridade de #${ticketId} alterada para **${priority}**.` : "A prioridade já estava selecionada ou o ticket foi encerrado.",
-    ephemeral: true,
-  });
-}
-
 export function createBot(token: string, log: Logger = consoleLogger): BotHandle {
   const client = new Client({
     intents: INTENTS,
@@ -1978,8 +1904,6 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
             await handleFormSelect(interaction, parsed.args[0] ?? "", log);
           } else if (parsed?.kind === "ticket" && parsed.action === "dept") {
             await handleDepartmentSelect(interaction, log);
-          } else if (parsed?.kind === "ticket" && parsed.action === "manage_priority") {
-            await handleTicketPrioritySelect(interaction, log);
           }
           return;
         }
