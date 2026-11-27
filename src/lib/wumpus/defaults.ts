@@ -52,6 +52,9 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     businessHoursStart: 9,
     businessHoursEnd: 18,
     businessHoursDays: [1, 2, 3, 4, 5],
+    businessHoursMode: "warn",
+    businessHoursUtcOffset: -3,
+    businessHoursClosedMessage: "",
     slaWarningMinutes: 60,
     namingPattern: "atendimento-{user}",
     welcomeMessage:

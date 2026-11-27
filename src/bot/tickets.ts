@@ -27,7 +27,7 @@ import { id } from "./ids.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
 import { buildPanelPayload, defaultButtons } from "./panels.ts";
-import { businessHoursLabel, businessHoursNotice, isWithinBusinessHours } from "../lib/wumpus/business-hours.ts";
+import { businessHoursBlocks, businessHoursClosedReply, businessHoursLabel, businessHoursNotice, isWithinBusinessHours } from "../lib/wumpus/business-hours.ts";
 import {
   normalizeTicketPanels,
   panelTicketTypes,
@@ -500,6 +500,11 @@ export async function openTicket(
 
   if (list(config, "blacklistedUserIds").includes(userId)) {
     return { ok: false, error: "Voce esta bloqueado(a) de abrir atendimentos neste servidor. Fale com a equipe em outro canal." };
+  }
+
+  // Modo "bloquear": fora do horário o painel recusa a abertura em vez de só avisar.
+  if (!isWithinBusinessHours(config) && businessHoursBlocks(config)) {
+    return { ok: false, error: businessHoursClosedReply(config) };
   }
 
   const maxOpen = Math.max(1, Math.trunc(num(config, "maxOpenPerUser", 1)));

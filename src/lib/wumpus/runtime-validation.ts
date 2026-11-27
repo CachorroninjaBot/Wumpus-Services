@@ -16,6 +16,7 @@ const enumValues: Record<string, readonly string[]> = {
   response: ["alert", "lockdown_review", "auto"],
   panelFormat: ["components_v2", "embed"],
   departmentDisplayMode: ["select", "buttons"],
+  businessHoursMode: ["warn", "block"],
   type: ["short", "paragraph", "select"],
 };
 
@@ -39,7 +40,11 @@ function matchesDefault(value: unknown, example: unknown, depth = 0, key = "", r
   if (typeof example === "string") {
     return typeof value === "string" && value.length <= 4000 && (!enumValues[key] || enumValues[key]!.includes(value));
   }
-  if (typeof example === "number") return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000;
+  // Exemplos negativos (ex.: fuso UTC-3) liberam valores negativos até o
+  // mesmo piso do exemplo; o teto continua igual para todos.
+  if (typeof example === "number") {
+    return typeof value === "number" && Number.isFinite(value) && value >= Math.min(0, example) && value <= 1_000_000_000;
+  }
   if (typeof example === "boolean") return typeof value === "boolean";
   return value === example;
 }
@@ -196,6 +201,15 @@ export const publishInputSchema = z.object({
   for (const key of ["panelButtonStyle", "departmentButtonStyle"]) {
     if (ticketConfig?.[key] !== undefined && ![1, 2, 3, 4].includes(Number(ticketConfig[key]))) {
       ctx.addIssue({ code: "custom", message: `Estilo inválido para tickets.${key}.` });
+    }
+  }
+  if (ticketConfig?.businessHoursEnabled === true) {
+    const offset = Number(ticketConfig.businessHoursUtcOffset ?? 0);
+    if (!Number.isInteger(offset) || offset < -12 || offset > 14) {
+      ctx.addIssue({ code: "custom", message: "O fuso do horário de atendimento precisa ser um inteiro entre -12 e 14." });
+    }
+    if (typeof ticketConfig.businessHoursClosedMessage === "string" && ticketConfig.businessHoursClosedMessage.length > 500) {
+      ctx.addIssue({ code: "custom", message: "A mensagem de fora do horário deve ter até 500 caracteres." });
     }
   }
   if (ticketConfig?.departmentDisplayMode === "buttons" && Array.isArray(departments) && departments.length > 5) {

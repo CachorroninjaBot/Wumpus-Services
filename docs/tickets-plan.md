@@ -178,3 +178,25 @@ Não dá para testar OAuth nem enviar mensagem no Discord por script. O caminho 
     `runtime-validation.ts` limita pergunta a 200 e resposta a 2.000 chars).
   - Tudo gated por `planAllows(plan, "ai")` + `aiSupportEnabled`, igual ao
     botão "Resposta com IA".
+
+## Horário de atendimento e contexto da IA do balão (2026-11-27)
+
+- **Horário de atendimento** (`lib/wumpus/business-hours.ts`): sistema completo
+  com fuso configurável (`businessHoursUtcOffset`, padrão -3/Brasília), dias da
+  semana, janela que vira a noite (ex.: 22h–6h), dois modos fora do horário —
+  `warn` (padrão; abre o ticket e avisa) e `block` (`businessHoursMode`;
+  recusa a abertura no `createTicket` com a resposta de fechado) — e mensagem
+  personalizada (`businessHoursClosedMessage`, até 500 chars). O rótulo do
+  horário (ex.: "seg, ter, qua, qui, sex das 9h às 18h (UTC-3)") aparece no
+  aviso, na resposta de recusa e no rodapé do painel publicado. Configurado na
+  seção "Horário de atendimento" de `config.tickets.tsx`; `runtime-validation.ts`
+  valida fuso (-12..14) e tamanho da mensagem.
+- **Contexto do servidor na IA do balão** (`lib/wumpus/assistant.ts`): a função
+  `guildKnowledgeContext` injeta no lado do servidor, na primeira mensagem da
+  conversa, um bloco "Conhecimento do servidor" com o horário de atendimento
+  configurado, departamentos (até 10) e os artigos aprovados da base de
+  conhecimento mais parecidos com a pergunta (ranking por palavras-chave ≥4
+  chars contra título+tags+corpo; top 6, corpo cortado em 600 chars, bloco
+  limitado a ~3.600 chars). O prompt do sistema orienta a tratar esses artigos
+  como resposta oficial do servidor. Falha na leitura do runtime degrada em
+  silêncio (bloco vazio), sem quebrar o chat.

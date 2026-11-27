@@ -869,10 +869,36 @@ function TicketPanelSettings() {
                       <ToggleRow label="Horário de atendimento" description="Quem abrir fora do horário recebe um aviso; o ticket continua aberto." checked={Boolean(tcfg.config.businessHoursEnabled)} onChange={(value) => patchTickets({ businessHoursEnabled: value })} />
                       {tcfg.config.businessHoursEnabled ? (
                         <>
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <NumberField id="ticket-hours-start" label="Abre às (UTC)" min={0} max={23} value={Number(tcfg.config.businessHoursStart ?? 9)} onChange={(businessHoursStart) => patchTickets({ businessHoursStart })} />
-                            <NumberField id="ticket-hours-end" label="Fecha às (UTC; 24 = meia-noite)" min={0} max={24} value={Number(tcfg.config.businessHoursEnd ?? 18)} onChange={(businessHoursEnd) => patchTickets({ businessHoursEnd })} />
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <NumberField id="ticket-hours-start" label="Abre às" min={0} max={23} value={Number(tcfg.config.businessHoursStart ?? 9)} onChange={(businessHoursStart) => patchTickets({ businessHoursStart })} />
+                            <NumberField id="ticket-hours-end" label="Fecha às (24 = meia-noite)" min={0} max={24} value={Number(tcfg.config.businessHoursEnd ?? 18)} onChange={(businessHoursEnd) => patchTickets({ businessHoursEnd })} />
+                            <Field label="Fuso horário">
+                              <NativeSelect value={String(tcfg.config.businessHoursUtcOffset ?? -3)} onChange={(event) => patchTickets({ businessHoursUtcOffset: Number(event.target.value) })}>
+                                {[5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5].map((magnitude) => {
+                                  const offset = 5 - magnitude;
+                                  return <option key={offset} value={offset}>{`UTC${offset > 0 ? "+" : ""}${offset}${offset === -3 ? " (Brasília)" : ""}`}</option>;
+                                })}
+                              </NativeSelect>
+                            </Field>
                           </div>
+                          <Field label="Fora do horário">
+                            <NativeSelect value={String(tcfg.config.businessHoursMode ?? "warn")} onChange={(event) => patchTickets({ businessHoursMode: event.target.value })}>
+                              <option value="warn">Avisar e abrir mesmo assim</option>
+                              <option value="block">Bloquear a abertura</option>
+                            </NativeSelect>
+                            <p className="m-0 text-xs text-muted-foreground">No modo bloquear, quem tenta abrir recebe a mensagem abaixo e o ticket não é criado.</p>
+                          </Field>
+                          <Field label="Mensagem fora do horário (opcional)">
+                            <Textarea
+                              key={asString(tcfg.config.businessHoursClosedMessage)}
+                              rows={2}
+                              maxLength={500}
+                              defaultValue={asString(tcfg.config.businessHoursClosedMessage)}
+                              onBlur={(event) => patchTickets({ businessHoursClosedMessage: event.target.value.trim() })}
+                              placeholder="Ex.: Estamos fechados agora, mas deixe sua mensagem no próximo horário!"
+                            />
+                            <p className="m-0 text-xs text-muted-foreground">Vazio usa o aviso padrão. O horário configurado é adicionado automaticamente no final.</p>
+                          </Field>
                           <div className="space-y-1.5">
                             <Label>Dias de atendimento</Label>
                             <div className="flex flex-wrap gap-1.5" role="group" aria-label="Dias de atendimento">
@@ -898,7 +924,7 @@ function TicketPanelSettings() {
                                 );
                               })}
                             </div>
-                            <p className="m-0 text-xs text-muted-foreground">O fuso é o do servidor do bot (UTC). O horário também aparece no rodapé do painel.</p>
+                            <p className="m-0 text-xs text-muted-foreground">O horário também aparece no rodapé do painel publicado.</p>
                           </div>
                         </>
                       ) : null}
