@@ -23,7 +23,8 @@
     "test": "node --experimental-strip-types --test --test-concurrency=4 src/**/*.test.ts",
     "verify": "npm run typecheck && npm run test",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "deploy:pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-deploy.ps1"
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",

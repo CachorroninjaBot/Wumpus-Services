@@ -69,6 +69,24 @@ licenças são guardadas no banco compartilhado; o snapshot de servidores
 autorizados não fica no cookie do navegador. O bot e a dashboard devem usar a
 mesma `DATABASE_URL` para aplicar revogações e alterações de plano.
 
+## Deploy (Shard Cloud)
+
+A dashboard e o bot rodam no mesmo app do Shard Cloud
+(`wumpus-dashboard.shardweb.app`), com 2816 MB — o teto do plano. O build do
+Vite/Rolldown não cabe nessa RAM e o container morre com `OUT_OF_MEMORY`, então
+o upload leva o `.output` já compilado e o `CUSTOM_COMMAND` do `.shardcloud`
+só compila quando o pacote não traz `.output`.
+
+```bash
+npm run build
+npm run deploy:pack   # gera deploy.zip (inclui .output, sem .env/node_modules)
+```
+
+Envie o `deploy.zip` no painel do app. Na subida, o container roda
+`npm run db:migrate` e `npm run start`; sem `DATABASE_URL` em produção o
+processo não inicia. As variáveis de ambiente ficam configuradas no provedor,
+nunca no repositório.
+
 ## Discord Activity
 
 A dashboard web e a Activity usam as mesmas rotas e componentes. Configure
