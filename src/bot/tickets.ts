@@ -137,6 +137,10 @@ const TICKET_EMOJIS = {
   close: { id: "1575773956278067341", name: "close" },
 } as const;
 
+// Carinhas da avaliação pós-atendimento: vermelha = insatisfeito, azul =
+// neutra, verde = satisfeito. O índice é a própria nota.
+const RATING_FACES = ["", "😠", "🙁", "😐", "🙂", "😄"] as const;
+
 /** Texto do cabeçalho fixado — sempre reflete o estado atual do ticket. */
 function ticketHeaderText(ticket: Ticket): string {
   const status = ticket.waitingOn === "user"
@@ -1171,8 +1175,9 @@ export async function closeTicket(
           type: 1,
           components: [1, 2, 3, 4, 5].map((rating) => ({
             type: 2,
-            style: rating >= 4 ? 3 : 2,
+            style: rating <= 2 ? 4 : rating === 3 ? 1 : 3,
             label: String(rating),
+            emoji: { name: RATING_FACES[rating] },
             custom_id: id("ticket", "rate", ticketId, rating, guild.id)
           }))
         }
