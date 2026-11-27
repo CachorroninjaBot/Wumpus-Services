@@ -57,6 +57,32 @@ export type FormFieldConfig = {
 const KEY = "wumpus-demo-v2";
 const THEME_KEY_PREFIX = "wumpus-theme-v1:";
 
+/**
+ * Histórico de configuração por servidor+módulo.
+ *
+ * Guarda o estado ANTERIOR à mudança, não o novo. Edições em rajada (digitar
+ * num campo) colapsam numa única versão: só cria snapshot se a última versão
+ * tem mais de 5 minutos. Assim o histórico mostra pontos de decisão, não cada
+ * tecla digitada.
+ */
+export type ConfigVersion = {
+  id: string;
+  at: number;
+  actor: string;
+  config: Record<string, unknown>;
+};
+
+const VERSION_WINDOW_MS = 5 * 60_000;
+const MAX_VERSIONS = 20;
+
+function configVersionKey(guildId: string, module: ModuleKey) {
+  return `${guildId}:${module}`;
+}
+
+function jsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 type PersistSlice = {
   activeGuildId: string;
   guilds: Guild[];
@@ -77,6 +103,7 @@ type PersistSlice = {
   posts: ChannelPost[];
   publishQueue: PublishJob[];
   recentMessages: RecentMessage[];
+  configVersions: Record<string, ConfigVersion[]>;
   sessionUser: SessionUser;
   theme: "dark" | "light" | "system";
 };
@@ -89,6 +116,7 @@ type Actions = {
   setActiveGuild: (id: string) => void;
   setAdmin: (on: boolean) => void;
   updateConfig: (module: ModuleKey, patch: Record<string, unknown>) => void;
+  restoreConfigVersion: (module: ModuleKey, versionId: string) => { ok: true } | { ok: false; error: string };
   setModuleEnabled: (module: ModuleKey, enabled: boolean) => void;
   applyPreset: (preset: PresetId) => void;
   openTicket: (input: { openerId: string; department: string; subject: string; body: string }) => { ok: true; id: string } | { ok: false; error: string };
@@ -153,6 +181,7 @@ function pick(s: PersistSlice): PersistSlice {
     posts: s.posts,
     publishQueue: s.publishQueue,
     recentMessages: s.recentMessages,
+    configVersions: s.configVersions,
     sessionUser: s.sessionUser,
     theme: s.theme,
   };
@@ -160,7 +189,7 @@ function pick(s: PersistSlice): PersistSlice {
 
 function seedSlice(): PersistSlice {
   const s = cloneSeed();
-  return { ...s, activeGuildId: DEMO_GUILD, theme: "system", posts: [], publishQueue: [], recentMessages: [] };
+  return { ...s, activeGuildId: DEMO_GUILD, theme: "system", posts: [], publishQueue: [], recentMessages: [], configVersions: {} };
 }
 
 function persist(slice: PersistSlice) {
@@ -386,6 +415,7 @@ export const useWumpus = create<WumpusStore>((set, get) => {
               posts: parsed.posts ?? [],
               publishQueue: parsed.publishQueue ?? [],
               recentMessages: parsed.recentMessages ?? [],
+              configVersions: parsed.configVersions ?? {},
               hydrated: true,
             });
             document.documentElement.dataset.theme = theme;
@@ -439,6 +469,17 @@ export const useWumpus = create<WumpusStore>((set, get) => {
     updateConfig: (module, patch) => {
       const state = get();
       const current = cfg(module);
+      const key = configVersionKey(state.activeGuildId, module);
+      const history = state.configVersions[key] ?? [];
+      const newest = history[0];
+      // Rajada de edições = uma versão só: mantém o estado anterior ao começo
+      // da rajada, que é o ponto do qual alguém realmente quer voltar.
+      const snapshot = !newest || Date.now() - newest.at > VERSION_WINDOW_MS
+        ? [
+            { id: uid("v"), at: Date.now(), actor: state.sessionUser.globalName, config: jsonClone(current.config) },
+            ...history,
+          ].slice(0, MAX_VERSIONS)
+        : history;
       const nextModules = {
         ...state.modules,
         [state.activeGuildId]: {
@@ -446,8 +487,42 @@ export const useWumpus = create<WumpusStore>((set, get) => {
           [module]: { ...current, config: { ...current.config, ...patch } },
         },
       };
-      write({ modules: nextModules });
+      write({
+        modules: nextModules,
+        ...(snapshot === history ? {} : { configVersions: { ...state.configVersions, [key]: snapshot } }),
+      });
       audit(module, `Configuração de ${module} atualizada.`);
+    },
+
+    restoreConfigVersion: (module, versionId) => {
+      const state = get();
+      const key = configVersionKey(state.activeGuildId, module);
+      const version = (state.configVersions[key] ?? []).find((entry) => entry.id === versionId);
+      if (!version) return { ok: false, error: "Versão não encontrada no histórico." };
+      const current = cfg(module);
+      // O estado atual vira uma versão antes de sair: restaurar nunca perde
+      // a configuração que estava valendo.
+      const entry: ConfigVersion = {
+        id: uid("v"),
+        at: Date.now(),
+        actor: state.sessionUser.globalName,
+        config: jsonClone(current.config),
+      };
+      write({
+        modules: {
+          ...state.modules,
+          [state.activeGuildId]: {
+            ...state.modules[state.activeGuildId],
+            [module]: { ...current, config: jsonClone(version.config) },
+          },
+        },
+        configVersions: {
+          ...state.configVersions,
+          [key]: [entry, ...(state.configVersions[key] ?? [])].slice(0, MAX_VERSIONS),
+        },
+      });
+      audit(module, `Configuração de ${module} restaurada de ${new Date(version.at).toLocaleString("pt-BR")}.`);
+      return { ok: true };
     },
 
     setModuleEnabled: (module, enabled) => {

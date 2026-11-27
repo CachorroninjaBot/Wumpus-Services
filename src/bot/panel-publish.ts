@@ -6,7 +6,7 @@
  * os varios paineis de atendimento; painel unico antigo continua na chave
  * `tickets`, entao a mensagem ja publicada e reaproveitada.
  */
-import type { Guild } from "discord.js";
+import { ChannelType, type Guild } from "discord.js";
 import type { Sendable } from "./resolve.ts";
 import type { Logger } from "./logger.ts";
 import { readBotCollection, updateBotCollection } from "../lib/wumpus/runtime.server.ts";
@@ -41,18 +41,32 @@ export async function publishPanelIdempotent(
   const rows = await readBotCollection<PublishedPanel>("panel-messages");
   const existing = rows.find((row) => row.guildId === guild.id && rowKey(row) === key);
 
-  if (existing && existing.channelId === target.id && target.messages) {
-    try {
-      const message = await target.messages.fetch(existing.messageId);
-      await message.edit({ flags: panel.flags, components: panel.components } as Record<string, unknown>);
-      return "atualizado";
-    } catch {
-      log.warn("painel anterior não encontrado; publicando um novo", {
-        guildId: guild.id,
-        kind,
-        key,
-        messageId: existing.messageId,
-      });
+  if (existing && target.messages) {
+    // Em canal de fórum o painel é um post: o id salvo é o do tópico e a
+    // mensagem inicial vive dentro dele, não no canal.
+    const isForum = (target as { type?: unknown }).type === ChannelType.GuildForum;
+    if (existing.channelId === target.id || isForum) {
+      try {
+        let message: { edit: (options: Record<string, unknown>) => Promise<unknown> } | null =
+          await target.messages.fetch(existing.messageId).catch(() => null);
+        if (!message && isForum) {
+          const thread = await guild.channels.fetch(existing.messageId).catch(() => null);
+          const starter = thread?.isThread()
+            ? await thread.fetchStarterMessage().catch(() => null)
+            : null;
+          message = starter as { edit: (options: Record<string, unknown>) => Promise<unknown> } | null;
+        }
+        if (!message) throw new Error("mensagem do painel não encontrada");
+        await message.edit({ flags: panel.flags, components: panel.components } as Record<string, unknown>);
+        return "atualizado";
+      } catch {
+        log.warn("painel anterior não encontrado; publicando um novo", {
+          guildId: guild.id,
+          kind,
+          key,
+          messageId: existing.messageId,
+        });
+      }
     }
   }
 

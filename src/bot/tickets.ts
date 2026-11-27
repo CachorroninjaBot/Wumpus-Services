@@ -26,6 +26,7 @@ import { id } from "./ids.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
 import { buildPanelPayload, defaultButtons } from "./panels.ts";
+import { businessHoursLabel, businessHoursNotice, isWithinBusinessHours } from "../lib/wumpus/business-hours.ts";
 import {
   normalizeTicketPanels,
   panelTicketTypes,
@@ -317,10 +318,15 @@ export async function openTicket(
   log: Logger,
   intakeAnswers: Array<{ question: string; answer: string }> = [],
   subjectOverride?: string,
-): Promise<{ ok: true; ticket: Ticket; channelId: string } | { ok: false; error: string }> {
+  panelChannelId?: string,
+): Promise<{ ok: true; ticket: Ticket; channelId: string; notice?: string } | { ok: false; error: string }> {
   const config = await moduleConfig(guild.id, "tickets");
   if (!config) return { ok: false, error: "O atendimento ainda nao foi configurado neste servidor." };
   if (!isEnabled(config)) return { ok: false, error: "O atendimento esta pausado neste servidor." };
+
+  if (list(config, "blacklistedUserIds").includes(userId)) {
+    return { ok: false, error: "Voce esta bloqueado(a) de abrir atendimentos neste servidor. Fale com a equipe em outro canal." };
+  }
 
   const maxOpen = Math.max(1, Math.trunc(num(config, "maxOpenPerUser", 1)));
   const mine = (await read<Ticket>("tickets")).filter(
@@ -356,6 +362,14 @@ export async function openTicket(
       : str(config, "categoryId"),
   );
 
+  /**
+   * Painel apontado para um canal de fórum: cada atendimento vira um tópico
+   * (post) do fórum em vez de um canal de texto na categoria. É o mesmo modelo
+   * que o Ticket Tool usa — o tópico é público para quem já vê o fórum.
+   */
+  const panelChannel = resolveChannel(guild, panelChannelId);
+  const forumTarget = panelChannel?.type === ChannelType.GuildForum ? panelChannel : null;
+
   const pattern = str(config, "namingPattern", "atendimento-{user}");
   const opener = await guild.client.users.fetch(userId).catch(() => null);
   const username = opener?.username ?? "membro";
@@ -377,7 +391,17 @@ export async function openTicket(
       .replace(/[^a-z0-9-]/g, "-")
       .replace(/-+/g, "-")
       .slice(0, 90) || `atendimento-${username}`;
-    const channel = await guild.channels.create({
+    const channel = forumTarget
+      ? await forumTarget.threads.create({
+          name: name.slice(0, 100),
+          autoArchiveDuration: 1440,
+          message: {
+            content: `Atendimento #${ticketId} · ${department ?? "Geral"}`.slice(0, 2000),
+            allowedMentions: { parse: [] },
+          },
+          reason: `Atendimento #${ticketId} aberto por ${userId}`,
+        })
+      : await guild.channels.create({
       name,
       type: ChannelType.GuildText,
       parent: category?.type === ChannelType.GuildCategory ? category.id : undefined,
@@ -414,6 +438,7 @@ export async function openTicket(
         }))
       ]
     });
+    if (channel.isThread()) await channel.members.add(userId).catch(() => undefined);
 
     const now = new Date().toISOString();
     const ticket: Ticket = {
@@ -514,7 +539,8 @@ export async function openTicket(
     );
 
     log.info("atendimento aberto", { guildId: guild.id, ticketId, userId, department });
-    return { ok: true, ticket, channelId: channel.id };
+    const notice = isWithinBusinessHours(config) ? undefined : businessHoursNotice(config);
+    return { ok: true, ticket, channelId: channel.id, ...(notice ? { notice } : {}) };
   } catch (error) {
     // O plano manda NAO engolir: log detalhado aqui, e a mensagem ao usuario
     // apenas aponta a causa mais comum — nunca um falso sucesso.
@@ -633,16 +659,24 @@ export async function addTicketMember(
     guild.channels.fetch(ticket.channelId).catch(() => null),
     guild.members.fetch(memberId).catch(() => null),
   ]);
-  if (!channel?.isTextBased() || !("permissionOverwrites" in channel) || !member) {
+  if (!channel?.isTextBased() || !member) {
+    return { ok: false, detail: "Não encontrei o canal ou a pessoa selecionada." };
+  }
+  if (!channel.isThread() && !("permissionOverwrites" in channel)) {
     return { ok: false, detail: "Não encontrei o canal ou a pessoa selecionada." };
   }
   try {
-    await channel.permissionOverwrites.edit(member.id, {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      AttachFiles: true,
-    }, { reason: `Adicionado ao atendimento #${ticketId} por ${actorId}` });
+    if (channel.isThread()) {
+      // Tópico de fórum não tem overwrites por pessoa: entra na lista do tópico.
+      await channel.members.add(member.id);
+    } else if ("permissionOverwrites" in channel) {
+      await channel.permissionOverwrites.edit(member.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        AttachFiles: true,
+      }, { reason: `Adicionado ao atendimento #${ticketId} por ${actorId}` });
+    }
     await auditAndLog(guild, {
       module: "tickets", category: "members", eventType: "ticket_member_added",
       actorId, targetId: member.id, channelId: ticket.channelId, severity: "info",
@@ -670,15 +704,35 @@ export async function removeTicketMember(
     return { ok: false, detail: "Não é possível remover o solicitante ou o bot do atendimento." };
   }
   const channel = await guild.channels.fetch(ticket.channelId).catch(() => null);
-  if (!channel?.isTextBased() || !("permissionOverwrites" in channel)) {
+  if (!channel?.isTextBased()) {
     return { ok: false, detail: "O canal deste atendimento não está disponível." };
   }
-  const overwrite = channel.permissionOverwrites.cache.get(memberId);
-  if (!overwrite || !overwrite.allow.has(PermissionFlagsBits.ViewChannel)) {
-    return { ok: false, detail: "Essa pessoa não foi adicionada individualmente a este atendimento." };
+  if (!channel.isThread() && !("permissionOverwrites" in channel)) {
+    return { ok: false, detail: "O canal deste atendimento não está disponível." };
+  }
+  if (channel.isThread()) {
+    if (!channel.members.cache.has(memberId)) {
+      return { ok: false, detail: "Essa pessoa não foi adicionada individualmente a este atendimento." };
+    }
+    try {
+      await channel.members.remove(memberId, `Removido do atendimento #${ticketId} por ${actorId}`);
+    } catch (error) {
+      log.warn("falha ao remover membro do tópico", { guildId: guild.id, ticketId, memberId, error: String(error).slice(0, 250) });
+      return { ok: false, detail: "O Discord não permitiu remover essa pessoa do tópico." };
+    }
+  } else if ("permissionOverwrites" in channel) {
+    const overwrite = channel.permissionOverwrites.cache.get(memberId);
+    if (!overwrite || !overwrite.allow.has(PermissionFlagsBits.ViewChannel)) {
+      return { ok: false, detail: "Essa pessoa não foi adicionada individualmente a este atendimento." };
+    }
+    try {
+      await channel.permissionOverwrites.delete(memberId, `Removido do atendimento #${ticketId} por ${actorId}`);
+    } catch (error) {
+      log.warn("falha ao remover membro do ticket", { guildId: guild.id, ticketId, memberId, error: String(error).slice(0, 250) });
+      return { ok: false, detail: "O Discord não permitiu remover essa pessoa do canal." };
+    }
   }
   try {
-    await channel.permissionOverwrites.delete(memberId, `Removido do atendimento #${ticketId} por ${actorId}`);
     await auditAndLog(guild, {
       module: "tickets", category: "members", eventType: "ticket_member_removed",
       actorId, targetId: memberId, channelId: ticket.channelId, severity: "info",
@@ -688,7 +742,7 @@ export async function removeTicketMember(
     }, log);
     return { ok: true, detail: `O acesso de <@${memberId}> foi removido.` };
   } catch (error) {
-    log.warn("falha ao remover membro do ticket", { guildId: guild.id, ticketId, memberId, error: String(error).slice(0, 250) });
+    log.warn("falha ao registrar remoção de membro do ticket", { guildId: guild.id, ticketId, memberId, error: String(error).slice(0, 250) });
     return { ok: false, detail: "O Discord não permitiu remover essa pessoa do canal." };
   }
 }
@@ -1446,7 +1500,10 @@ export function buildTicketPanelPayload(
     title: panel.title,
     description: panel.description,
     accentColor: panel.accentColor,
-    footer: panel.footer,
+    footer: [
+      panel.footer,
+      config.businessHoursEnabled === true ? `Atendimento ${businessHoursLabel(config)}.` : "",
+    ].filter(Boolean).join(" · ").slice(0, 300),
     buttons: ticketPanelButtons(config, panel),
   });
 }

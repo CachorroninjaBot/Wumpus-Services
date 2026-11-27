@@ -32,6 +32,12 @@ SLA, transcript e feedback.
 | Formulário de abertura | ✅ até 5 perguntas obrigatórias por tipo; respostas aparecem no canal e no histórico da dashboard |
 | Modelos de configuração | ✅ suporte geral, loja e comunidade; aplicam configurações editáveis antes da publicação |
 | Personalização do painel | ✅ título, descrição, rodapé, cor, estilo do botão, menu suspenso ou até 5 botões diretos; opções com emoji e descrição; prévia do painel e do menu |
+| Vários painéis | ✅ `ticketPanels` normalizado em `ticket-panels.ts`; cada painel tem canal, tipos e textos próprios; o plano limita 1 / 5 / 25. Botões antigos continuam resolvendo pelo slug legado |
+| Console operacional | ✅ fila com vistas (minhas, sem responsável, SLA, aguardando usuário), busca na conversa, contexto do solicitante, respostas prontas e métricas por tipo |
+| Modo fórum | ✅ painel apontado para um canal de fórum cria cada atendimento como tópico (post) do fórum; o painel é publicado como post e atualizado no lugar |
+| Versões e rollback | ✅ `configVersions` no store: snapshot do estado anterior (rajadas de 5 min colapsam) e "Restaurar" que salva o estado atual antes de voltar |
+| Bloqueio e horário | ✅ `blacklistedUserIds` recusa a abertura com mensagem; `businessHours*` avisa quem abre fora do horário e entra no rodapé do painel (UTC) |
+| Saúde do bot | ✅ cartão "Bot no Discord" no painel: online/offline, ping e permissões essenciais para abrir e organizar tickets |
 
 Build: `npm run typecheck && npm test`. Os testes de tudo novo estão em
 `src/bot/tickets-sla.test.ts` (28 testes) — matemática pura, sem Discord.
@@ -88,6 +94,14 @@ O bot guarda por servidor. `moduleConfig(guildId, "tickets")` lê o runtime.
 - **`tickets-metrics.ts`** — agregação pura por atendente (`aggregateStaffReport`)
   + leitor do store (`ticketStaffReport`) + linhas prontas para Discord
   (`reportLines`).
+- **`ticket-panels.ts`** — normalizador puro de painéis/tipos: `ticketPanels` novo
+  ou campos legados viram a mesma `TicketPanel[]`; `findTicketType` aceita id,
+  nome e slug legado, então botões já publicados continuam funcionando.
+- **`preflight.ts`** — validação pura antes de publicar (canal, tipos, textos).
+- **`panel-publish.ts`** — publicação idempotente por `guildId + key`; em canal de
+  fórum localiza o post salvo para editar no lugar.
+- **`business-hours.ts`** — janela de atendimento pura em UTC (suporta horário que
+  atravessa a meia-noite) e textos do aviso/rodapé.
 - **`tickets.ts`** — efeitos: `checkSla` (SLA + auto-close num ciclo só),
   `setTicketPriority`, `reopenClosedTicket`, `closeTicket(guild, id, actor, log,
   reason)`. `recordTicketMessage` grava `firstResponseAt` (1ª mensagem de quem

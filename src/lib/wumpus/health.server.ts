@@ -9,7 +9,7 @@ export type BotHealthRecord = {
   guildCount: number;
   guildIds: string[];
   guildResources?: Record<string, {
-    channels: Array<{ id: string; name: string; type: "text" | "category" }>;
+    channels: Array<{ id: string; name: string; type: "text" | "category" | "forum" }>;
     roles: Array<{ id: string; name: string; color: string; position: number }>;
     permissions?: {
       manageMessages: boolean;

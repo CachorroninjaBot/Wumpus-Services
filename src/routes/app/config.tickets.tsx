@@ -1,12 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { ArrowDown, ArrowUp, Layers, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { asList, asString, planAllows } from "@/lib/wumpus/engine";
-import { useActiveGuild, useModule, useWumpus } from "@/lib/wumpus/store";
+import { getStoredSessionToken } from "@/lib/wumpus/session-token";
+import { getGuildProtectionReadiness } from "@/lib/wumpus/runtime-store";
+import { useActiveGuild, useModule, useWumpus, type ConfigVersion } from "@/lib/wumpus/store";
 import { usePublishPanel } from "@/lib/wumpus/use-publish-panel";
 import { ExclusiveButton } from "@/components/exclusive-button";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
@@ -17,7 +19,7 @@ import {
   panelTicketTypes,
   type TicketPanel,
 } from "@/lib/wumpus/ticket-panels";
-import type { TicketDepartmentConfig } from "@/lib/wumpus/types";
+import type { Channel, TicketDepartmentConfig } from "@/lib/wumpus/types";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { NumberField } from "@/components/protect/helpers";
@@ -34,6 +36,40 @@ const discordButtonStyles = [
 ];
 
 const TICKETS_MODULE = "tickets" as const;
+const businessDayLabels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const emptyVersions: ConfigVersion[] = [];
+const emptyChannels: Channel[] = [];
+
+const configFieldLabels: Record<string, string> = {
+  panelTitle: "título",
+  panelDescription: "descrição",
+  panelChannelId: "canal do painel",
+  panelButtonLabel: "texto do botão",
+  panelButtonEmoji: "emoji do botão",
+  departments: "tipos de atendimento",
+  departmentSettings: "tipos de atendimento",
+  ticketPanels: "painéis",
+  welcomeMessage: "mensagem de boas-vindas",
+  maxOpenPerUser: "limite por pessoa",
+  namingPattern: "nome do canal",
+  blacklistedUserIds: "bloqueios",
+  businessHoursEnabled: "horário de atendimento",
+  businessHoursDays: "dias de atendimento",
+  staffRoleIds: "cargos da equipe",
+  savedReplies: "respostas prontas",
+};
+
+function formatVersionTime(at: number) {
+  return new Date(at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function changeSummary(previous: Record<string, unknown>, current: Record<string, unknown>) {
+  const keys = new Set([...Object.keys(previous), ...Object.keys(current)]);
+  const changed = [...keys].filter((key) => JSON.stringify(previous[key]) !== JSON.stringify(current[key]));
+  if (!changed.length) return "sem diferenças em relação ao atual";
+  const labels = changed.slice(0, 2).map((key) => configFieldLabels[key] ?? key);
+  return `${changed.length} campo(s): ${labels.join(", ")}${changed.length > 2 ? "…" : ""}`;
+}
 
 const ticketTemplates: Record<string, { label: string; description: string; config: Partial<Record<string, unknown>> }> = {
   support: {
@@ -105,6 +141,10 @@ function TicketPanelSettings() {
   const tcfg = useModule("tickets");
   const staffConfig = useModule("staff");
   const updateConfig = useWumpus((s) => s.updateConfig);
+  const restoreConfigVersion = useWumpus((s) => s.restoreConfigVersion);
+  const allConfigVersions = useWumpus((s) => s.configVersions);
+  const versions = allConfigVersions[`${gid}:${TICKETS_MODULE}`] ?? emptyVersions;
+  const channels = useWumpus((s) => s.channels[gid] ?? emptyChannels);
   const setEnabled = useWumpus((s) => s.setModuleEnabled);
   const canUseDepartments = planAllows(guild.plan, "multiDepartment");
 
@@ -145,6 +185,7 @@ function TicketPanelSettings() {
   );
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const panel = panels.find((entry) => entry.id === selectedPanelId) ?? panels[0];
+  const panelChannelIsForum = channels.some((channel) => channel.id === panel?.channelId && channel.type === "forum");
   const panelTypes = useMemo(
     () => (panel ? panelTicketTypes(tcfg.config, panel) : []),
     [panel, tcfg.config],
@@ -167,6 +208,48 @@ function TicketPanelSettings() {
   const [dirty, setDirty] = useState(false);
   const [pubNotice, setPubNotice] = useState<string | null>(null);
   const [pubTone, setPubTone] = useState<"ok" | "error" | "neutral">("neutral");
+  const [readiness, setReadiness] = useState<Awaited<ReturnType<typeof getGuildProtectionReadiness>> | null>(null);
+  const [historyNotice, setHistoryNotice] = useState("");
+
+  function restoreVersion(version: ConfigVersion) {
+    const result = restoreConfigVersion(TICKETS_MODULE, version.id);
+    if (!result.ok) {
+      setHistoryNotice(result.error);
+      return;
+    }
+    setDirty(true);
+    setHistoryNotice(`Versão de ${formatVersionTime(version.at)} restaurada. Publique para aplicar no Discord.`);
+  }
+
+  useEffect(() => {
+    const token = getStoredSessionToken();
+    if (!token) return;
+    let alive = true;
+    getGuildProtectionReadiness({ data: { token, guildId: gid } })
+      .then((result) => {
+        if (alive) setReadiness(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [gid]);
+
+  const businessDays: number[] = Array.isArray(tcfg.config.businessHoursDays)
+    ? (tcfg.config.businessHoursDays as unknown[])
+        .map((day) => Number(day))
+        .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+    : [1, 2, 3, 4, 5];
+
+  const missingPermissions = readiness?.permissions
+    ? ([
+        ["manageChannels", "Gerenciar canais"],
+        ["manageRoles", "Gerenciar cargos"],
+        ["manageMessages", "Gerenciar mensagens"],
+      ] as const)
+        .filter(([key]) => !readiness.permissions?.[key])
+        .map(([, label]) => label)
+    : [];
 
   const preflight = useMemo(() => ticketPanelPreflight(tcfg.config), [tcfg.config]);
   const blockingIssues = preflight.filter((issue) => issue.level === "error");
@@ -402,6 +485,11 @@ function TicketPanelSettings() {
                   Excluir
                 </Button>
               </div>
+            ) : null}
+            {panelChannelIsForum ? (
+              <p className="m-0 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                Canal de fórum detectado: cada atendimento vira um tópico público do fórum e o painel é publicado como um post.
+              </p>
             ) : null}
           </section>
 
@@ -769,6 +857,59 @@ function TicketPanelSettings() {
                         </div>
                       ))}
                     </div>
+                    <div className="space-y-3 rounded-xl border border-border p-3">
+                      <ToggleRow label="Horário de atendimento" description="Quem abrir fora do horário recebe um aviso; o ticket continua aberto." checked={Boolean(tcfg.config.businessHoursEnabled)} onChange={(value) => patchTickets({ businessHoursEnabled: value })} />
+                      {tcfg.config.businessHoursEnabled ? (
+                        <>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <NumberField id="ticket-hours-start" label="Abre às (UTC)" min={0} max={23} value={Number(tcfg.config.businessHoursStart ?? 9)} onChange={(businessHoursStart) => patchTickets({ businessHoursStart })} />
+                            <NumberField id="ticket-hours-end" label="Fecha às (UTC; 24 = meia-noite)" min={0} max={24} value={Number(tcfg.config.businessHoursEnd ?? 18)} onChange={(businessHoursEnd) => patchTickets({ businessHoursEnd })} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label>Dias de atendimento</Label>
+                            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Dias de atendimento">
+                              {businessDayLabels.map((label, day) => {
+                                const active = businessDays.includes(day);
+                                return (
+                                  <button
+                                    key={label}
+                                    type="button"
+                                    aria-pressed={active}
+                                    onClick={() => patchTickets({
+                                      businessHoursDays: active
+                                        ? businessDays.filter((value) => value !== day)
+                                        : [...businessDays, day].sort(),
+                                    })}
+                                    className={cn(
+                                      "rounded-full border px-3 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                      active ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-muted/50",
+                                    )}
+                                  >
+                                    {label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <p className="m-0 text-xs text-muted-foreground">O fuso é o do servidor do bot (UTC). O horário também aparece no rodapé do painel.</p>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                    <Field label="Pessoas bloqueadas de abrir tickets">
+                      <Textarea
+                        key={asList(tcfg.config.blacklistedUserIds).join(",")}
+                        rows={3}
+                        defaultValue={asList(tcfg.config.blacklistedUserIds).join("\n")}
+                        onBlur={(event) => patchTickets({
+                          blacklistedUserIds: event.target.value
+                            .split(/[\s,;]+/)
+                            .map((value) => value.trim())
+                            .filter((value) => /^\d{17,20}$/.test(value)),
+                        })}
+                        placeholder="Um ID do Discord por linha"
+                      />
+                      <p className="m-0 text-xs text-muted-foreground">Quem estiver na lista vê uma recusa ao clicar no painel. O bloqueio não fecha tickets já abertos.</p>
+                    </Field>
                     <div className="space-y-4 divide-y divide-border">
                       <ToggleRow label="IA de apoio à equipe" description="Sugestões privadas aparecem no canal para os atendentes." checked={Boolean(tcfg.config.aiSupportEnabled)} onChange={(value) => patchTickets({ aiSupportEnabled: value })} />
                       <ToggleRow label="Incluir conversa nas análises por IA" description="Quando desligado, o conteúdo das mensagens não é enviado à IA." checked={Boolean(tcfg.config.aiIncludeConversation)} onChange={(value) => patchTickets({ aiIncludeConversation: value })} />
@@ -804,6 +945,32 @@ function TicketPanelSettings() {
                 />
               )}
               <div className="space-y-2 rounded-2xl border border-border p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="m-0 text-sm font-semibold">Bot no Discord</h3>
+                  <Badge tone={readiness?.status === "online" ? "ok" : readiness?.status === "not_installed" ? "warn" : readiness ? "danger" : "default"}>
+                    {readiness?.status === "online"
+                      ? "Online"
+                      : readiness?.status === "not_installed"
+                        ? "Não instalado"
+                        : readiness?.status === "offline"
+                          ? "Offline"
+                          : "Verificando…"}
+                  </Badge>
+                </div>
+                {readiness?.status === "online" ? (
+                  <p className="m-0 text-xs text-muted-foreground">
+                    {readiness.pingMs != null ? `${readiness.pingMs} ms de ping. ` : ""}
+                    {missingPermissions.length
+                      ? `Faltam permissões: ${missingPermissions.join(", ")}.`
+                      : "Permissões essenciais concedidas para abrir e organizar tickets."}
+                  </p>
+                ) : readiness?.status === "not_installed" ? (
+                  <p className="m-0 text-xs text-muted-foreground">Adicione o bot ao servidor antes de publicar o painel.</p>
+                ) : readiness?.status === "offline" ? (
+                  <p className="m-0 text-xs text-muted-foreground">O bot não responde há alguns minutos. A publicação fica na fila até ele voltar.</p>
+                ) : null}
+              </div>
+              <div className="space-y-2 rounded-2xl border border-border p-4">
                 <h3 className="m-0 text-base font-semibold">Publicar no Discord</h3>
                 <p className="m-0 text-sm text-muted-foreground">O bot publica ou atualiza os {panels.length} painel(is) configurado(s) e só confirma quando o Discord responder.</p>
                 <ul className="m-0 space-y-1 pl-0 text-sm" aria-live="polite">
@@ -823,6 +990,28 @@ function TicketPanelSettings() {
                 >
                   {pubBusy ? "Aguardando confirmação do bot…" : dirty ? "Publicar alterações" : "Publicar painel no Discord"}
                 </Button>
+              </div>
+              <div className="space-y-2 rounded-2xl border border-border p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="m-0 text-sm font-semibold">Histórico de versões</h3>
+                  <Badge tone="default">{versions.length}</Badge>
+                </div>
+                {versions.length ? (
+                  <ul className="m-0 space-y-2 pl-0">
+                    {versions.map((version) => (
+                      <li key={version.id} className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="m-0 text-xs font-medium">{formatVersionTime(version.at)}</p>
+                          <p className="m-0 text-xs text-muted-foreground">{version.actor || "Equipe"} · {changeSummary(version.config, tcfg.config)}</p>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => restoreVersion(version)}>Restaurar</Button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="m-0 text-xs text-muted-foreground">As versões aparecem aqui depois da primeira alteração de configuração.</p>
+                )}
+                {historyNotice ? <p role="status" className="m-0 text-xs text-muted-foreground">{historyNotice}</p> : null}
               </div>
             </aside>
           </div>

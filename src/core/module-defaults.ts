@@ -202,6 +202,11 @@ export const moduleDefaults: Record<ModuleId, Record<string, unknown>> = {
     priorityEnabled: true,
     savedReplies: [],
     tags: [],
+    blacklistedUserIds: [],
+    businessHoursEnabled: false,
+    businessHoursStart: 9,
+    businessHoursEnd: 18,
+    businessHoursDays: [1, 2, 3, 4, 5],
     // Departamentos do atendimento. O bot ja lia `departments`, mas nao havia
     // valor padrao — entao todo servidor caia no "sem departamento" e o select
     // de escolha nunca aparecia.

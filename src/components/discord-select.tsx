@@ -17,7 +17,12 @@ export function DiscordSelect({ id, value, onChange, kind, placeholder = "Seleci
   const roles = useWumpus((s) => s.roles[guildId] ?? []);
   const options = kind === "role"
     ? roles.filter((role) => role.id !== guildId).map((role) => ({ id: role.id, name: `@${role.name}` }))
-    : channels.filter((channel) => channel.type === kind).map((channel) => ({ id: channel.id, name: `${kind === "text" ? "#" : ""}${channel.name}` }));
+    : channels
+        .filter((channel) => channel.type === kind || (kind === "text" && channel.type === "forum"))
+        .map((channel) => ({
+          id: channel.id,
+          name: channel.type === "forum" ? `#${channel.name} (fórum)` : `${kind === "text" ? "#" : ""}${channel.name}`,
+        }));
 
   const selected = options.find((option) => option.id === value || option.name.replace(/^[#▰@ ]+/, "") === value.replace(/^[#▰@ ]+/, ""));
   return <SearchSelect id={id} value={selected?.id ?? ""} options={options.map((option) => ({ id: option.id, label: option.name }))} onChange={onChange} placeholder={placeholder} className={className} />;

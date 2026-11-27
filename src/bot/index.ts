@@ -63,6 +63,7 @@ import { planAllows } from "../lib/wumpus/plan-features.ts";
 import {
   findTicketPanel,
   findTicketType,
+  normalizeTicketPanels,
   panelTicketTypes,
 } from "../lib/wumpus/ticket-panels.ts";
 import { consoleLogger, type Logger } from "./logger.ts";
@@ -622,7 +623,7 @@ async function promptDepartment(
   const types = panel && config ? panelTicketTypes(config, panel) : [];
 
   if (types.length <= 1) {
-    await beginTicketOpen(interaction, types[0]?.id ?? null, log);
+    await beginTicketOpen(interaction, types[0]?.id ?? null, log, panel?.id);
     return;
   }
 
@@ -649,15 +650,35 @@ async function promptDepartment(
   });
 }
 
+/**
+ * Painel dono de uma abertura. O botao ja manda o id do painel; o select e o
+ * modal antigo nao mandam, entao o tipo decide (o painel deve conter o tipo).
+ */
+function panelForOpen(
+  config: Parameters<typeof findTicketPanel>[0],
+  panelId: string | undefined,
+  typeId: string | undefined,
+) {
+  if (panelId) return findTicketPanel(config, panelId);
+  if (typeId) {
+    return normalizeTicketPanels(config).find((panel) =>
+      panelTicketTypes(config, panel).some((type) => type.id === typeId),
+    );
+  }
+  return findTicketPanel(config, undefined);
+}
+
 async function beginTicketOpen(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   typeRef: string | null,
   log: Logger,
+  panelId?: string,
 ): Promise<void> {
   const guild = interaction.guild;
   if (!guild) return;
   const config = await moduleConfig(guild.id, "tickets");
   const type = typeRef ? findTicketType(config, typeRef) : undefined;
+  const panel = panelForOpen(config, panelId, type?.id);
   const questions = (type?.intakeQuestions ?? [])
     .filter((question) => Boolean(question.trim()))
     .slice(0, 5);
@@ -666,7 +687,7 @@ async function beginTicketOpen(
 
   if (questions.length && type) {
     const modal = new ModalBuilder()
-      .setCustomId(id("ticket", "intake_submit", type.id))
+      .setCustomId(id("ticket", "intake_submit", type.id, panel?.id ?? ""))
       .setTitle(`Abrir ticket · ${type.name.slice(0, 25)}`.slice(0, 45));
     for (const [index, question] of questions.entries()) {
       const field = new TextInputBuilder()
@@ -683,9 +704,11 @@ async function beginTicketOpen(
   }
 
   await interaction.deferReply({ ephemeral: true });
-  const result = await openTicket(guild, interaction.user.id, department, log);
+  const result = await openTicket(guild, interaction.user.id, department, log, [], undefined, panel?.channelId || undefined);
   await interaction.editReply(
-    result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error,
+    result.ok
+      ? `Atendimento aberto em <#${result.channelId}>.${result.notice ? ` ${result.notice}` : ""}`
+      : result.error,
   );
 }
 
@@ -1378,9 +1401,12 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
       return;
     }
     await interaction.deferReply({ ephemeral: true });
-    const result = await openTicket(guild, interaction.user.id, type.name, log, answers);
+    const panel = panelForOpen(config, args[1] || undefined, type.id);
+    const result = await openTicket(guild, interaction.user.id, type.name, log, answers, undefined, panel?.channelId || undefined);
     await interaction.editReply(
-      result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error,
+      result.ok
+        ? `Atendimento aberto em <#${result.channelId}>.${result.notice ? ` ${result.notice}` : ""}`
+        : result.error,
     );
     return;
   }
@@ -1557,13 +1583,15 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
         guild.id,
         {
           channels: [...guild.channels.cache.values()].flatMap(
-            (channel): Array<{ id: string; name: string; type: "text" | "category" }> =>
+            (channel): Array<{ id: string; name: string; type: "text" | "category" | "forum" }> =>
               channel.type === ChannelType.GuildCategory
                 ? [{ id: channel.id, name: channel.name, type: "category" as const }]
                 : channel.type === ChannelType.GuildText ||
                     channel.type === ChannelType.GuildAnnouncement
                   ? [{ id: channel.id, name: channel.name, type: "text" as const }]
-                  : [],
+                  : channel.type === ChannelType.GuildForum
+                    ? [{ id: channel.id, name: channel.name, type: "forum" as const }]
+                    : [],
           ),
           roles: [...guild.roles.cache.values()]
             .filter((role) => role.id !== guild.id && !role.managed)

@@ -44,6 +44,11 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     reopenEnabled: true,
     priorityEnabled: true,
     savedReplies: [],
+    blacklistedUserIds: [],
+    businessHoursEnabled: false,
+    businessHoursStart: 9,
+    businessHoursEnd: 18,
+    businessHoursDays: [1, 2, 3, 4, 5],
     slaWarningMinutes: 60,
     namingPattern: "atendimento-{user}",
     welcomeMessage:

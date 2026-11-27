@@ -189,6 +189,37 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
     return counts;
   }, [rows, sessionUser.id, slaMinutes]);
 
+  /** Desempenho por tipo de atendimento: quem puxa a fila e como responde. */
+  const typeMetrics = useMemo(() => {
+    const map = new Map<string, { open: number; sla: number; responded: number; responseSum: number }>();
+    for (const row of rows) {
+      const type = row.department || "Sem tipo";
+      const entry = map.get(type) ?? { open: 0, sla: 0, responded: 0, responseSum: 0 };
+      if (row.status !== "closed") {
+        entry.open += 1;
+        if (slaState({
+          id: row.number,
+          status: row.status,
+          createdAt: new Date(row.createdAt).toISOString(),
+          firstResponseAt: row.firstResponseAt ? new Date(row.firstResponseAt).toISOString() : null,
+        }, slaMinutes) !== "ok") entry.sla += 1;
+      }
+      if (row.firstResponseAt) {
+        entry.responded += 1;
+        entry.responseSum += Math.max(0, row.firstResponseAt - row.createdAt);
+      }
+      map.set(type, entry);
+    }
+    return [...map.entries()]
+      .map(([type, entry]) => ({
+        type,
+        open: entry.open,
+        sla: entry.sla,
+        avgResponse: entry.responded ? `${Math.round(entry.responseSum / entry.responded / 60_000)} min` : "—",
+      }))
+      .sort((a, b) => b.open - a.open || a.type.localeCompare(b.type, "pt-BR"));
+  }, [rows, slaMinutes]);
+
   const loadMessages = useCallback(async (ticketId: number) => {
     const token = getStoredSessionToken();
     if (!token) return;
@@ -420,6 +451,36 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
               ))}
             </ul>
           )}
+
+          <details className="border-t border-border px-3 py-2.5">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              Métricas por tipo
+            </summary>
+            {typeMetrics.length ? (
+              <table className="mt-2 w-full text-left text-xs">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="pb-1 font-medium">Tipo</th>
+                    <th className="pb-1 text-right font-medium">Abertos</th>
+                    <th className="pb-1 text-right font-medium">SLA</th>
+                    <th className="pb-1 text-right font-medium">1ª resp.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {typeMetrics.map((metric) => (
+                    <tr key={metric.type} className="border-t border-border/60">
+                      <td className="max-w-[10rem] truncate py-1">{metric.type}</td>
+                      <td className="py-1 text-right font-mono-num">{metric.open}</td>
+                      <td className={cn("py-1 text-right font-mono-num", metric.sla > 0 && "text-warn")}>{metric.sla}</td>
+                      <td className="py-1 text-right font-mono-num text-muted-foreground">{metric.avgResponse}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="m-0 mt-1 text-xs text-muted-foreground">Sem atendimentos para calcular.</p>
+            )}
+          </details>
         </Card>
 
         {selected ? (

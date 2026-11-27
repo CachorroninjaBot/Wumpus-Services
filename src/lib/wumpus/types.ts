@@ -12,7 +12,7 @@ export type Role = {
 export type Channel = {
   id: string;
   name: string;
-  type: "text" | "category" | "voice";
+  type: "text" | "category" | "voice" | "forum";
   parentId: string | null;
 };
 

@@ -12,7 +12,7 @@ import { getDiscordGuildResources, getServerGroups, saveServerGroups } from "@/l
 import { getStoredSessionToken } from "@/lib/wumpus/session-token";
 
 type ServerGroup = { id: string; name: string; guildIds: string[]; resourceMappings?: Record<string, Record<string, string>> };
-type Resource = { id: string; name: string; type?: "text" | "category" };
+type Resource = { id: string; name: string; type?: "text" | "category" | "forum" };
 type Reference = { kind: "channel" | "role"; id: string; label: string };
 const STORAGE_KEY = "wumpus-server-groups-v1";
 const channelField = /(?:channel|category)ids?$/i;
