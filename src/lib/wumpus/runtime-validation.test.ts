@@ -125,6 +125,38 @@ test("aceita personalização do painel e rejeita limites inválidos", () => {
   }).success, false);
 });
 
+test("aceita múltiplos painéis com tipos próprios (ticketPanels)", () => {
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: {
+      tickets: {
+        ticketPanels: [{
+          id: "panel-loja",
+          name: "Loja",
+          channelId: "ch_loja",
+          title: "Central da loja",
+          description: "Pedidos e reembolsos.",
+          accentColor: "#28655b",
+          footer: "Atendimento de segunda a sexta.",
+          buttonLabel: "Abrir atendimento",
+          buttonEmoji: "🛒",
+          buttonStyle: 2,
+          displayMode: "buttons",
+          buttonDisplayStyle: 3,
+          menuPrompt: "Escolha o assunto:",
+          menuPlaceholder: "Selecione uma opção",
+          typeIds: ["purchase", "report"],
+        }],
+      },
+    },
+  }).success, true);
+
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: { tickets: { ticketPanels: [{ id: "panel-x", segredo: "nao" }] } },
+  }).success, false);
+});
+
 test("recusa mais departamentos configurados do que o Discord suporta", () => {
   assert.equal(publishInputSchema.safeParse({
     ...valid,

@@ -97,6 +97,28 @@ export const moduleDefaults: Record<ModuleKey, Record<string, unknown>> = {
     departmentButtonStyle: 2,
     departmentMenuPrompt: "Escolha o departamento para abrir o atendimento:",
     departmentMenuPlaceholder: "Escolha o departamento",
+    // Um exemplo completo aqui e o que permite a validacao de publicacao
+    // aceitar paineis criados pela dashboard: cada painel gravado precisa ter
+    // apenas estas chaves.
+    ticketPanels: [
+      {
+        id: "default",
+        name: "Painel principal",
+        channelId: "",
+        title: "Central de atendimento",
+        description: "Escolha o departamento. Um canal privado é criado só para você e a equipe.",
+        accentColor: "#28655b",
+        footer: "",
+        buttonLabel: "Abrir atendimento",
+        buttonEmoji: "🎫",
+        buttonStyle: 1,
+        displayMode: "select",
+        buttonDisplayStyle: 2,
+        menuPrompt: "Escolha o departamento para abrir o atendimento:",
+        menuPlaceholder: "Escolha o departamento",
+        typeIds: [],
+      },
+    ],
   },
   forms: {
     panelChannelId: "",
