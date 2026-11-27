@@ -20,8 +20,9 @@ import {
   type Message,
   type TextChannel
 } from "discord.js";
-import { bool, guildPlan, isEnabled, list, moduleConfig, num, str } from "./config.ts";
+import { bool, guildPlan, isEnabled, list, moduleConfig, num, str, type ModuleConfig } from "./config.ts";
 import { planAllows } from "../lib/wumpus/plan-features.ts";
+import { analyzeWithContext } from "./ai.ts";
 import { id } from "./ids.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
@@ -66,6 +67,8 @@ export type Ticket = {
   /** Primeira resposta da equipe — base do SLA e das metricas por atendente. */
   firstResponseAt: string | null;
   firstRespondedBy: string | null;
+  /** Última resposta enviada pela IA autônoma — evita responder em loop. */
+  aiRepliedAt?: string | null;
   /** Ultima mensagem de qualquer um — base do fechamento por inatividade. */
   lastActivityAt: string;
   closeReason: string | null;
@@ -132,6 +135,15 @@ const PRIORITY_LABELS: Record<TicketPriority, string> = {
   urgent: "Urgente",
 };
 
+// Emojis customizados do servidor principal nos controles do canal de ticket.
+// O bot precisa estar no servidor dono do emoji para o Discord aceitar o id.
+const TICKET_EMOJIS = {
+  unclaimed: { id: "1575773320769568799", name: "naoassumido" },
+  claimed: { id: "1575773318940725288", name: "assumido" },
+  manage: { id: "1575773710080540703", name: "gerenciar" },
+  close: { id: "1575773956278067341", name: "close" },
+} as const;
+
 /** Texto do cabeçalho fixado — sempre reflete o estado atual do ticket. */
 function ticketHeaderText(ticket: Ticket): string {
   const status = ticket.waitingOn === "user"
@@ -154,11 +166,10 @@ function ticketHeaderComponents(ticket: Ticket) {
     type: 1,
     components: [
       claimed
-        ? { type: 2, style: 3, label: "Assumido", custom_id: id("ticket", "claim", ticket.id), disabled: true }
-        : { type: 2, style: 2, label: "Assumir", custom_id: id("ticket", "claim", ticket.id) },
-      { type: 2, style: 2, label: "Transferir", custom_id: id("ticket", "transfer_pick", ticket.id) },
-      { type: 2, style: 2, label: "Gerenciar", emoji: { name: "⚙️" }, custom_id: id("ticket", "manage", ticket.id) },
-      { type: 2, style: 4, label: "Fechar", custom_id: id("ticket", "close", ticket.id) },
+        ? { type: 2, style: 3, label: "Assumido", emoji: { id: TICKET_EMOJIS.claimed.id, name: TICKET_EMOJIS.claimed.name }, custom_id: id("ticket", "claim", ticket.id), disabled: true }
+        : { type: 2, style: 2, label: "Assumir", emoji: { id: TICKET_EMOJIS.unclaimed.id, name: TICKET_EMOJIS.unclaimed.name }, custom_id: id("ticket", "claim", ticket.id) },
+      { type: 2, style: 2, emoji: { id: TICKET_EMOJIS.manage.id, name: TICKET_EMOJIS.manage.name }, custom_id: id("ticket", "manage", ticket.id) },
+      { type: 2, style: 4, label: "Fechar", emoji: { id: TICKET_EMOJIS.close.id, name: TICKET_EMOJIS.close.name }, custom_id: id("ticket", "close", ticket.id) },
     ],
   }];
 }
@@ -192,7 +203,7 @@ export async function syncTicketHeader(guild: Guild, ticketId: number, log?: Log
 }
 
 /** Grava a mensagem do canal de atendimento — base da transcricao e da IA. */
-export async function recordTicketMessage(message: Message): Promise<void> {
+export async function recordTicketMessage(message: Message, log?: Logger): Promise<void> {
   if (!message.guild || message.author.bot) return;
 
   const rows = await read<Ticket>("tickets");
@@ -213,9 +224,10 @@ export async function recordTicketMessage(message: Message): Promise<void> {
 
   // Primeira resposta da equipe: o SLA mede ate aqui, nao ate o claim. Um
   // claim sem resposta nenhuma nao tira o ticket do estado de espera.
+  const isOpener = message.author.id === ticket.openerId;
   let isStaffReply = ticket.claimedBy === message.author.id;
   const member = message.member;
-  if (!isStaffReply && member && (!ticket.firstResponseAt || ticket.waitingOn === "staff")) {
+  if (!isStaffReply && member && !isOpener) {
     const [ticketConfig, staffConfig] = await Promise.all([
       moduleConfig(message.guild.id, "tickets"),
       moduleConfig(message.guild.id, "staff"),
@@ -229,19 +241,36 @@ export async function recordTicketMessage(message: Message): Promise<void> {
   }
   const firstResponse = isStaffReply && !ticket.firstResponseAt ? at : null;
 
+  let autoClaimed = false;
+  let stateChanged = false;
+
   await mutate<Ticket>("tickets", (all) => {
     const row = all.find((entry) => entry.id === ticket.id && entry.guildId === ticket.guildId);
     if (!row) return all;
     row.lastActivityAt = at;
-    if (
-      (row.waitingOn === "user" && message.author.id === ticket.openerId) ||
-      (row.waitingOn === "staff" && isStaffReply)
-    ) row.waitingOn = null;
+    // Automação: a equipe assume ao digitar e a espera acompanha quem falou
+    // por último — resposta da equipe aguarda o usuário e vice-versa.
+    if (isStaffReply && !isOpener) {
+      if (!row.claimedBy) {
+        row.claimedBy = message.author.id;
+        row.claimedAt = at;
+        row.status = "claimed";
+        autoClaimed = true;
+        stateChanged = true;
+      }
+      if (row.waitingOn !== "user") {
+        row.waitingOn = "user";
+        stateChanged = true;
+      }
+    } else if (isOpener && row.waitingOn !== "staff") {
+      row.waitingOn = "staff";
+      stateChanged = true;
+    }
     if (firstResponse) {
       row.firstResponseAt = firstResponse;
       row.firstRespondedBy = message.author.id;
     }
-    if (message.author.id === ticket.openerId && !row.subject) {
+    if (isOpener && !row.subject) {
       row.subject = content.trim().slice(0, 80);
     }
     return all;
@@ -260,6 +289,158 @@ export async function recordTicketMessage(message: Message): Promise<void> {
     });
     return messages;
   });
+
+  if (autoClaimed) {
+    log?.info("atendimento assumido automaticamente pela primeira mensagem da equipe", {
+      guildId: message.guild.id, ticketId: ticket.id, staffId: message.author.id,
+    });
+    const channel = message.channel;
+    if (channel.isTextBased() && "send" in channel) {
+      await channel.send({
+        content: `<@${message.author.id}> assumiu este atendimento.`,
+        allowedMentions: { users: [message.author.id], parse: [] },
+      }).catch(() => undefined);
+    }
+  }
+  if (stateChanged) {
+    await syncTicketHeader(message.guild, ticket.id, log);
+  }
+
+  const subjectCaptured = isOpener && !ticket.subject;
+  if (!isOpener) return;
+  const ticketConfig = await moduleConfig(message.guild.id, "tickets");
+
+  if (subjectCaptured && bool(ticketConfig, "priorityEnabled", true) && bool(ticketConfig, "aiAutoPriorityEnabled", false)) {
+    await autoPriorityFromAi(message.guild, ticket, content, log);
+  }
+
+  if (isOpener && !ticket.claimedBy && !ticket.firstResponseAt && bool(ticketConfig, "aiAutoReplyEnabled", false)) {
+    await autoAiReply(message, ticket, ticketConfig, log);
+  }
+}
+
+type TrainingPair = { question: string; answer: string };
+
+function readTraining(config: ModuleConfig | null): TrainingPair[] {
+  const raw = config?.aiTraining;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item): TrainingPair[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const question = typeof row.question === "string" ? row.question.trim() : "";
+    const answer = typeof row.answer === "string" ? row.answer.trim() : "";
+    return question && answer ? [{ question, answer }] : [];
+  }).slice(0, 100);
+}
+
+async function ticketStaffRoleIds(guild: Guild, ticketConfig: ModuleConfig | null): Promise<string[]> {
+  const staffConfig = await moduleConfig(guild.id, "staff");
+  return [...new Set([
+    ...list(ticketConfig, "staffRoleIds"),
+    ...list(staffConfig, "staffRoleIds"),
+  ])].slice(0, 5);
+}
+
+/** Prioridade automática: a IA classifica o contexto da primeira mensagem. */
+async function autoPriorityFromAi(guild: Guild, ticket: Ticket, content: string, log?: Logger): Promise<void> {
+  const plan = await guildPlan(guild.id);
+  if (!plan || !planAllows(plan, "ai")) return;
+  const verdict = await analyzeWithContext({
+    task: [
+      "Classifique a urgência deste atendimento respondendo exatamente uma palavra: baixa, normal, alta ou urgente.",
+      "Urgente: risco imediato, bug crítico, golpe, má conduta grave.",
+      "Alta: prejuízo ou bloqueio acontecendo agora.",
+      "Normal: dúvida ou pedido comum.",
+      "Baixa: pedido secundário ou elogio.",
+    ].join(" "),
+    context: `Assunto: ${content.slice(0, 500)}\nDepartamento: ${ticket.department ?? "geral"}`,
+    maxTokens: 10,
+  });
+  const label = (verdict ?? "").toLocaleLowerCase("pt-BR");
+  const priority: TicketPriority = label.includes("urgente")
+    ? "urgent"
+    : label.includes("alta")
+      ? "high"
+      : label.includes("baixa")
+        ? "low"
+        : "normal";
+  let changed = false;
+  await mutate<Ticket>("tickets", (all) => {
+    const row = all.find((entry) => entry.id === ticket.id && entry.guildId === ticket.guildId);
+    if (!row || row.status === "closed") return all;
+    if (row.priority !== priority) {
+      row.priority = priority;
+      changed = true;
+    }
+    return all;
+  });
+  if (changed) {
+    log?.info("prioridade definida automaticamente pela IA", { guildId: guild.id, ticketId: ticket.id, priority });
+    await syncTicketHeader(guild, ticket.id, log);
+  }
+}
+
+/**
+ * Resposta autônoma: responde com base no treinamento da dashboard e, quando
+ * não entende o pedido, chama a equipe em vez de inventar uma resposta.
+ */
+async function autoAiReply(
+  message: Message,
+  ticket: Ticket,
+  ticketConfig: ModuleConfig | null,
+  log?: Logger
+): Promise<void> {
+  const guild = message.guild!;
+  const plan = await guildPlan(guild.id);
+  if (!plan || !planAllows(plan, "ai") || !bool(ticketConfig, "aiSupportEnabled", true)) return;
+
+  const training = readTraining(ticketConfig);
+  const history = (await getTicketMessages(ticket.id))
+    .slice(-10)
+    .map((entry) => `${entry.authorName}: ${entry.content}`)
+    .join("\n");
+  const context = [
+    `Atendimento #${ticket.id} · Departamento: ${ticket.department ?? "geral"}`,
+    `Conversa:\n${history || "(sem mensagens anteriores)"}`,
+    training.length
+      ? `Base de treinamento oficial do servidor:\n${training.map((pair) => `P: ${pair.question}\nR: ${pair.answer}`).join("\n")}`
+      : "Nenhuma base de treinamento configurada.",
+  ].join("\n\n");
+
+  const draft = await analyzeWithContext({
+    task: [
+      "Responda a última mensagem do usuário do atendimento usando somente a base de treinamento e a conversa.",
+      "Se a base e a conversa não forem suficientes para responder com segurança, responda exatamente ESCALAR e nada mais.",
+      "Nunca invente políticas, prazos, valores ou promessas. Máximo de 6 linhas.",
+    ].join(" "),
+    context,
+    maxTokens: 400,
+  });
+
+  const channel = message.channel;
+  if (!channel.isTextBased() || !("send" in channel)) return;
+  const escalate = !draft || draft.trim().toLocaleUpperCase("pt-BR").startsWith("ESCALAR");
+
+  if (escalate) {
+    const roleIds = await ticketStaffRoleIds(guild, ticketConfig);
+    await channel.send({
+      content: [
+        roleIds.length ? roleIds.map((roleId) => `<@&${roleId}>`).join(" ") : "Equipe de atendimento,",
+        "a IA não conseguiu responder este atendimento — é necessário um atendente humano.",
+      ].join(" "),
+      allowedMentions: { roles: roleIds, parse: [] },
+    }).catch(() => undefined);
+    log?.info("IA escalou o atendimento para a equipe", { guildId: guild.id, ticketId: ticket.id });
+    return;
+  }
+
+  await channel.send({ content: draft.slice(0, 2000) }).catch(() => undefined);
+  await mutate<Ticket>("tickets", (all) => {
+    const row = all.find((entry) => entry.id === ticket.id && entry.guildId === ticket.guildId);
+    if (row) row.aiRepliedAt = new Date().toISOString();
+    return all;
+  });
+  log?.info("IA respondeu o atendimento automaticamente", { guildId: guild.id, ticketId: ticket.id });
 }
 
 /** Sends a dashboard reply through the bot and records it with the real staff identity. */

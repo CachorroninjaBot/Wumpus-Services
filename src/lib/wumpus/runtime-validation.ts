@@ -116,6 +116,22 @@ export const publishInputSchema = z.object({
   }
 
   const ticketConfig = input.modules.tickets;
+  const training = ticketConfig?.aiTraining;
+  if (Array.isArray(training)) {
+    if (training.length > 100) {
+      ctx.addIssue({ code: "custom", message: "O treinamento da IA aceita até 100 pares de pergunta e resposta." });
+    }
+    training.forEach((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return;
+      const row = item as Record<string, unknown>;
+      if (typeof row.question !== "string" || !row.question.trim() || row.question.length > 200) {
+        ctx.addIssue({ code: "custom", message: `A pergunta ${index + 1} do treinamento precisa ter até 200 caracteres.` });
+      }
+      if (typeof row.answer !== "string" || !row.answer.trim() || row.answer.length > 2000) {
+        ctx.addIssue({ code: "custom", message: `A resposta ${index + 1} do treinamento precisa ter até 2.000 caracteres.` });
+      }
+    });
+  }
   const departments = ticketConfig?.departmentSettings;
   if (Array.isArray(departments)) {
     if (departments.length > 25) {

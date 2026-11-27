@@ -152,3 +152,29 @@ Não dá para testar OAuth nem enviar mensagem no Discord por script. O caminho 
   o usuário editar o próprio estado), mas ainda é limite.
 - **Login real nunca testado** ponta a ponta.
 - **`ephemeral` depreciado**: ~15 chamadas no bot.
+
+## Automação do canal e IA autônoma (2026-11-27)
+
+- **Controles do canal** (`ticketHeaderComponents`): linha com Assumir/Assumido
+  (emojis customizados `naoassumido`/`assumido`), Gerenciar (só o emoji
+  `gerenciar`) e Fechar (emoji `close`). O botão **Transferir** saiu da linha
+  principal e virou botão do menu Gerenciar. Os selects de adicionar/remover
+  pessoa têm prefixos ➕/➖, e o texto do menu não menciona mais o SLA.
+- **Auto-assunção e espera automática** (`recordTicketMessage`): quem tem cargo
+  de equipe assume o ticket ao digitar pela primeira vez (mesmo efeito do
+  `claimTicket`: status `claimed`, aviso no canal); a espera acompanha quem
+  falou por último — resposta da equipe ⇒ `waitingOn: "user"`, resposta do
+  solicitante ⇒ `waitingOn: "staff"`. Toda mudança de estado sincroniza o
+  cabeçalho fixado.
+- **IA autônoma** (chaves novas em `lib/wumpus/defaults.ts`):
+  - `aiAutoReplyEnabled` — a IA responde o solicitante no canal enquanto
+    nenhum atendente assumiu. Prompt restrito à base de treinamento +
+    conversa; quando não sabe, responde `ESCALAR` e o bot menciona os cargos
+    de atendimento em vez de inventar resposta.
+  - `aiAutoPriorityEnabled` — na primeira mensagem do solicitante a IA
+    classifica a prioridade (baixa/normal/alta/urgente) e atualiza o ticket.
+  - `aiTraining` — pares pergunta/resposta editados na seção "Treinamento da
+    IA de atendimento" da dashboard (até 100 pares; validação em
+    `runtime-validation.ts` limita pergunta a 200 e resposta a 2.000 chars).
+  - Tudo gated por `planAllows(plan, "ai")` + `aiSupportEnabled`, igual ao
+    botão "Resposta com IA".

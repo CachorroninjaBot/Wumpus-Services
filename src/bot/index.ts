@@ -983,20 +983,20 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
       new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
         new UserSelectMenuBuilder()
           .setCustomId(id("ticket", "manage_add_member", ticketId))
-          .setPlaceholder("Adicionar pessoa ao ticket")
+          .setPlaceholder("➕ Adicionar pessoa ao ticket")
           .setMinValues(1)
           .setMaxValues(1),
       ),
       new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
         new UserSelectMenuBuilder()
           .setCustomId(id("ticket", "manage_remove_member", ticketId))
-          .setPlaceholder("Remover pessoa adicionada")
+          .setPlaceholder("➖ Remover pessoa adicionada")
           .setMinValues(1)
           .setMaxValues(1),
       ),
     );
     await interaction.reply({
-      content: `Controles da equipe · atendimento #${ticketId}\nO SLA continua contando em todos os estados de espera.`,
+      content: `Controles da equipe · atendimento #${ticketId}`,
       components: [
         ...controls,
         {
@@ -1006,6 +1006,7 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
             { type: 2, style: 2, label: "Aguardar usuário", custom_id: id("ticket", "manage_wait_user", ticketId) },
             { type: 2, style: 2, label: "Aguardar equipe", custom_id: id("ticket", "manage_wait_staff", ticketId) },
             { type: 2, style: 2, label: "Retomar", custom_id: id("ticket", "manage_resume", ticketId) },
+            { type: 2, style: 2, label: "Transferir", custom_id: id("ticket", "transfer_pick", ticketId) },
           ],
         },
       ] as never,
@@ -1808,7 +1809,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
     void handleImageContent(message, log).catch((error) =>
       log.error("falha no automod de imagem", { error: String(error) }),
     );
-    void recordTicketMessage(message).catch(() => undefined);
+    void recordTicketMessage(message, log).catch(() => undefined);
     void bump(message.guild.id, "messages").catch(() => undefined);
     void handleKnowledgeMessage(message, log).catch((error) =>
       log.error("falha na base de conhecimento", { error: String(error) }),

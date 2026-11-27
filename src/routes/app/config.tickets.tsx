@@ -199,6 +199,14 @@ function TicketPanelSettings() {
       .slice(0, 25);
   }, [tcfg.config.savedReplies]);
 
+  const aiTraining = useMemo<Array<{ question: string; answer: string }>>(() => {
+    const raw = Array.isArray(tcfg.config.aiTraining) ? tcfg.config.aiTraining : [];
+    return raw
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+      .map((entry) => ({ question: asString(entry.question), answer: asString(entry.answer) }))
+      .slice(0, 100);
+  }, [tcfg.config.aiTraining]);
+
   const departmentDisplayMode = panel?.displayMode ?? "select";
   const panelButtonStyle = discordButtonStyles.find((style) => style.value === (panel?.buttonStyle ?? 1)) ?? discordButtonStyles[0]!;
   const departmentButtonStyle = discordButtonStyles.find((style) => style.value === (panel?.buttonDisplayStyle ?? 2)) ?? discordButtonStyles[1]!;
@@ -917,6 +925,80 @@ function TicketPanelSettings() {
                   </section>
                 </div>
               </details>
+
+              <section className="space-y-4 rounded-2xl border border-border bg-card p-5" aria-labelledby="ticket-ai-heading">
+                <header>
+                  <h3 id="ticket-ai-heading" className="m-0 text-base font-semibold">Treinamento da IA de atendimento</h3>
+                  <p className="m-0 mt-1 text-sm text-muted-foreground">Ensine a IA com as perguntas e respostas oficiais do seu servidor. Ela responde sozinha e chama a equipe quando não souber.</p>
+                </header>
+                <div className="space-y-4 divide-y divide-border">
+                  <ToggleRow label="Respostas automáticas com IA" description="A IA responde o cliente no canal enquanto nenhum atendente assumiu. Precisa da “IA de apoio à equipe” ligada." checked={Boolean(tcfg.config.aiAutoReplyEnabled)} onChange={(value) => patchTickets({ aiAutoReplyEnabled: value })} />
+                  <ToggleRow label="Prioridade automática por IA" description="A IA lê a primeira mensagem e define a prioridade do atendimento." checked={Boolean(tcfg.config.aiAutoPriorityEnabled)} onChange={(value) => patchTickets({ aiAutoPriorityEnabled: value })} />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <Label>Base de conhecimento</Label>
+                      <p className="m-0 mt-0.5 text-xs text-muted-foreground">A IA usa apenas estas respostas e a conversa — ela nunca inventa políticas, prazos ou valores.</p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={aiTraining.length >= 100}
+                      onClick={() => patchTickets({ aiTraining: [...aiTraining, { question: "", answer: "" }] })}
+                    >
+                      <Plus aria-hidden="true" className="size-4" />
+                      Adicionar pergunta
+                    </Button>
+                  </div>
+                  {aiTraining.map((pair, index) => (
+                    <div key={`ai-${index}`} className="grid gap-2 rounded-xl border border-border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-start">
+                      <Field label={`Pergunta ${index + 1}`}>
+                        <Input
+                          aria-label={`Pergunta ${index + 1} do treinamento`}
+                          maxLength={200}
+                          value={pair.question}
+                          placeholder="Ex.: Qual o horário de atendimento?"
+                          onChange={(event) => {
+                            const next = [...aiTraining];
+                            next[index] = { ...pair, question: event.target.value };
+                            patchTickets({ aiTraining: next });
+                          }}
+                        />
+                      </Field>
+                      <Field label={`Resposta ${index + 1}`}>
+                        <Textarea
+                          aria-label={`Resposta ${index + 1} do treinamento`}
+                          rows={3}
+                          maxLength={2000}
+                          value={pair.answer}
+                          placeholder="Resposta oficial que a IA enviará"
+                          onChange={(event) => {
+                            const next = [...aiTraining];
+                            next[index] = { ...pair, answer: event.target.value };
+                            patchTickets({ aiTraining: next });
+                          }}
+                        />
+                      </Field>
+                      <div className="sm:pt-7">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Remover pergunta ${index + 1}`}
+                          onClick={() => patchTickets({ aiTraining: aiTraining.filter((_, itemIndex) => itemIndex !== index) })}
+                        >
+                          <Trash2 aria-hidden="true" className="size-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  {!aiTraining.length ? (
+                    <p className="m-0 rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">Nenhuma pergunta treinada ainda. Sem treinamento, a IA encaminha todos os atendimentos para a equipe.</p>
+                  ) : null}
+                </div>
+              </section>
             </div>
 
             <aside className="min-w-0 space-y-4 xl:sticky xl:top-24 xl:self-start">

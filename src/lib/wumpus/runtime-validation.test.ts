@@ -125,6 +125,28 @@ test("aceita personalização do painel e rejeita limites inválidos", () => {
   }).success, false);
 });
 
+test("aceita treinamento da IA e recusa pares incompletos", () => {
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: {
+      tickets: {
+        aiAutoReplyEnabled: true,
+        aiAutoPriorityEnabled: true,
+        aiTraining: [{ question: "Qual o horário de atendimento?", answer: "De 9h às 18h." }],
+      },
+    },
+  }).success, true);
+
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: { tickets: { aiTraining: [{ question: "Só a pergunta" }] } },
+  }).success, false);
+  assert.equal(publishInputSchema.safeParse({
+    ...valid,
+    modules: { tickets: { aiTraining: [{ question: "x".repeat(201), answer: "ok" }] } },
+  }).success, false);
+});
+
 test("aceita múltiplos painéis com tipos próprios (ticketPanels)", () => {
   assert.equal(publishInputSchema.safeParse({
     ...valid,
