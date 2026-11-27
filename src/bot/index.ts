@@ -60,6 +60,11 @@ import { handleKnowledgeMessage } from "./knowledge.ts";
 import { trackFrequentQuestion } from "./knowledge-faq.ts";
 import { analyzeWithContext } from "./ai.ts";
 import { planAllows } from "../lib/wumpus/plan-features.ts";
+import {
+  findTicketPanel,
+  findTicketType,
+  panelTicketTypes,
+} from "../lib/wumpus/ticket-panels.ts";
 import { consoleLogger, type Logger } from "./logger.ts";
 import {
   auditAndLog,
@@ -597,7 +602,11 @@ async function respond(interaction: Interaction, content: string): Promise<void>
  * por linha. Com select cabem 25, da para por descricao em cada opcao, e a
  * escolha fica num unico controle em vez de uma fileira de botoes.
  */
-async function promptDepartment(interaction: ButtonInteraction, log: Logger): Promise<void> {
+async function promptDepartment(
+  interaction: ButtonInteraction,
+  panelId: string | undefined,
+  log: Logger,
+): Promise<void> {
   const guild = interaction.guild;
   if (!guild) return;
 
@@ -608,83 +617,57 @@ async function promptDepartment(interaction: ButtonInteraction, log: Logger): Pr
   }
 
   const config = await moduleConfig(guild.id, "tickets");
-  const departments = list(config, "departments").filter(Boolean).slice(0, 25);
+  const panel = findTicketPanel(config, panelId);
+  // Sem painel salvo (botao antigo) o painel sintetizado traz todos os tipos.
+  const types = panel && config ? panelTicketTypes(config, panel) : [];
 
-  if (departments.length <= 1) {
-    await beginTicketOpen(interaction, departments[0] ?? null, log);
+  if (types.length <= 1) {
+    await beginTicketOpen(interaction, types[0]?.id ?? null, log);
     return;
   }
 
-  const departmentSettings = getTicketDepartmentSettings(config);
-  const menuPlaceholder = typeof config?.departmentMenuPlaceholder === "string"
-    ? config.departmentMenuPlaceholder.trim().slice(0, 150)
-    : "";
-  const menuPrompt = typeof config?.departmentMenuPrompt === "string"
-    ? config.departmentMenuPrompt.trim().slice(0, 2000)
-    : "";
   const menu = new StringSelectMenuBuilder()
     .setCustomId(id("ticket", "dept"))
-    .setPlaceholder(menuPlaceholder || "Escolha o departamento")
+    .setPlaceholder((panel?.menuPlaceholder || "Escolha o tipo de atendimento").slice(0, 150))
     .setMinValues(1)
     .setMaxValues(1)
     .addOptions(
-      departments.map((department) =>
-        (() => {
-          const settings = departmentSettings.find((entry) => entry.name === department);
-          const option = new StringSelectMenuOptionBuilder()
-            .setLabel(department.slice(0, 100))
-            .setValue(department.slice(0, 100));
-          if (typeof settings?.description === "string" && settings.description.trim()) {
-            option.setDescription(settings.description.trim().slice(0, 100));
-          }
-          if (typeof settings?.emoji === "string" && settings.emoji.trim()) {
-            option.setEmoji(settings.emoji.trim());
-          }
-          return option;
-        })(),
-      ),
+      types.slice(0, 25).map((type) => {
+        const option = new StringSelectMenuOptionBuilder()
+          .setLabel(type.name.slice(0, 100))
+          .setValue(type.id.slice(0, 100));
+        if (type.description) option.setDescription(type.description.slice(0, 100));
+        if (type.emoji) option.setEmoji(type.emoji);
+        return option;
+      }),
     );
 
   await interaction.reply({
-    content: menuPrompt || "Escolha o departamento para abrir o atendimento:",
+    content: (panel?.menuPrompt || "Escolha o tipo para abrir o atendimento:").slice(0, 2000),
     ephemeral: true,
     components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
   });
 }
 
-function getTicketDepartmentSettings(
-  config: Awaited<ReturnType<typeof moduleConfig>>,
-): Record<string, unknown>[] {
-  return Array.isArray(config?.departmentSettings)
-    ? config.departmentSettings.filter(
-        (entry): entry is Record<string, unknown> =>
-          Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
-      )
-    : [];
-}
-
 async function beginTicketOpen(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
-  department: string | null,
+  typeRef: string | null,
   log: Logger,
 ): Promise<void> {
   const guild = interaction.guild;
   if (!guild) return;
   const config = await moduleConfig(guild.id, "tickets");
-  const settings = getTicketDepartmentSettings(config).find((entry) => entry.name === department);
-  const questions = Array.isArray(settings?.intakeQuestions)
-    ? settings.intakeQuestions
-        .filter(
-          (question): question is string =>
-            typeof question === "string" && Boolean(question.trim()),
-        )
-        .slice(0, 5)
-    : [];
+  const type = typeRef ? findTicketType(config, typeRef) : undefined;
+  const questions = (type?.intakeQuestions ?? [])
+    .filter((question) => Boolean(question.trim()))
+    .slice(0, 5);
+  // openTicket grava o NOME do tipo; ids novos e nomes antigos resolvem igual.
+  const department = type?.name ?? typeRef ?? null;
 
-  if (questions.length && settings && typeof settings.id === "string") {
+  if (questions.length && type) {
     const modal = new ModalBuilder()
-      .setCustomId(id("ticket", "intake_submit", settings.id))
-      .setTitle(`Abrir ticket · ${String(settings.name).slice(0, 25)}`.slice(0, 45));
+      .setCustomId(id("ticket", "intake_submit", type.id))
+      .setTitle(`Abrir ticket · ${type.name.slice(0, 25)}`.slice(0, 45));
     for (const [index, question] of questions.entries()) {
       const field = new TextInputBuilder()
         .setCustomId(`q${index}`)
@@ -706,7 +689,7 @@ async function beginTicketOpen(
   );
 }
 
-/** Abre o atendimento no departamento escolhido no select. */
+/** Abre o atendimento no tipo escolhido no select (id novo ou nome antigo). */
 async function handleDepartmentSelect(
   interaction: StringSelectMenuInteraction,
   log: Logger,
@@ -927,7 +910,7 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
   }
 
   if (kind === "ticket" && action === "open") {
-    await promptDepartment(interaction, log);
+    await promptDepartment(interaction, args[0], log);
     return;
   }
 
@@ -937,14 +920,14 @@ async function handleButton(interaction: ButtonInteraction, log: Logger): Promis
       await interaction.reply({ content: maintenance, ephemeral: true });
       return;
     }
-    const departmentId = decodeURIComponent(args[0] ?? "");
+    const typeRef = decodeURIComponent(args[0] ?? "");
     const config = await moduleConfig(guild.id, "tickets");
-    const department = getTicketDepartmentSettings(config).find((entry) => entry.id === departmentId);
-    if (!department || typeof department.name !== "string") {
+    const type = findTicketType(config, typeRef);
+    if (!type) {
       await interaction.reply({ content: "Esta opção de atendimento não está mais disponível.", ephemeral: true });
       return;
     }
-    await beginTicketOpen(interaction, department.name, log);
+    await beginTicketOpen(interaction, type.id, log);
     return;
   }
 
@@ -1367,16 +1350,11 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
 
   if (kind === "ticket" && action === "intake_submit") {
     const config = await moduleConfig(guild.id, "tickets");
-    const settings = getTicketDepartmentSettings(config).find((entry) => entry.id === args[0]);
-    const questions = Array.isArray(settings?.intakeQuestions)
-      ? settings.intakeQuestions
-          .filter(
-            (question): question is string =>
-              typeof question === "string" && Boolean(question.trim()),
-          )
-          .slice(0, 5)
-      : [];
-    if (!settings || typeof settings.name !== "string" || !questions.length) {
+    const type = findTicketType(config, args[0] ?? "");
+    const questions = (type?.intakeQuestions ?? [])
+      .filter((question) => Boolean(question.trim()))
+      .slice(0, 5);
+    if (!type || !questions.length) {
       await interaction.reply({
         content: "Este formulário mudou. Volte ao painel e tente abrir o atendimento novamente.",
         ephemeral: true,
@@ -1400,7 +1378,7 @@ async function handleModal(interaction: ModalSubmitInteraction, log: Logger): Pr
       return;
     }
     await interaction.deferReply({ ephemeral: true });
-    const result = await openTicket(guild, interaction.user.id, settings.name, log, answers);
+    const result = await openTicket(guild, interaction.user.id, type.name, log, answers);
     await interaction.editReply(
       result.ok ? `Atendimento aberto em <#${result.channelId}>.` : result.error,
     );

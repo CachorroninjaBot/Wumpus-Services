@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Layers, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
@@ -12,6 +12,11 @@ import { ExclusiveButton } from "@/components/exclusive-button";
 import { DiscordMultiSelect, DiscordSelect } from "@/components/discord-select";
 import { DiscordPanel, DiscordModalPreview } from "@/components/discord-panel";
 import { ticketPanelPreflight } from "@/lib/wumpus/preflight";
+import {
+  normalizeTicketPanels,
+  panelTicketTypes,
+  type TicketPanel,
+} from "@/lib/wumpus/ticket-panels";
 import type { TicketDepartmentConfig } from "@/lib/wumpus/types";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
@@ -133,9 +138,21 @@ function TicketPanelSettings() {
     return canUseDepartments ? normalized.slice(0, 25) : normalized.slice(0, 1);
   }, [canUseDepartments, tcfg.config.departmentSettings, tcfg.config.departments]);
 
-  const departmentDisplayMode = asString(tcfg.config.departmentDisplayMode, "select") === "buttons" ? "buttons" : "select";
-  const panelButtonStyle = discordButtonStyles.find((style) => style.value === Number(tcfg.config.panelButtonStyle)) ?? discordButtonStyles[0]!;
-  const departmentButtonStyle = discordButtonStyles.find((style) => style.value === Number(tcfg.config.departmentButtonStyle)) ?? discordButtonStyles[1]!;
+  const maxPanels = canUseDepartments ? (guild.plan === "vitalicio" ? 25 : 5) : 1;
+  const panels = useMemo(
+    () => normalizeTicketPanels(tcfg.config).slice(0, maxPanels),
+    [maxPanels, tcfg.config],
+  );
+  const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
+  const panel = panels.find((entry) => entry.id === selectedPanelId) ?? panels[0];
+  const panelTypes = useMemo(
+    () => (panel ? panelTicketTypes(tcfg.config, panel) : []),
+    [panel, tcfg.config],
+  );
+
+  const departmentDisplayMode = panel?.displayMode ?? "select";
+  const panelButtonStyle = discordButtonStyles.find((style) => style.value === (panel?.buttonStyle ?? 1)) ?? discordButtonStyles[0]!;
+  const departmentButtonStyle = discordButtonStyles.find((style) => style.value === (panel?.buttonDisplayStyle ?? 2)) ?? discordButtonStyles[1]!;
   const [selectedTemplate, setSelectedTemplate] = useState("support");
   const [templateNotice, setTemplateNotice] = useState("");
   const [previewMode, setPreviewMode] = useState<"panel" | "modal">("panel");
@@ -153,11 +170,80 @@ function TicketPanelSettings() {
     setDirty(true);
   }
 
+  /**
+   * Grava a lista de paineis. O primeiro painel também alimenta os campos
+   * antigos (`panelChannelId`, `panelTitle`, ...) para o que ainda lê deles
+   * continuar coerente.
+   */
+  function savePanels(next: TicketPanel[]) {
+    const primary = next[0];
+    patchTickets({
+      ticketPanels: next,
+      ...(primary
+        ? {
+            panelChannelId: primary.channelId,
+            panelTitle: primary.title,
+            panelDescription: primary.description,
+            panelAccentColor: primary.accentColor,
+            panelFooter: primary.footer,
+            panelButtonLabel: primary.buttonLabel,
+            panelButtonEmoji: primary.buttonEmoji,
+            panelButtonStyle: primary.buttonStyle,
+            departmentDisplayMode: primary.displayMode,
+            departmentButtonStyle: primary.buttonDisplayStyle,
+            departmentMenuPrompt: primary.menuPrompt,
+            departmentMenuPlaceholder: primary.menuPlaceholder,
+          }
+        : {}),
+    });
+  }
+
+  function patchPanel(patch: Partial<TicketPanel>) {
+    if (!panel) return;
+    savePanels(panels.map((entry) => (entry.id === panel.id ? { ...entry, ...patch } : entry)));
+  }
+
+  function addPanel() {
+    if (panels.length >= maxPanels || !panel) return;
+    const id = `panel-${crypto.randomUUID()}`;
+    const next: TicketPanel[] = [
+      ...panels,
+      {
+        ...panel,
+        id,
+        name: `Painel ${panels.length + 1}`,
+        channelId: "",
+        typeIds: panel.typeIds.length ? panel.typeIds : departmentSettings.map((type) => type.id),
+      },
+    ];
+    savePanels(next);
+    setSelectedPanelId(id);
+  }
+
+  function removePanel(id: string) {
+    if (panels.length <= 1) return;
+    const next = panels.filter((entry) => entry.id !== id);
+    savePanels(next);
+    if (selectedPanelId === id) setSelectedPanelId(next[0]?.id ?? null);
+  }
+
   function saveDepartments(next: TicketDepartmentConfig[]) {
     const limited = canUseDepartments ? next.slice(0, 25) : next.slice(0, 1);
+    const previous = new Set(departmentSettings.map((type) => type.id));
+    const added = limited.filter((type) => !previous.has(type.id)).map((type) => type.id);
     patchTickets({
       departments: limited.map((department) => department.name.trim()).filter(Boolean),
       departmentSettings: limited,
+      // Tipo novo entra em todos os paineis existentes: é o comportamento que
+      // a pessoa espera ao clicar em "Adicionar tipo".
+      ...(added.length && Array.isArray(tcfg.config.ticketPanels)
+        ? {
+            ticketPanels: panels.map((entry) => ({
+              ...entry,
+              typeIds: [...new Set([...entry.typeIds, ...added])],
+            })),
+          }
+        : {}),
     });
   }
 
@@ -166,17 +252,43 @@ function TicketPanelSettings() {
     if (!template) return;
     const presetDepartments = template.config.departmentSettings as TicketDepartmentConfig[];
     const limitedDepartments = canUseDepartments ? presetDepartments : presetDepartments.slice(0, 1);
+    const typeIds = limitedDepartments.map((department) => department.id);
+    const templatePanels = panel
+      ? panels.map((entry) =>
+          entry.id === panel.id
+            ? {
+                ...entry,
+                title: asString(template.config.panelTitle, entry.title),
+                description: asString(template.config.panelDescription, entry.description),
+                buttonLabel: asString(template.config.panelButtonLabel, entry.buttonLabel),
+                buttonEmoji: asString(template.config.panelButtonEmoji, entry.buttonEmoji),
+                typeIds,
+              }
+            : entry,
+        )
+      : panels;
+    const primary = templatePanels[0];
     patchTickets({
       ...template.config,
       departments: limitedDepartments.map((department) => department.name),
       departmentSettings: limitedDepartments,
+      ticketPanels: templatePanels,
+      ...(primary
+        ? {
+            panelTitle: primary.title,
+            panelDescription: primary.description,
+            panelButtonLabel: primary.buttonLabel,
+            panelButtonEmoji: primary.buttonEmoji,
+          }
+        : {}),
     });
     setTemplateNotice(`Modelo “${template.label}” aplicado. Ajuste o que quiser e publique o painel.`);
   }
 
   async function publish() {
     setPubNotice(null);
-    const result = await publishPanel("tickets", asString(tcfg.config.panelChannelId));
+    const channelRef = panels.map((entry) => entry.channelId).find(Boolean) ?? "";
+    const result = await publishPanel("tickets", channelRef);
     if (result) {
       setPubNotice(result.status === "done" ? "Painel publicado no Discord." : result.status === "failed" ? result.detail ?? "O bot não conseguiu publicar o painel." : "Pedido enviado; o bot vai confirmar em instantes.");
       setPubTone(result.status === "done" ? "ok" : result.status === "failed" ? "error" : "neutral");
@@ -231,16 +343,67 @@ function TicketPanelSettings() {
             {!canUseDepartments ? <div className="flex flex-wrap items-center justify-between gap-3"><p className="m-0 text-xs text-muted-foreground">Seu plano permite um tipo de atendimento. Os modelos serão aplicados com uma categoria; departamentos extras são exclusivos dos planos Pro e Vitalício.</p><ExclusiveButton /></div> : null}
           </section>
 
+          <section className="space-y-4 rounded-2xl border border-border bg-card p-5" aria-labelledby="ticket-panels-heading">
+            <header className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 id="ticket-panels-heading" className="m-0 text-base font-semibold">Painéis publicados</h3>
+                <p className="m-0 mt-1 text-sm text-muted-foreground">Cada painel tem seu canal, sua mensagem e a seleção de tipos. Ao publicar, o bot atualiza todos de uma vez.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge tone={panels.length >= maxPanels ? "warn" : "default"}>{panels.length}/{maxPanels}</Badge>
+                <Button type="button" size="sm" variant="outline" onClick={addPanel} disabled={panels.length >= maxPanels}>
+                  <Plus aria-hidden="true" className="size-4" />
+                  Novo painel
+                </Button>
+              </div>
+            </header>
+            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Painéis de atendimento">
+              {panels.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={panel?.id === entry.id}
+                  onClick={() => setSelectedPanelId(entry.id)}
+                  className={cn(
+                    "min-w-40 rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    panel?.id === entry.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50",
+                  )}
+                >
+                  <span className="block truncate text-sm font-medium">{entry.name}</span>
+                  <span className="block text-xs text-muted-foreground">{entry.channelId ? "Canal definido" : "Sem canal"}</span>
+                </button>
+              ))}
+            </div>
+            {!canUseDepartments ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="m-0 text-xs text-muted-foreground">O plano Gratuito publica um painel. Vários painéis (5 no Pro, ilimitados no Vitalício) fazem parte dos planos pagos.</p>
+                <ExclusiveButton />
+              </div>
+            ) : null}
+            {panel ? (
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                <Field label="Nome interno do painel">
+                  <Input maxLength={60} value={panel.name} onChange={(event) => patchPanel({ name: event.target.value })} />
+                </Field>
+                <Field label="Canal onde este painel é publicado">
+                  <DiscordSelect kind="text" value={panel.channelId} onChange={(channelId) => patchPanel({ channelId })} placeholder="Selecione um canal" />
+                </Field>
+                <Button type="button" size="sm" variant="ghost" className="text-destructive" disabled={panels.length <= 1} onClick={() => removePanel(panel.id)}>
+                  <Trash2 aria-hidden="true" className="size-4" />
+                  Excluir
+                </Button>
+              </div>
+            ) : null}
+          </section>
+
           <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(320px,.8fr)]">
             <div className="min-w-0 space-y-8">
               <section className="space-y-4 rounded-2xl border border-border bg-card p-5" aria-labelledby="ticket-location-heading">
                 <header>
-                  <h3 id="ticket-location-heading" className="m-0 text-base font-semibold">Onde a pessoa encontra ajuda?</h3>
-                  <p className="m-0 mt-1 text-sm text-muted-foreground">Escolha o canal público e a categoria para os canais privados.</p>
+                  <h3 id="ticket-location-heading" className="m-0 text-base font-semibold">Onde os tickets são criados?</h3>
+                  <p className="m-0 mt-1 text-sm text-muted-foreground">O canal de cada painel fica na seção acima. Aqui você define a categoria dos canais privados.</p>
                 </header>
-                <Field label="Canal do painel de atendimento">
-                  <DiscordSelect kind="text" value={asString(tcfg.config.panelChannelId)} onChange={(panelChannelId) => patchTickets({ panelChannelId })} placeholder="Selecione um canal" />
-                </Field>
                 <Field label="Categoria onde os canais privados serão criados">
                   <DiscordSelect kind="category" value={asString(tcfg.config.categoryId)} onChange={(categoryId) => patchTickets({ categoryId })} placeholder="Selecione uma categoria" />
                 </Field>
@@ -249,50 +412,50 @@ function TicketPanelSettings() {
 
               <section className="space-y-4 rounded-2xl border border-border bg-card p-5" aria-labelledby="ticket-context-heading">
                 <header>
-                  <h3 id="ticket-context-heading" className="m-0 text-base font-semibold">Dê contexto ao painel</h3>
+                  <h3 id="ticket-context-heading" className="m-0 text-base font-semibold">Dê contexto ao painel{panel ? ` “${panel.name}”` : ""}</h3>
                   <p className="m-0 mt-1 text-sm text-muted-foreground">A pessoa verá esta mensagem antes de escolher o tipo de atendimento.</p>
                 </header>
                 <Field label="Título do painel">
-                  <Input maxLength={100} value={asString(tcfg.config.panelTitle)} onChange={(e) => { patchTickets({ panelTitle: e.target.value }); setDirty(true); }} />
-                  <CharCounter current={asString(tcfg.config.panelTitle).length} max={100} />
+                  <Input maxLength={100} value={panel?.title ?? ""} onChange={(e) => patchPanel({ title: e.target.value })} />
+                  <CharCounter current={(panel?.title ?? "").length} max={100} />
                 </Field>
                 <Field label="Descrição do painel">
-                  <Textarea maxLength={4000} value={asString(tcfg.config.panelDescription)} onChange={(e) => { patchTickets({ panelDescription: e.target.value }); setDirty(true); }} />
-                  <CharCounter current={asString(tcfg.config.panelDescription).length} max={4000} />
+                  <Textarea maxLength={4000} value={panel?.description ?? ""} onChange={(e) => patchPanel({ description: e.target.value })} />
+                  <CharCounter current={(panel?.description ?? "").length} max={4000} />
                 </Field>
                 <Field label="Cor de destaque">
                   <div className="flex gap-2">
-                    <input type="color" value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => { patchTickets({ panelAccentColor: e.target.value }); setDirty(true); }} className="h-9 w-12 cursor-pointer rounded border border-border bg-background" />
-                    <Input value={asString(tcfg.config.panelAccentColor, "#28655b")} onChange={(e) => { patchTickets({ panelAccentColor: e.target.value }); setDirty(true); }} placeholder="#28655b" />
+                    <input type="color" value={panel?.accentColor ?? "#28655b"} onChange={(e) => patchPanel({ accentColor: e.target.value })} className="h-9 w-12 cursor-pointer rounded border border-border bg-background" />
+                    <Input value={panel?.accentColor ?? "#28655b"} onChange={(e) => patchPanel({ accentColor: e.target.value })} placeholder="#28655b" />
                   </div>
                 </Field>
                 <Field label="Como mostrar as opções de atendimento?">
                   <div className="grid gap-2 sm:grid-cols-1 md:grid-cols-2" role="group" aria-label="Formato das opções de atendimento">
-                    <button type="button" aria-pressed={departmentDisplayMode === "select"} onClick={() => { patchTickets({ departmentDisplayMode: "select" }); setDirty(true); }} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", departmentDisplayMode === "select" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
+                    <button type="button" aria-pressed={departmentDisplayMode === "select"} onClick={() => patchPanel({ displayMode: "select" })} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", departmentDisplayMode === "select" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
                       <span className="block text-sm font-semibold">Menu suspenso</span>
                       <span className="mt-1 block text-xs text-muted-foreground">Uma lista compacta que aceita até 25 opções.</span>
                     </button>
-                    <button type="button" aria-pressed={departmentDisplayMode === "buttons"} disabled={departmentSettings.length > 5} onClick={() => { patchTickets({ departmentDisplayMode: "buttons" }); setDirty(true); }} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50", departmentDisplayMode === "buttons" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
+                    <button type="button" aria-pressed={departmentDisplayMode === "buttons"} disabled={panelTypes.length > 5} onClick={() => patchPanel({ displayMode: "buttons" })} className={cn("min-h-16 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50", departmentDisplayMode === "buttons" ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted/50")}>
                       <span className="block text-sm font-semibold">Botões no painel</span>
                       <span className="mt-1 block text-xs text-muted-foreground">Cada tipo aparece direto na publicação, até 5.</span>
                     </button>
                   </div>
-                  {departmentSettings.length > 5 ? <p className="m-0 text-xs text-muted-foreground">Para usar botões, reduza os tipos de atendimento para no máximo 5.</p> : null}
+                  {panelTypes.length > 5 ? <p className="m-0 text-xs text-muted-foreground">Para usar botões, deixe no máximo 5 tipos marcados neste painel.</p> : null}
                 </Field>
                 {departmentDisplayMode === "select" ? (
                   <>
                     <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
-                      <Field label="Texto do botão de abertura"><Input maxLength={80} value={asString(tcfg.config.panelButtonLabel, "Abrir atendimento")} onChange={(e) => { patchTickets({ panelButtonLabel: e.target.value }); setDirty(true); }} placeholder="Abrir atendimento" /></Field>
-                      <Field label="Emoji"><Input maxLength={32} value={asString(tcfg.config.panelButtonEmoji, "🎫")} onChange={(e) => { patchTickets({ panelButtonEmoji: e.target.value }); setDirty(true); }} placeholder="🎫" /></Field>
+                      <Field label="Texto do botão de abertura"><Input maxLength={80} value={panel?.buttonLabel ?? ""} onChange={(e) => patchPanel({ buttonLabel: e.target.value })} placeholder="Abrir atendimento" /></Field>
+                      <Field label="Emoji"><Input maxLength={32} value={panel?.buttonEmoji ?? ""} onChange={(e) => patchPanel({ buttonEmoji: e.target.value })} placeholder="🎫" /></Field>
                     </div>
                     <Field label="Mensagem ao escolher um tipo">
-                      <Textarea rows={2} maxLength={2000} value={asString(tcfg.config.departmentMenuPrompt, "Escolha o departamento para abrir o atendimento:")} onChange={(event) => { patchTickets({ departmentMenuPrompt: event.target.value }); setDirty(true); }} />
+                      <Textarea rows={2} maxLength={2000} value={panel?.menuPrompt ?? ""} onChange={(event) => patchPanel({ menuPrompt: event.target.value })} />
                     </Field>
                     <Field label="Texto dentro do menu">
-                      <Input maxLength={150} value={asString(tcfg.config.departmentMenuPlaceholder, "Escolha o departamento")} onChange={(event) => { patchTickets({ departmentMenuPlaceholder: event.target.value }); setDirty(true); }} />
+                      <Input maxLength={150} value={panel?.menuPlaceholder ?? ""} onChange={(event) => patchPanel({ menuPlaceholder: event.target.value })} />
                     </Field>
                     <Field label="Cor do botão de abertura">
-                      <NativeSelect value={String(panelButtonStyle.value)} onChange={(event) => { patchTickets({ panelButtonStyle: Number(event.target.value) }); setDirty(true); }}>
+                      <NativeSelect value={String(panelButtonStyle.value)} onChange={(event) => patchPanel({ buttonStyle: Number(event.target.value) as 1 | 2 | 3 | 4 })}>
                         {discordButtonStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}
                       </NativeSelect>
                     </Field>
@@ -300,7 +463,7 @@ function TicketPanelSettings() {
                 ) : (
                   <>
                     <Field label="Cor dos botões de opção">
-                      <NativeSelect value={String(departmentButtonStyle.value)} onChange={(event) => { patchTickets({ departmentButtonStyle: Number(event.target.value) }); setDirty(true); }}>
+                      <NativeSelect value={String(departmentButtonStyle.value)} onChange={(event) => patchPanel({ buttonDisplayStyle: Number(event.target.value) as 1 | 2 | 3 | 4 })}>
                         {discordButtonStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}
                       </NativeSelect>
                     </Field>
@@ -308,8 +471,8 @@ function TicketPanelSettings() {
                   </>
                 )}
                 <Field label="Texto complementar no rodapé (opcional)">
-                  <Textarea rows={2} maxLength={300} value={asString(tcfg.config.panelFooter)} onChange={(event) => { patchTickets({ panelFooter: event.target.value }); setDirty(true); }} placeholder="Ex.: Horário de atendimento: 9h às 18h" />
-                  <CharCounter current={asString(tcfg.config.panelFooter).length} max={300} />
+                  <Textarea rows={2} maxLength={300} value={panel?.footer ?? ""} onChange={(event) => patchPanel({ footer: event.target.value })} placeholder="Ex.: Horário de atendimento: 9h às 18h" />
+                  <CharCounter current={(panel?.footer ?? "").length} max={300} />
                   <p className="m-0 text-xs text-muted-foreground">Aparece em texto discreto abaixo do painel.</p>
                 </Field>
               </section>
@@ -360,6 +523,36 @@ function TicketPanelSettings() {
                         <Plus aria-hidden="true" className="size-4" />
                         Adicionar tipo
                       </Button>
+                    </div>
+                    <div className="rounded-xl border border-border p-3">
+                      <p className="m-0 text-xs font-medium">Tipos que aparecem neste painel</p>
+                      <p className="m-0 mt-1 text-xs text-muted-foreground">Marque o que a pessoa vê em “{panel?.name ?? "painel"}”. Os tipos continuam compartilhados entre os painéis.</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {departmentSettings.map((type) => {
+                          const active = panel?.typeIds.includes(type.id) ?? false;
+                          return (
+                            <button
+                              key={type.id}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => {
+                                if (!panel) return;
+                                const typeIds = active
+                                  ? panel.typeIds.filter((id) => id !== type.id)
+                                  : [...panel.typeIds, type.id];
+                                patchPanel({ typeIds });
+                              }}
+                              className={cn(
+                                "rounded-full border px-3 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                active ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-muted/50",
+                              )}
+                            >
+                              {type.emoji || "🎫"} {type.name || "Sem nome"}
+                            </button>
+                          );
+                        })}
+                        {!departmentSettings.length ? <p className="m-0 text-xs text-muted-foreground">Crie um tipo para poder marcá-lo aqui.</p> : null}
+                      </div>
                     </div>
                     <div className="divide-y divide-border rounded-xl border border-border px-3">
                       {departmentSettings.map((department, index) => (
@@ -532,25 +725,25 @@ function TicketPanelSettings() {
                 </div>
               </div>
               {previewMode === "modal" ? (
-                <DiscordModalPreview title={departmentSettings[0]?.name || "Abrir atendimento"} questions={departmentSettings[0]?.intakeQuestions || ["Como podemos ajudar?"]} />
+                <DiscordModalPreview title={panelTypes[0]?.name || "Abrir atendimento"} questions={panelTypes[0]?.intakeQuestions.length ? panelTypes[0].intakeQuestions : ["Como podemos ajudar?"]} />
               ) : (
                 <DiscordPanel
-                  channel={asString(tcfg.config.panelChannelId, "abrir-ticket").replace(/^#/, "") || "abrir-ticket"}
-                  title={asString(tcfg.config.panelTitle, "Precisa de ajuda?")}
-                  description={asString(tcfg.config.panelDescription, "Escolha uma opção para falar com nossa equipe.")}
-                  accent={asString(tcfg.config.panelAccentColor, "#28655b")}
-                  buttons={[`${asString(tcfg.config.panelButtonEmoji, "🎫")} ${asString(tcfg.config.panelButtonLabel, "Abrir atendimento")}`]}
-                  choiceOptions={departmentSettings}
+                  channel={(panel?.channelId || "abrir-ticket").replace(/^#/, "") || "abrir-ticket"}
+                  title={panel?.title || "Precisa de ajuda?"}
+                  description={panel?.description || "Escolha uma opção para falar com nossa equipe."}
+                  accent={panel?.accentColor || "#28655b"}
+                  buttons={[`${panel?.buttonEmoji || "🎫"} ${panel?.buttonLabel || "Abrir atendimento"}`]}
+                  choiceOptions={panelTypes}
                   choiceDisplayMode={departmentDisplayMode}
                   choiceButtonStyle={departmentDisplayMode === "buttons" ? departmentButtonStyle.preview : panelButtonStyle.preview}
-                  menuPrompt={asString(tcfg.config.departmentMenuPrompt, "Escolha o departamento para abrir o atendimento:")}
-                  menuPlaceholder={asString(tcfg.config.departmentMenuPlaceholder, "Escolha o departamento")}
-                  footer={asString(tcfg.config.panelFooter)}
+                  menuPrompt={panel?.menuPrompt || "Escolha o tipo para abrir o atendimento:"}
+                  menuPlaceholder={panel?.menuPlaceholder || "Escolha o tipo"}
+                  footer={panel?.footer ?? ""}
                 />
               )}
               <div className="space-y-2 rounded-2xl border border-border p-4">
                 <h3 className="m-0 text-base font-semibold">Publicar no Discord</h3>
-                <p className="m-0 text-sm text-muted-foreground">A publicação só aparece como concluída depois que o bot confirmar no Discord.</p>
+                <p className="m-0 text-sm text-muted-foreground">O bot publica ou atualiza os {panels.length} painel(is) configurado(s) e só confirma quando o Discord responder.</p>
                 <ul className="m-0 space-y-1 pl-0 text-sm" aria-live="polite">
                   {blockingIssues.map((issue) => (
                     <li key={issue.message} className="flex gap-2 text-destructive"><span aria-hidden="true">•</span><span>{issue.message}</span></li>

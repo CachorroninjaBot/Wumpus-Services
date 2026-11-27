@@ -9,7 +9,7 @@ import type { Guild, GuildMember } from "discord.js";
 import { buildPanelPayload } from "./panels.ts";
 import { buildFormPanel, reviewForm } from "./forms.ts";
 import {
-  buildTicketPanel,
+  buildTicketPanels,
   claimTicket,
   closeTicket,
   recordInternalTicketNote,
@@ -18,6 +18,7 @@ import {
   setTicketWaiting,
   transferTicket,
 } from "./tickets.ts";
+import { panelMessageKey, publishPanelIdempotent } from "./panel-publish.ts";
 import { asSendable, resolveChannel } from "./resolve.ts";
 import type { Logger } from "./logger.ts";
 import {
@@ -50,6 +51,68 @@ import {
 /** Lê o estado compartilhado entre dashboard e bot. */
 async function readRuntimeFile(): Promise<RuntimeFile> {
   return readRuntime();
+}
+
+/**
+ * Publica todos os paineis de atendimento configurados.
+ *
+ * Um painel quebrado (canal apagado, sem permissao) nao impede os outros: a
+ * publicacao so falha quando nenhum foi publicado, e o erro lista os que
+ * ficaram de fora.
+ */
+async function publishTicketPanels(
+  guild: Guild,
+  log: Logger,
+): Promise<{ ok: true; channelId: string; messageId: string } | { ok: false; error: string }> {
+  const panels = await buildTicketPanels(guild);
+  if (!panels.length) return { ok: false, error: "Nenhum painel de atendimento configurado." };
+
+  const failures: string[] = [];
+  let firstChannel = "";
+  let published = 0;
+
+  for (const { panel, payload } of panels) {
+    if (!panel.channelId) {
+      failures.push(`"${panel.name}" está sem canal`);
+      continue;
+    }
+    const target = asSendable(resolveChannel(guild, panel.channelId));
+    if (!target) {
+      failures.push(`canal "${panel.channelId}" do painel "${panel.name}" não encontrado`);
+      continue;
+    }
+    try {
+      await publishPanelIdempotent(
+        guild,
+        "tickets",
+        payload,
+        target,
+        log,
+        panelMessageKey("tickets", panel.id),
+      );
+      published += 1;
+      if (!firstChannel) firstChannel = target.id;
+    } catch (error) {
+      const detail = String(error);
+      failures.push(
+        /50013|missing permissions|missing access/i.test(detail)
+          ? `sem permissão no canal do painel "${panel.name}"`
+          : `painel "${panel.name}": ${detail.slice(0, 140)}`,
+      );
+    }
+  }
+
+  if (!published) {
+    return {
+      ok: false,
+      error: `Nenhum painel pôde ser publicado. ${failures.join("; ")}`,
+    };
+  }
+  if (failures.length) log.warn("alguns painéis de atendimento não foram publicados", {
+    guildId: guild.id,
+    failures,
+  });
+  return { ok: true, channelId: firstChannel, messageId: "" };
 }
 
 /**
@@ -96,6 +159,10 @@ async function publishPanel(
   const config = runtime.guilds[guild.id]?.[job.target as keyof (typeof runtime.guilds)[string]] as
     Record<string, unknown> | undefined;
 
+  if (job.target === "tickets") {
+    return publishTicketPanels(guild, log);
+  }
+
   const channel = resolveChannel(guild, job.channelRef);
   if (!channel) {
     return {
@@ -110,15 +177,13 @@ async function publishPanel(
   }
 
   const panel =
-    job.target === "tickets"
-      ? await buildTicketPanel(guild)
-      : job.target === "forms"
-        ? await buildFormPanel(guild)
-        : buildPanelPayload({
-            title: String(config?.panelTitle ?? "Wumpus"),
-            description: String(config?.panelDescription ?? ""),
-            accentColor: String(config?.panelAccentColor ?? "#28655b"),
-          });
+    job.target === "forms"
+      ? await buildFormPanel(guild)
+      : buildPanelPayload({
+          title: String(config?.panelTitle ?? "Wumpus"),
+          description: String(config?.panelDescription ?? ""),
+          accentColor: String(config?.panelAccentColor ?? "#28655b"),
+        });
 
   try {
     const message = await target.send({

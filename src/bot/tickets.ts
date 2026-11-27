@@ -26,6 +26,11 @@ import { id } from "./ids.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
 import { buildPanelPayload, defaultButtons } from "./panels.ts";
+import {
+  normalizeTicketPanels,
+  panelTicketTypes,
+  type TicketPanel,
+} from "../lib/wumpus/ticket-panels.ts";
 import { resolveChannel, resolveRole, resolveRoles } from "./resolve.ts";
 import { bump } from "./statistics.ts";
 import { mutate, mutateBatched, nextId, read } from "./store.ts";
@@ -1382,42 +1387,83 @@ export async function reopenClosedTicket(
   return { ok: true, channelId: opened.channelId };
 }
 
-/** Painel publicavel do modulo de atendimento. */
-export async function buildTicketPanel(guild: Guild) {
-  const config = await moduleConfig(guild.id, "tickets");
-  const departments = list(config, "departments");
-  const departmentSettings = Array.isArray(config?.departmentSettings)
-    ? config.departmentSettings.filter(
-        (entry): entry is Record<string, unknown> =>
-          Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
-      )
-    : [];
-  const useDepartmentButtons =
-    config?.departmentDisplayMode === "buttons" &&
-    departments.length > 0 &&
-    departments.length <= 5;
-  const buttonStyle = Number(config?.departmentButtonStyle);
-  const departmentButtonStyle = [1, 2, 3, 4].includes(buttonStyle)
-    ? buttonStyle as 1 | 2 | 3 | 4
-    : 2;
+/**
+ * Botoes do painel de um painel/tipo.
+ *
+ * Painel com um unico tipo vira o proprio botao de abertura; com varios, ou
+ * vira menu (`select`) ou um botao por tipo, no maximo 5.
+ */
+function ticketPanelButtons(
+  config: Record<string, unknown>,
+  panel: TicketPanel,
+): ReturnType<typeof defaultButtons> {
+  const types = panelTicketTypes(config, panel);
 
+  if (types.length === 1) {
+    const type = types[0];
+    return [{
+      label: panel.buttonLabel,
+      customId: id("ticket", "department", encodeURIComponent(type.id)),
+      style: panel.buttonStyle,
+      ...(panel.buttonEmoji ? { emoji: panel.buttonEmoji } : {}),
+    }];
+  }
+
+  if (panel.displayMode === "buttons" && types.length > 1 && types.length <= 5) {
+    return types.map((type) => ({
+      label: type.name.slice(0, 80),
+      customId: id("ticket", "department", encodeURIComponent(type.id)),
+      style: panel.buttonDisplayStyle,
+      ...(type.emoji ? { emoji: type.emoji } : {}),
+    }));
+  }
+
+  if (!types.length) {
+    // Config ainda sem tipos (ou painel acabou de ser criado): mantem o
+    // botao de abertura para o menu antigo resolver.
+    return defaultButtons("tickets", {
+      ...config,
+      panelButtonLabel: panel.buttonLabel,
+      panelButtonEmoji: panel.buttonEmoji,
+      panelButtonStyle: panel.buttonStyle,
+    });
+  }
+
+  return [{
+    label: panel.buttonLabel,
+    customId: id("ticket", "open", panel.id),
+    style: panel.buttonStyle,
+    ...(panel.buttonEmoji ? { emoji: panel.buttonEmoji } : {}),
+  }];
+}
+
+/** Payload de um painel especifico (sincrono; usado pela dashboard e pelo outbox). */
+export function buildTicketPanelPayload(
+  config: Record<string, unknown>,
+  panel: TicketPanel,
+) {
   return buildPanelPayload({
-    title: str(config, "panelTitle", "Central de atendimento"),
-    description: str(config, "panelDescription", "Abra um atendimento privado e fale com a equipe."),
-    accentColor: str(config, "panelAccentColor", "#28655b"),
-    footer: str(config, "panelFooter", ""),
-    buttons: useDepartmentButtons
-      ? departmentSettings
-          .filter((department) => departments.includes(String(department.name ?? "")))
-          .slice(0, 5)
-          .map((department) => ({
-            label: String(department.name ?? "").slice(0, 80),
-            customId: id("ticket", "department", encodeURIComponent(String(department.id ?? ""))),
-            style: departmentButtonStyle,
-            ...(typeof department.emoji === "string" && department.emoji.trim()
-              ? { emoji: department.emoji.trim() }
-              : {}),
-          }))
-      : defaultButtons("tickets", config ?? undefined)
+    title: panel.title,
+    description: panel.description,
+    accentColor: panel.accentColor,
+    footer: panel.footer,
+    buttons: ticketPanelButtons(config, panel),
   });
+}
+
+/** Paineis publicaveis do servidor — um payload por painel configurado. */
+export async function buildTicketPanels(guild: Guild) {
+  const config = (await moduleConfig(guild.id, "tickets")) ?? {};
+  const plan = await guildPlan(guild.id);
+  const limit = plan === "vitalicio" ? 25 : plan === "pro" ? 5 : 1;
+  return normalizeTicketPanels(config)
+    .slice(0, limit)
+    .map((panel) => ({
+      panel,
+      payload: buildTicketPanelPayload(config, panel),
+    }));
+}
+
+export async function ticketConfigFor(guild: Guild) {
+  return (await moduleConfig(guild.id, "tickets")) ?? {};
 }
