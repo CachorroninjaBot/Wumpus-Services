@@ -874,10 +874,9 @@ function TicketPanelSettings() {
                             <NumberField id="ticket-hours-end" label="Fecha às (24 = meia-noite)" min={0} max={24} value={Number(tcfg.config.businessHoursEnd ?? 18)} onChange={(businessHoursEnd) => patchTickets({ businessHoursEnd })} />
                             <Field label="Fuso horário">
                               <NativeSelect value={String(tcfg.config.businessHoursUtcOffset ?? -3)} onChange={(event) => patchTickets({ businessHoursUtcOffset: Number(event.target.value) })}>
-                                {[5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5].map((magnitude) => {
-                                  const offset = 5 - magnitude;
-                                  return <option key={offset} value={offset}>{`UTC${offset > 0 ? "+" : ""}${offset}${offset === -3 ? " (Brasília)" : ""}`}</option>;
-                                })}
+                                {[5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5].map((offset) => (
+                                  <option key={offset} value={offset}>{`UTC${offset > 0 ? "+" : ""}${offset}${offset === -3 ? " (Brasília)" : ""}`}</option>
+                                ))}
                               </NativeSelect>
                             </Field>
                           </div>
