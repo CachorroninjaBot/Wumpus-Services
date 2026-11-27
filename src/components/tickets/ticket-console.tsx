@@ -11,6 +11,7 @@ import {
   Send,
   StickyNote,
   UserCheck,
+  UserRound,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,32 @@ import type { TicketPriority } from "@/lib/wumpus/types";
 type TicketRow = Awaited<ReturnType<typeof getGuildTickets>>[number];
 type TicketMessage = Awaited<ReturnType<typeof getGuildTicketMessages>>["messages"][number];
 type ActionName = "claim" | "reply" | "note" | "close" | "priority" | "transfer" | "waiting_user" | "waiting_staff" | "resume";
+
+/** Vistas rápidas da fila — cada uma responde uma pergunta do atendente. */
+const queueViews = [
+  { id: "active", label: "Em andamento" },
+  { id: "mine", label: "Minhas" },
+  { id: "unassigned", label: "Sem responsável" },
+  { id: "sla", label: "SLA em risco" },
+  { id: "waiting_user", label: "Aguardando usuário" },
+  { id: "closed", label: "Encerrados" },
+  { id: "all", label: "Todos" },
+] as const;
+type QueueView = (typeof queueViews)[number]["id"];
+
+type SavedReply = { title: string; body: string };
+
+function savedRepliesFrom(config: Record<string, unknown>): SavedReply[] {
+  if (!Array.isArray(config.savedReplies)) return [];
+  return config.savedReplies
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .map((entry) => ({
+      title: typeof entry.title === "string" ? entry.title.trim() : "",
+      body: typeof entry.body === "string" ? entry.body.trim() : "",
+    }))
+    .filter((entry) => entry.title && entry.body)
+    .slice(0, 25);
+}
 
 const statusLabel: Record<string, string> = {
   open: "Aberto",
@@ -70,7 +97,8 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
 
   const [rows, setRows] = useState<TicketRow[]>([]);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [view, setView] = useState<QueueView>("active");
+  const [messageQuery, setMessageQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -91,15 +119,75 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
   }, [selectedId]);
 
   const selected = rows.find((row) => row.number === selectedId) ?? null;
+  const macros = useMemo(
+    () => savedRepliesFrom(ticketsConfig.config as Record<string, unknown>),
+    [ticketsConfig.config],
+  );
+
+  function slaForRow(row: TicketRow) {
+    return slaState({
+      id: row.number,
+      status: row.status,
+      createdAt: new Date(row.createdAt).toISOString(),
+      firstResponseAt: row.firstResponseAt ? new Date(row.firstResponseAt).toISOString() : null,
+    }, slaMinutes);
+  }
+
   const visibleRows = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("pt-BR");
     return rows
-      .filter((row) =>
-        statusFilter === "all" ||
-        (statusFilter === "active" ? row.status !== "closed" : row.status === statusFilter),
-      )
+      .filter((row) => {
+        switch (view) {
+          case "active":
+            return row.status !== "closed";
+          case "mine":
+            return row.status !== "closed" && row.claimedBy === sessionUser.id;
+          case "unassigned":
+            return row.status !== "closed" && !row.claimedBy;
+          case "sla":
+            return row.status !== "closed" && slaState({
+              id: row.number,
+              status: row.status,
+              createdAt: new Date(row.createdAt).toISOString(),
+              firstResponseAt: row.firstResponseAt ? new Date(row.firstResponseAt).toISOString() : null,
+            }, slaMinutes) !== "ok";
+          case "waiting_user":
+            return row.status !== "closed" && row.waitingOn === "user";
+          case "closed":
+            return row.status === "closed";
+          case "all":
+            return true;
+        }
+      })
       .filter((row) => !needle || `#${row.number} ${row.subject} ${row.department} ${row.openerName ?? ""}`.toLocaleLowerCase("pt-BR").includes(needle));
-  }, [query, rows, statusFilter]);
+  }, [query, rows, sessionUser.id, slaMinutes, view]);
+
+  const viewCounts = useMemo(() => {
+    const counts: Record<QueueView, number> = {
+      active: 0,
+      mine: 0,
+      unassigned: 0,
+      sla: 0,
+      waiting_user: 0,
+      closed: 0,
+      all: rows.length,
+    };
+    for (const row of rows) {
+      const open = row.status !== "closed";
+      if (open) counts.active += 1;
+      else counts.closed += 1;
+      if (open && row.claimedBy === sessionUser.id) counts.mine += 1;
+      if (open && !row.claimedBy) counts.unassigned += 1;
+      if (open && row.waitingOn === "user") counts.waiting_user += 1;
+      if (open && slaState({
+        id: row.number,
+        status: row.status,
+        createdAt: new Date(row.createdAt).toISOString(),
+        firstResponseAt: row.firstResponseAt ? new Date(row.firstResponseAt).toISOString() : null,
+      }, slaMinutes) !== "ok") counts.sla += 1;
+    }
+    return counts;
+  }, [rows, sessionUser.id, slaMinutes]);
 
   const loadMessages = useCallback(async (ticketId: number) => {
     const token = getStoredSessionToken();
@@ -158,6 +246,7 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
       return;
     }
     setReply("");
+    setMessageQuery("");
     setShowClose(false);
     setCloseReason("");
     setShowTransfer(false);
@@ -217,14 +306,15 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
     });
   }
 
-  const sla = selected
-    ? slaState({
-        id: selected.number,
-        status: selected.status,
-        createdAt: new Date(selected.createdAt).toISOString(),
-        firstResponseAt: selected.firstResponseAt ? new Date(selected.firstResponseAt).toISOString() : null,
-      }, slaMinutes)
-    : "ok";
+  const sla = selected ? slaForRow(selected) : "ok";
+
+  const visibleMessages = useMemo(() => {
+    const needle = messageQuery.trim().toLocaleLowerCase("pt-BR");
+    if (!needle) return messages;
+    return messages.filter((message) =>
+      `${message.authorName} ${message.content}`.toLocaleLowerCase("pt-BR").includes(needle),
+    );
+  }, [messageQuery, messages]);
 
   return (
     <div className="space-y-4">
@@ -257,7 +347,7 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
         </p>
       ) : null}
 
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(280px,.82fr)_minmax(0,1.6fr)]">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(260px,.8fr)_minmax(0,1.6fr)] xl:grid-cols-[minmax(240px,.72fr)_minmax(0,1.5fr)_minmax(220px,.62fr)]">
         <Card className="space-y-3 p-0">
           <div className="space-y-2 border-b border-border p-3">
             <div className="relative">
@@ -270,13 +360,25 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
                 placeholder="Buscar por número, assunto ou pessoa"
               />
             </div>
-            <NativeSelect aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="active">Em andamento</option>
-              <option value="open">Aguardando equipe</option>
-              <option value="claimed">Em atendimento</option>
-              <option value="closed">Encerrados</option>
-              <option value="all">Todos</option>
-            </NativeSelect>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Vistas da fila">
+              {queueViews.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  aria-pressed={view === entry.id}
+                  onClick={() => setView(entry.id)}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    view === entry.id
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted/50",
+                  )}
+                >
+                  {entry.label}
+                  <span className="ml-1 font-mono-num text-[11px] text-muted-foreground">{viewCounts[entry.id]}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {visibleRows.length === 0 ? (
@@ -309,6 +411,9 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
                       <Badge tone={statusTone(row.status)}>{statusLabel[row.status] ?? row.status}</Badge>
                       <Badge>{row.department}</Badge>
                       {row.priority !== "normal" ? <Badge tone={priorityTone[row.priority]}>{priorityLabel[row.priority]}</Badge> : null}
+                      {row.status !== "closed" && slaForRow(row) !== "ok" ? <Badge tone="danger">SLA</Badge> : null}
+                      {row.status !== "closed" && row.waitingOn === "user" ? <Badge tone="warn">Aguardando usuário</Badge> : null}
+                      {row.status !== "closed" && row.claimedBy === sessionUser.id ? <Badge tone="info">Minha</Badge> : null}
                     </span>
                   </button>
                 </li>
@@ -318,6 +423,7 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
         </Card>
 
         {selected ? (
+          <>
           <Card className="min-w-0 space-y-4">
             <header className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
@@ -327,7 +433,7 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
                   <Badge>{selected.department}</Badge>
                   <Badge tone={priorityTone[selected.priority]}>{priorityLabel[selected.priority]}</Badge>
                   {selected.status !== "closed" && sla !== "ok" ? (
-                    <Badge tone="danger">{sla === "breach" ? "SLA crítico" : "SLA estourado"}</Badge>
+                    <Badge tone="danger">{sla === "breach" ? "SLA estourado" : "SLA em risco"}</Badge>
                   ) : null}
                 </div>
                 <h3 className="m-0 mt-1 text-lg font-semibold tracking-tight">{selected.subject}</h3>
@@ -469,17 +575,37 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
             )}
 
             <section aria-label="Conversa do atendimento" className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h4 className="m-0 text-sm font-semibold">Conversa</h4>
-                <span className="text-xs text-muted-foreground">{loadingMessages ? "Carregando…" : `${messages.length} mensagem(ns)`}</span>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      aria-label="Buscar na conversa"
+                      className="h-8 w-48 pl-8 text-xs sm:w-64"
+                      value={messageQuery}
+                      onChange={(event) => setMessageQuery(event.target.value)}
+                      placeholder="Buscar na conversa"
+                    />
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {loadingMessages
+                      ? "Carregando…"
+                      : messageQuery.trim()
+                        ? `${visibleMessages.length} de ${messages.length}`
+                        : `${messages.length} mensagem(ns)`}
+                  </span>
+                </div>
               </div>
               <div className="max-h-[26rem] space-y-2 overflow-y-auto rounded-xl border border-border bg-muted/20 p-3">
                 {loadingMessages ? (
                   <p className="m-0 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /> Buscando a conversa…</p>
-                ) : messages.length === 0 ? (
-                  <p className="m-0 text-sm text-muted-foreground">Nenhuma mensagem registrada ainda.</p>
+                ) : visibleMessages.length === 0 ? (
+                  <p className="m-0 text-sm text-muted-foreground">
+                    {messages.length ? "Nenhuma mensagem corresponde à busca." : "Nenhuma mensagem registrada ainda."}
+                  </p>
                 ) : (
-                  messages.map((message) => {
+                  visibleMessages.map((message) => {
                     const internal = message.kind === "internal";
                     const fromOpener = message.authorId === selected.openerId;
                     return (
@@ -514,6 +640,26 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
             ) : (
               <div className="space-y-2">
                 <Label htmlFor="ticket-reply">Resposta da equipe</Label>
+                {macros.length ? (
+                  <div className="max-w-sm">
+                    <NativeSelect
+                      aria-label="Inserir resposta pronta"
+                      value=""
+                      onChange={(event) => {
+                        const macro = macros.find((entry) => entry.title === event.target.value);
+                        if (macro) {
+                          setReply((current) => (current.trim() ? `${current}\n${macro.body}` : macro.body));
+                          event.target.value = "";
+                        }
+                      }}
+                    >
+                      <option value="">Inserir resposta pronta…</option>
+                      {macros.map((macro) => (
+                        <option key={macro.title} value={macro.title}>{macro.title}</option>
+                      ))}
+                    </NativeSelect>
+                  </div>
+                ) : null}
                 <Textarea
                   id="ticket-reply"
                   rows={3}
@@ -543,8 +689,84 @@ export function TicketConsole({ guildId, initialTicket }: { guildId: string; ini
               </div>
             )}
           </Card>
+          <aside className="space-y-4 lg:col-span-2 xl:col-span-1 xl:sticky xl:top-24" aria-label="Contexto do atendimento">
+            <Card className="space-y-3">
+              <h4 className="m-0 flex items-center gap-2 text-sm font-semibold">
+                <UserRound aria-hidden="true" className="size-4 text-muted-foreground" />
+                Contexto
+              </h4>
+              <div className="space-y-1">
+                <p className="m-0 text-sm font-medium">{selected.openerName ?? selected.openerId}</p>
+                <p className="m-0 break-all text-xs text-muted-foreground">ID {selected.openerId}</p>
+                <a className="text-xs text-primary hover:underline" href={`https://discord.com/users/${selected.openerId}`} target="_blank" rel="noreferrer">
+                  Abrir perfil no Discord
+                </a>
+              </div>
+              <dl className="m-0 space-y-1.5 border-t border-border pt-2 text-xs">
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="m-0 text-muted-foreground">Tipo</dt>
+                  <dd className="m-0 text-right">{selected.department}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="m-0 text-muted-foreground">Status</dt>
+                  <dd className="m-0 text-right">{statusLabel[selected.status] ?? selected.status}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="m-0 text-muted-foreground">Prioridade</dt>
+                  <dd className="m-0 text-right">{priorityLabel[selected.priority]}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="m-0 text-muted-foreground">Responsável</dt>
+                  <dd className="m-0 text-right">{selected.claimedBy ? <a className="text-primary hover:underline" href={`https://discord.com/users/${selected.claimedBy}`} target="_blank" rel="noreferrer">{selected.claimedBy}</a> : "Sem responsável"}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="m-0 text-muted-foreground">Aberto em</dt>
+                  <dd className="m-0 text-right">{formatTime(selected.createdAt)}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="m-0 text-muted-foreground">1ª resposta</dt>
+                  <dd className="m-0 text-right">{selected.firstResponseAt ? formatRelative(selected.firstResponseAt) : "—"}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="m-0 text-muted-foreground">Espera</dt>
+                  <dd className="m-0 text-right">
+                    {selected.waitingOn === "user" ? "Solicitante" : selected.waitingOn === "staff" ? "Equipe" : "—"}
+                  </dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="m-0 text-muted-foreground">SLA</dt>
+                  <dd className="m-0 text-right">
+                    {selected.status === "closed"
+                      ? "—"
+                      : sla === "breach"
+                        ? "Fora do prazo"
+                        : sla === "warning"
+                          ? "Perto do prazo"
+                          : "Dentro do prazo"}
+                  </dd>
+                </div>
+                {selected.status === "closed" ? (
+                  <div className="flex items-baseline justify-between gap-2">
+                    <dt className="m-0 text-muted-foreground">Avaliação</dt>
+                    <dd className="m-0 text-right">{selected.feedback ? `${selected.feedback.rating}/5` : "Sem avaliação"}</dd>
+                  </div>
+                ) : null}
+              </dl>
+              <div className="flex flex-col gap-1.5 border-t border-border pt-2 text-xs">
+                <a className="text-primary hover:underline" href={`https://discord.com/channels/${guildId}/${selected.channelId}`} target="_blank" rel="noreferrer">
+                  Abrir canal no Discord
+                </a>
+                {selected.transcriptUrl ? (
+                  <a className="text-primary hover:underline" href={selected.transcriptUrl} target="_blank" rel="noreferrer">
+                    Transcrição externa
+                  </a>
+                ) : null}
+              </div>
+            </Card>
+          </aside>
+          </>
         ) : (
-          <Card>
+          <Card className="lg:col-span-1 xl:col-span-2">
             <EmptyState
               icon={<Inbox aria-hidden="true" className="size-8 text-muted-foreground" />}
               title="Selecione um atendimento"

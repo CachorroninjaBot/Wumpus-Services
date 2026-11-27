@@ -150,6 +150,14 @@ function TicketPanelSettings() {
     [panel, tcfg.config],
   );
 
+  const savedReplies = useMemo<Array<{ title: string; body: string }>>(() => {
+    const raw = Array.isArray(tcfg.config.savedReplies) ? tcfg.config.savedReplies : [];
+    return raw
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+      .map((entry) => ({ title: asString(entry.title), body: asString(entry.body) }))
+      .slice(0, 25);
+  }, [tcfg.config.savedReplies]);
+
   const departmentDisplayMode = panel?.displayMode ?? "select";
   const panelButtonStyle = discordButtonStyles.find((style) => style.value === (panel?.buttonStyle ?? 1)) ?? discordButtonStyles[0]!;
   const departmentButtonStyle = discordButtonStyles.find((style) => style.value === (panel?.buttonDisplayStyle ?? 2)) ?? discordButtonStyles[1]!;
@@ -707,6 +715,60 @@ function TicketPanelSettings() {
                       <Textarea key={asString(tcfg.config.welcomeMessage)} rows={3} defaultValue={asString(tcfg.config.welcomeMessage)} onBlur={(e) => patchTickets({ welcomeMessage: e.target.value })} />
                       <p className="m-0 text-xs text-muted-foreground">Enviada automaticamente quando o atendimento é aberto.</p>
                     </Field>
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <Label>Respostas prontas</Label>
+                          <p className="m-0 mt-0.5 text-xs text-muted-foreground">Atalhos que a equipe insere na conversa com um clique.</p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={savedReplies.length >= 25}
+                          onClick={() => patchTickets({ savedReplies: [...savedReplies, { title: `Resposta ${savedReplies.length + 1}`, body: "" }] })}
+                        >
+                          <Plus aria-hidden="true" className="size-4" />
+                          Adicionar resposta
+                        </Button>
+                      </div>
+                      {savedReplies.map((macro, index) => (
+                        <div key={`macro-${index}`} className="grid gap-2 sm:grid-cols-[10rem_minmax(0,1fr)_auto] sm:items-start">
+                          <Input
+                            aria-label={`Atalho da resposta ${index + 1}`}
+                            maxLength={40}
+                            value={macro.title}
+                            placeholder="Atalho"
+                            onChange={(event) => {
+                              const next = [...savedReplies];
+                              next[index] = { ...macro, title: event.target.value };
+                              patchTickets({ savedReplies: next });
+                            }}
+                          />
+                          <Textarea
+                            aria-label={`Texto da resposta ${index + 1}`}
+                            rows={2}
+                            maxLength={1500}
+                            value={macro.body}
+                            placeholder="Texto enviado ao solicitante"
+                            onChange={(event) => {
+                              const next = [...savedReplies];
+                              next[index] = { ...macro, body: event.target.value };
+                              patchTickets({ savedReplies: next });
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            aria-label={`Remover resposta ${index + 1}`}
+                            onClick={() => patchTickets({ savedReplies: savedReplies.filter((_, itemIndex) => itemIndex !== index) })}
+                          >
+                            <Trash2 aria-hidden="true" className="size-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                     <div className="space-y-4 divide-y divide-border">
                       <ToggleRow label="IA de apoio à equipe" description="Sugestões privadas aparecem no canal para os atendentes." checked={Boolean(tcfg.config.aiSupportEnabled)} onChange={(value) => patchTickets({ aiSupportEnabled: value })} />
                       <ToggleRow label="Incluir conversa nas análises por IA" description="Quando desligado, o conteúdo das mensagens não é enviado à IA." checked={Boolean(tcfg.config.aiIncludeConversation)} onChange={(value) => patchTickets({ aiIncludeConversation: value })} />
