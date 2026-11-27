@@ -128,13 +128,6 @@ export async function canManageTickets(guild: Guild, userId: string): Promise<bo
   return staffRoles.some((role) => member.roles.cache.has(role.id));
 }
 
-const PRIORITY_LABELS: Record<TicketPriority, string> = {
-  low: "Baixa",
-  normal: "Normal",
-  high: "Alta",
-  urgent: "Urgente",
-};
-
 // Emojis customizados do servidor principal nos controles do canal de ticket.
 // O bot precisa estar no servidor dono do emoji para o Discord aceitar o id.
 const TICKET_EMOJIS = {
@@ -153,10 +146,10 @@ function ticketHeaderText(ticket: Ticket): string {
       : ticket.claimedBy || ticket.firstResponseAt
         ? "Em atendimento"
         : "Aguardando equipe";
-  const owner = ticket.claimedBy ? ` · Responsável: <@${ticket.claimedBy}>` : "";
+  const owner = ticket.claimedBy ? `\n🛠️ Responsável: <@${ticket.claimedBy}>` : "";
   return [
     `<@${ticket.openerId}> · atendimento **#${ticket.id}**${ticket.department ? ` · **${ticket.department}**` : ""}`,
-    `Status: **${status}**${owner} · Prioridade: **${PRIORITY_LABELS[ticket.priority] ?? "Normal"}**`,
+    `<:status:1575772794271178823> Status: **${status}**${owner}`,
   ].join("\n");
 }
 
