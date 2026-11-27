@@ -115,6 +115,12 @@ export function planIdFromName(name: string): PlanId | null {
   return null;
 }
 
+/** Produto exato da ShardPay — imune a renomeações do catálogo. */
+export function planIdFromProductId(productId: string | null | undefined): PlanId | null {
+  if (!productId) return null;
+  return plans.find((plan) => plan.productId === productId)?.id ?? null;
+}
+
 export function planById(id: PlanId): CatalogPlan {
   return plans.find((p) => p.id === id) ?? plans[0]!;
 }

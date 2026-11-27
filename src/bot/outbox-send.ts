@@ -6,7 +6,6 @@
  * resultado) e pura e vive no outro arquivo.
  */
 import type { Guild, GuildMember } from "discord.js";
-import { pendingJobs, pruneOutbox, settleActionJob, settleJob } from "./outbox.ts";
 import { buildPanelPayload } from "./panels.ts";
 import { buildFormPanel, reviewForm } from "./forms.ts";
 import {
@@ -22,7 +21,6 @@ import {
 import { asSendable, resolveChannel } from "./resolve.ts";
 import type { Logger } from "./logger.ts";
 import {
-  mutateRuntime,
   readBotCollection,
   readRuntime,
   updateBotCollection,
@@ -30,6 +28,12 @@ import {
   type OutboxJob,
   type RuntimeFile,
 } from "../lib/wumpus/runtime.server.ts";
+import {
+  claimPendingOutboxJobs,
+  failQueuedOutboxJobs,
+  pruneOutboxTable,
+  settleOutboxJob,
+} from "../lib/wumpus/outbox-store.server.ts";
 import { setupVerification, restoreVerification, setLockdown } from "./security.ts";
 import { id } from "./ids.ts";
 import { guildPlan } from "./config.ts";
@@ -44,18 +48,8 @@ import {
 } from "./human-support.ts";
 
 /** Lê o estado compartilhado entre dashboard e bot. */
-export async function readRuntimeFile(): Promise<RuntimeFile> {
+async function readRuntimeFile(): Promise<RuntimeFile> {
   return readRuntime();
-}
-
-async function persistOutboxChanges(processed: OutboxJob[]): Promise<void> {
-  const processedById = new Map(processed.map((job) => [job.id, job]));
-  await mutateRuntime((runtime) => {
-    runtime.outbox = pruneOutbox(
-      (runtime.outbox ?? []).map((job) => processedById.get(job.id) ?? job),
-    );
-    runtime.updatedAt = Date.now();
-  });
 }
 
 /**
@@ -312,50 +306,42 @@ export async function syncStaffRosterMember(
  * "publicado" falso que existia antes.
  */
 export async function processOutbox(guild: Guild, log: Logger): Promise<number> {
-  const runtime = await readRuntimeFile();
-  const pending = pendingJobs(runtime.outbox, guild.id);
+  const pending = await claimPendingOutboxJobs(guild.id);
   if (!pending.length) return 0;
 
   if (!(await guildPlan(guild.id))) {
-    const outbox = (runtime.outbox ?? []).map((job) =>
-      job.guildId === guild.id && job.status === "queued"
-        ? {
-            ...job,
-            status: "failed" as const,
-            detail: "Este servidor não tem uma licença ativa no plano atual.",
-            at: Date.now(),
-          }
-        : job,
-    );
     for (const job of pending) {
       if (job.kind === "support_handoff") await failSupportChat(job.id);
       if (job.kind === "support_message" && job.supportChatId && job.supportMessageId) {
         await setSupportMessageDelivery(job.supportChatId, job.supportMessageId, "failed");
       }
     }
-    await persistOutboxChanges(outbox);
+    await failQueuedOutboxJobs(guild.id, "Este servidor não tem uma licença ativa no plano atual.");
     return pending.length;
   }
 
-  let outbox = runtime.outbox ?? [];
+  const runtime = await readRuntimeFile();
 
   for (const job of pending) {
     const startedAt = Date.now();
+    let status: OutboxJob["status"] = job.status;
+    const settle = async (result: { ok: boolean; detail?: string; channelId?: string; messageId?: string }) => {
+      await settleOutboxJob(job.id, result);
+      status = result.ok ? "done" : "failed";
+    };
     try {
       if (job.kind === "ticket_action") {
-        const result = await processTicketAction(guild, job, log);
-        outbox = settleActionJob(outbox, job.id, result);
+        await settle(await processTicketAction(guild, job, log));
         continue;
       }
       if (job.kind === "form_action") {
-        const result = await processFormAction(guild, job, log);
-        outbox = settleActionJob(outbox, job.id, result);
+        await settle(await processFormAction(guild, job, log));
         continue;
       }
       if (job.kind === "support_handoff") {
         const result = await createHumanSupportThread(guild, job, log);
         if (!result.ok) await failSupportChat(job.id);
-        outbox = settleActionJob(outbox, job.id, result);
+        await settle(result);
         continue;
       }
       if (job.kind === "support_message") {
@@ -371,7 +357,7 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
         if (!result.ok && job.supportChatId && job.supportMessageId) {
           await setSupportMessageDelivery(job.supportChatId, job.supportMessageId, "failed");
         }
-        outbox = settleActionJob(outbox, job.id, result);
+        await settle(result);
         continue;
       }
       if (job.kind === "support_rating") {
@@ -379,26 +365,23 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
           job.supportChatId && job.rating
             ? await postSupportRating(guild, job.supportChatId, job.rating)
             : { ok: false, detail: "Avaliação de atendimento incompleta." };
-        outbox = settleActionJob(outbox, job.id, result);
+        await settle(result);
         continue;
       }
       if (job.kind === "staff_roster") {
-        const result = await refreshStaffRoster(guild, runtime, log);
-        outbox = settleActionJob(outbox, job.id, result);
+        await settle(await refreshStaffRoster(guild, runtime, log));
         continue;
       }
       if (job.kind === "security_audit") {
-        const result = await runPermissionAudit(guild, "manual", log);
-        outbox = settleActionJob(outbox, job.id, result);
+        await settle(await runPermissionAudit(guild, "manual", log));
         continue;
       }
       if (job.kind === "security_fix") {
-        const result = await processSecurityFixJob(guild, job, log);
-        outbox = settleActionJob(outbox, job.id, result);
+        await settle(await processSecurityFixJob(guild, job, log));
         continue;
       }
       const result = await publishPanel(guild, job, log);
-      outbox = settleJob(outbox, job.id, result);
+      await settle(result);
 
       if (result.ok) {
         log.info("painel publicado", {
@@ -426,13 +409,15 @@ export async function processOutbox(guild: Guild, log: Logger): Promise<number> 
           action: job.action ?? "none",
           queueWaitMs: Math.max(0, startedAt - job.createdAt),
           executionMs: Date.now() - startedAt,
-          status: outbox.find((entry) => entry.id === job.id)?.status ?? "queued",
+          status,
         });
       }
     }
   }
 
-  await persistOutboxChanges(outbox);
+  await pruneOutboxTable().catch((error) =>
+    log.warn("falha ao limpar a fila de saída", { error: String(error).slice(0, 200) }),
+  );
   return pending.length;
 }
 

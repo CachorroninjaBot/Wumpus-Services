@@ -1572,56 +1572,82 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
 
   let healthTimer: ReturnType<typeof setInterval> | null = null;
   let licenseSyncTimer: ReturnType<typeof setInterval> | null = null;
-  const reportHealth = (status: "online" | "offline") =>
-    writeBotHealth({
+
+  const buildGuildResources = () =>
+    Object.fromEntries(
+      [...client.guilds.cache.values()].map((guild) => [
+        guild.id,
+        {
+          channels: [...guild.channels.cache.values()].flatMap(
+            (channel): Array<{ id: string; name: string; type: "text" | "category" }> =>
+              channel.type === ChannelType.GuildCategory
+                ? [{ id: channel.id, name: channel.name, type: "category" as const }]
+                : channel.type === ChannelType.GuildText ||
+                    channel.type === ChannelType.GuildAnnouncement
+                  ? [{ id: channel.id, name: channel.name, type: "text" as const }]
+                  : [],
+          ),
+          roles: [...guild.roles.cache.values()]
+            .filter((role) => role.id !== guild.id && !role.managed)
+            .map((role) => ({
+              id: role.id,
+              name: role.name,
+              color: role.hexColor,
+              position: role.position,
+            })),
+          permissions: guild.members.me
+            ? {
+                manageMessages: guild.members.me.permissions.has(
+                  PermissionFlagsBits.ManageMessages,
+                ),
+                manageChannels: guild.members.me.permissions.has(
+                  PermissionFlagsBits.ManageChannels,
+                ),
+                manageRoles: guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles),
+                moderateMembers: guild.members.me.permissions.has(
+                  PermissionFlagsBits.ModerateMembers,
+                ),
+                viewAuditLog: guild.members.me.permissions.has(PermissionFlagsBits.ViewAuditLog),
+                banMembers: guild.members.me.permissions.has(PermissionFlagsBits.BanMembers),
+              }
+            : null,
+        },
+      ]),
+    );
+
+  // A varredura de canais/cargos de todos os servidores é o ponto mais caro do
+  // heartbeat. Ela só muda quando a estrutura muda, então fica em cache e é
+  // refeita no próximo envio depois de um evento relevante.
+  let guildResources = buildGuildResources();
+  let resourcesDirty = false;
+
+  const reportHealth = (status: "online" | "offline") => {
+    if (resourcesDirty) {
+      guildResources = buildGuildResources();
+      resourcesDirty = false;
+    }
+    return writeBotHealth({
       status,
       at: Date.now(),
       startedAt,
       guildCount: client.guilds.cache.size,
       guildIds: [...client.guilds.cache.keys()],
-      guildResources: Object.fromEntries(
-        [...client.guilds.cache.values()].map((guild) => [
-          guild.id,
-          {
-            channels: [...guild.channels.cache.values()].flatMap(
-              (channel): Array<{ id: string; name: string; type: "text" | "category" }> =>
-                channel.type === ChannelType.GuildCategory
-                  ? [{ id: channel.id, name: channel.name, type: "category" as const }]
-                  : channel.type === ChannelType.GuildText ||
-                      channel.type === ChannelType.GuildAnnouncement
-                    ? [{ id: channel.id, name: channel.name, type: "text" as const }]
-                    : [],
-            ),
-            roles: [...guild.roles.cache.values()]
-              .filter((role) => role.id !== guild.id && !role.managed)
-              .map((role) => ({
-                id: role.id,
-                name: role.name,
-                color: role.hexColor,
-                position: role.position,
-              })),
-            permissions: guild.members.me
-              ? {
-                  manageMessages: guild.members.me.permissions.has(
-                    PermissionFlagsBits.ManageMessages,
-                  ),
-                  manageChannels: guild.members.me.permissions.has(
-                    PermissionFlagsBits.ManageChannels,
-                  ),
-                  manageRoles: guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles),
-                  moderateMembers: guild.members.me.permissions.has(
-                    PermissionFlagsBits.ModerateMembers,
-                  ),
-                  viewAuditLog: guild.members.me.permissions.has(PermissionFlagsBits.ViewAuditLog),
-                  banMembers: guild.members.me.permissions.has(PermissionFlagsBits.BanMembers),
-                }
-              : null,
-          },
-        ]),
-      ),
+      guildResources,
       pingMs: client.ws.ping >= 0 ? client.ws.ping : null,
     });
+  };
   const startedAt = Date.now();
+
+  const markResourcesDirty = () => {
+    resourcesDirty = true;
+  };
+  client.on(Events.ChannelCreate, markResourcesDirty);
+  client.on(Events.ChannelDelete, markResourcesDirty);
+  client.on(Events.ChannelUpdate, markResourcesDirty);
+  client.on(Events.GuildRoleCreate, markResourcesDirty);
+  client.on(Events.GuildRoleDelete, markResourcesDirty);
+  client.on(Events.GuildRoleUpdate, markResourcesDirty);
+  client.on(Events.GuildUpdate, markResourcesDirty);
 
   client.once(Events.ClientReady, async () => {
     log.info("bot conectado ao Discord", { servidores: client.guilds.cache.size });
@@ -1645,6 +1671,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
       name: guild.name,
       members: guild.memberCount,
     });
+    resourcesDirty = true;
     void reportHealth("online").catch((error) =>
       log.error("falha ao sincronizar servidores do bot", { error: String(error) }),
     );
@@ -1661,6 +1688,7 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
   });
 
   client.on(Events.GuildDelete, () => {
+    resourcesDirty = true;
     void reportHealth("online").catch((error) =>
       log.error("falha ao sincronizar servidores do bot", { error: String(error) }),
     );
@@ -2062,6 +2090,8 @@ export function createBot(token: string, log: Logger = consoleLogger): BotHandle
       log.error("falha ao gravar mutações pendentes no encerramento", { error: String(error) }),
     );
     if (healthTimer) clearInterval(healthTimer);
+    if (licenseSyncTimer) clearInterval(licenseSyncTimer);
+    clearInterval(licenseSweepTimer);
     await reportHealth("offline").catch((error) =>
       log.error("falha ao marcar bot offline", { error: String(error) }),
     );

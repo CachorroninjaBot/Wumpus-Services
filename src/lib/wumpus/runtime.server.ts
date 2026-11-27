@@ -107,11 +107,12 @@ export type KnowledgeFaqSuggestion = {
  * Pedido de publicacao do painel para o bot.
  *
  * O painel NAO pode falar com o Discord: o bot roda em processo separado
- * (`scripts/start.mjs` faz `spawn`), e a unica ponte entre os dois e este
- * arquivo. Sem esta fila, "Publicar painel" na dashboard so escrevia um
- * registro no proprio estado — nunca chegava a canal nenhum.
+ * (`scripts/start.mjs` faz `spawn`), e a ponte entre os dois e a fila de saida
+ * — tabela `wumpus_outbox` em producao, JSON do runtime no modo local. Sem
+ * esta fila, "Publicar painel" na dashboard so escrevia um registro no proprio
+ * estado — nunca chegava a canal nenhum.
  *
- * O bot le a fila, publica de verdade e marca o resultado aqui. Assim o painel
+ * O bot le a fila, publica de verdade e marca o resultado. Assim o painel
  * consegue mostrar "publicado em #canal" ou o erro real, em vez de fingir
  * sucesso.
  */
@@ -284,7 +285,10 @@ export type RuntimeFile = {
   }>;
   /** Artigos da base de conhecimento, por servidor. */
   articles?: Record<string, RuntimeArticle[]>;
-  /** Pedidos de publicacao aguardando o bot. */
+  /**
+   * Fila de saida apenas no modo local sem banco. Em producao ela vive na
+   * tabela `wumpus_outbox` (ver `outbox-store.server.ts`).
+   */
   outbox?: OutboxJob[];
 };
 
@@ -363,7 +367,7 @@ async function readRuntimeUncached(): Promise<RuntimeFile> {
 }
 
 /** Coleções do bot; o modo local sem banco continua usando arquivos JSON. */
-export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status" | "support-chats" | "assistant-chats" | "staff-rosters" | "security-audits";
+export type BotCollectionName = "tickets" | "ticket_messages" | "statistics" | "moderation" | "audit" | "forms" | "ocr-usage" | "knowledge-faq-state" | "knowledge-suggestions" | "knowledge-suggestion-status" | "support-chats" | "assistant-chats" | "staff-rosters" | "security-audits" | "panel-messages";
 
 export async function readBotCollection<T>(name: BotCollectionName): Promise<T[]> {
   const now = Date.now();
@@ -469,11 +473,11 @@ export async function mutateRuntime(update: (current: RuntimeFile) => RuntimeFil
 }
 
 /**
- * Enfileira um pedido de publicacao.
+ * Enfileira um pedido de publicacao no runtime JSON.
  *
- * A fila e limitada: sem teto, um bot que nao sobe deixaria o arquivo crescer
- * sem parar. Descarta os mais antigos ja concluidos primeiro, depois os
- * pendentes mais velhos.
+ * So e usado no modo local sem banco (`outbox-store.server.ts` decide); em
+ * producao a fila e a tabela `wumpus_outbox`. A fila aqui e limitada: sem
+ * teto, um bot que nao sobe deixaria o arquivo crescer sem parar.
  */
 export async function enqueueOutbox(job: OutboxJob): Promise<void> {
   await mutateRuntime((current) => {

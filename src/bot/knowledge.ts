@@ -11,7 +11,7 @@
  * responder sem base e como inventar.
  */
 import type { Guild, Message } from "discord.js";
-import { analyzeWithContext, fastModel, groqChat } from "./ai.ts";
+import { analyzeWithContext } from "./ai.ts";
 import { bool, isEnabled, moduleConfig, num, str } from "./config.ts";
 import { auditAndLog } from "./logs.ts";
 import type { Logger } from "./logger.ts";
@@ -259,35 +259,4 @@ function claimCooldown(userId: string, seconds: number): boolean {
   }
 
   return true;
-}
-
-/**
- * Rascunho de resposta para o staff (nunca enviado ao cliente).
- * Usa o modelo rapido: e sugestao, nao decisao.
- */
-export async function draftReply(
-  guild: Guild,
-  history: string,
-  staffRoles: string[]
-): Promise<string | null> {
-  const config = await moduleConfig(guild.id, "knowledge");
-  if (!isEnabled(config)) return null;
-
-  const model = bool(config, "preferFastModel", true) ? fastModel() : undefined;
-
-  return groqChat(
-    [
-      {
-        role: "system",
-        content: [
-          "Voce e o Wumpus, assistente de staff de Discord.",
-          "Escreva um RASCUNHO de resposta para o membro, em portugues do Brasil.",
-          "Curto, cordial, sem prometer o que nao esta no historico.",
-          "Isto e sugestao para o staff revisar — nunca vai direto ao membro."
-        ].join(" ")
-      },
-      { role: "user", content: `Contexto da equipe: ${staffRoles.join(", ") || "atendimento"}\nHistorico do atendimento:\n${history}` }
-    ],
-    { model, maxTokens: 400, noCache: true }
-  );
 }

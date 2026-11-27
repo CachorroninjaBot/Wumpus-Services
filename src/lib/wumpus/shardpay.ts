@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { planById } from "./catalog";
 import { configuredLifetimeSubscriptions } from "./entitlements";
 import { listDashboardGrants } from "./admin-store.server";
 import { loadBilling, type BillingSnapshot } from "./shardpay.server";
@@ -41,6 +42,7 @@ export const getMyBilling = createServerFn({ method: "POST" })
         id: grant.id,
         status: "active",
         productName: `Acesso administrativo · ${grant.planId}`,
+        productId: null,
         planId: grant.planId,
         discordUsername: grant.username,
         discordUserId: grant.userId,
@@ -55,6 +57,7 @@ export const getMyBilling = createServerFn({ method: "POST" })
         id: `lifetime-${user.userId}`,
         status: "active",
         productName: "WumPlus Vitalício",
+        productId: planById("vitalicio").productId,
         planId: "vitalicio",
         discordUsername: user.username,
         discordUserId: user.userId,

@@ -63,7 +63,7 @@ async function waitForTicketJob(token: string, guildId: string, jobId: string) {
   return { status: "queued" as const, detail: "O bot ainda não confirmou. Atualize em instantes." };
 }
 
-export function TicketConsole({ guildId }: { guildId: string }) {
+export function TicketConsole({ guildId, initialTicket }: { guildId: string; initialTicket?: number }) {
   const sessionUser = useWumpus((state) => state.sessionUser);
   const ticketsConfig = useModule("tickets");
   const slaMinutes = Number(ticketsConfig.config.slaWarningMinutes ?? 0);
@@ -132,6 +132,7 @@ export function TicketConsole({ guildId }: { guildId: string }) {
       setRows(result);
       setSelectedId((current) => {
         if (current && result.some((row) => row.number === current)) return current;
+        if (initialTicket && result.some((row) => row.number === initialTicket)) return initialTicket;
         const firstOpen = result.find((row) => row.status !== "closed") ?? result[0];
         return firstOpen?.number ?? null;
       });
@@ -140,7 +141,7 @@ export function TicketConsole({ guildId }: { guildId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [guildId]);
+  }, [guildId, initialTicket]);
 
   useEffect(() => {
     setRows([]);

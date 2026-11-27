@@ -1,4 +1,5 @@
-import { planIdFromName, serverLimit, type PlanId } from "../lib/wumpus/catalog.ts";
+import { planIdFromName, planIdFromProductId, serverLimit, type PlanId } from "../lib/wumpus/catalog.ts";
+import { invalidateLicenseCache } from "./config.ts";
 import { configuredLifetimeSubscriptions, planForUser, type SubscriptionLite } from "../lib/wumpus/entitlements.ts";
 import { listDashboardGrants } from "../lib/wumpus/admin-store.server.ts";
 import { isPlatformOwner } from "../lib/wumpus/owner.ts";
@@ -81,8 +82,10 @@ async function loadSubscriptions(): Promise<Subscription[] | null> {
   return [
     ...rows.flatMap((raw): Subscription[] => {
     const row = asObject(raw);
-    const productName = String(asObject(row?.product)?.name ?? "");
-    const planId = planIdFromName(productName);
+    const product = asObject(row?.product);
+    const productName = String(product?.name ?? "");
+    const productId = typeof product?.id === "string" ? product.id : null;
+    const planId = planIdFromName(productName) ?? planIdFromProductId(productId);
     if (!row || !planId) return [];
     return [{
       status: String(row.status ?? ""),
@@ -143,6 +146,7 @@ export async function syncBotPlanLicenses(log: Logger): Promise<void> {
       current.updatedAt = now;
       return current;
     });
+    invalidateLicenseCache();
     if (changed) log.info("licenças de plano atualizadas", { contas: accounts.size });
   } catch (error) {
     log.warn("não foi possível atualizar as licenças com a ShardPay; mantendo o último estado conhecido", { error: String(error).slice(0, 250) });

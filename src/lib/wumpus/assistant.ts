@@ -4,7 +4,8 @@ import { z } from "zod";
 import { requireGuildFeature } from "./session-access.server";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
 import { enforceRequestLimit } from "./request-limits.server";
-import { enqueueOutbox, readBotCollection, readRuntime, updateBotCollection, type AssistantChatRecord, type OutboxJob, type SupportChatRecord } from "./runtime.server";
+import { readBotCollection, updateBotCollection, type AssistantChatRecord, type OutboxJob, type SupportChatRecord } from "./runtime.server";
+import { enqueueOutboxJob, findOutboxJob, listGuildOutbox } from "./outbox-store.server";
 
 const ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const LEGACY_SUPPORT_WAITING_NOTICE = "Em breve uma pessoa da equipe entrará em contato por aqui. Você pode continuar conversando neste chat do site.";
@@ -219,8 +220,7 @@ export const requestHumanSupport = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const session = await requireGuildFeature(data.token, data.guildId, "ai");
     enforceRequestLimit("ai-human-handoff", 3, 10 * 60_000, session.userId);
-    const existing = (await readRuntime()).outbox?.find((entry: OutboxJob) =>
-      entry.guildId === data.guildId &&
+    const existing = (await listGuildOutbox(data.guildId, 50)).find((entry: OutboxJob) =>
       entry.kind === "support_handoff" &&
       entry.actorId === session.userId &&
       entry.status === "queued");
@@ -263,7 +263,7 @@ export const requestHumanSupport = createServerFn({ method: "POST" })
       createdAt: Date.now(),
       status: "queued",
     };
-    await enqueueOutbox(job);
+    await enqueueOutboxJob(job);
     return { jobId: job.id };
   });
 
@@ -277,11 +277,8 @@ export const getHumanSupportStatus = createServerFn({ method: "POST" })
     const session = await requireGuildFeature(data.token, data.guildId, "ai");
     const chat = (await readBotCollection<SupportChatRecord>("support-chats")).find((entry) =>
       entry.id === data.jobId && entry.guildId === data.guildId && entry.requesterId === session.userId);
-    const job = (await readRuntime()).outbox?.find((entry: OutboxJob) =>
-      entry.id === data.jobId &&
-      entry.guildId === data.guildId &&
-      entry.kind === "support_handoff" &&
-      entry.actorId === session.userId);
+    const entry = await findOutboxJob(data.jobId, data.guildId);
+    const job = entry?.kind === "support_handoff" && entry.actorId === session.userId ? entry : null;
     return chat
       ? {
           status: chat.status,
@@ -379,7 +376,7 @@ export const sendHumanSupportMessage = createServerFn({ method: "POST" })
       createdAt: Date.now(),
       status: "queued",
     };
-    await enqueueOutbox(job);
+    await enqueueOutboxJob(job);
     return { jobId: job.id, messageId };
   });
 
@@ -413,7 +410,7 @@ export const rateHumanSupport = createServerFn({ method: "POST" })
       if (alreadyRated) throw new Error("Este atendimento já recebeu uma avaliação.");
       throw new Error("A avaliação fica disponível depois que o staff encerrar o atendimento.");
     }
-    await enqueueOutbox({
+    await enqueueOutboxJob({
       id: `support_rating_${randomUUID()}`,
       guildId: data.guildId,
       kind: "support_rating",

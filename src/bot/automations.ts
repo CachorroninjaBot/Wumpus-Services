@@ -227,19 +227,3 @@ async function execute(guild: Guild, request: ActionRequest): Promise<string> {
 
   throw new Error(`Acao desconhecida: ${String(request.kind)}`);
 }
-
-/** Estado atual das automacoes, para o `/config status`. */
-export async function automationsStatus(guildId: string): Promise<string> {
-  const config = await moduleConfig(guildId, "automations");
-  if (!isEnabled(config)) return "Automacoes desligadas.";
-
-  const mode = bool(config, "dryRun", false) ? "simulacao (dry-run)" : "execucao real";
-  const approval = bool(config, "requireApprovalForDestructiveActions", true) ? "sim" : "nao";
-  const limit = Math.trunc(num(config, "maxActionsPerHour", 30));
-
-  return [
-    `Modo: **${mode}**`,
-    `Aprovacao para destrutivas: **${approval}**`,
-    `Limite: **${limit}** acoes/hora`
-  ].join(" · ");
-}

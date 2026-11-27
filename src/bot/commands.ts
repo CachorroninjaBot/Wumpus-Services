@@ -20,9 +20,11 @@ import {
   Routes,
   SlashCommandBuilder,
   type RESTPostAPIApplicationCommandsJSONBody,
-  type ChatInputCommandInteraction
+  type ChatInputCommandInteraction,
+  type Guild
 } from "discord.js";
 import { guildPlan, list, loadRuntime, moduleConfig, num } from "./config.ts";
+import { readBotCollection, updateBotCollection } from "../lib/wumpus/runtime.server.ts";
 import { planAllows } from "../lib/wumpus/plan-features.ts";
 import {
   adviseConfig,
@@ -35,7 +37,7 @@ import {
 import { buildFormPanel } from "./forms.ts";
 import type { Logger } from "./logger.ts";
 import { isModAction, recordOccurrence } from "./moderation.ts";
-import { asSendable, resolveChannel, resolveRoles } from "./resolve.ts";
+import { asSendable, resolveChannel, resolveRoles, type Sendable } from "./resolve.ts";
 import { read } from "./store.ts";
 import { shiftSummary } from "./staff.ts";
 import { summarize } from "./statistics.ts";
@@ -592,6 +594,56 @@ async function handleAssistant(interaction: ChatInputCommandInteraction, log: Lo
   }
 }
 
+type PublishedPanel = {
+  guildId: string;
+  kind: "tickets" | "forms";
+  channelId: string;
+  messageId: string;
+  updatedAt: number;
+};
+
+/**
+ * Publica o painel uma vez por servidor e canal: se ja existe um painel
+ * publicado por este bot naquele canal, edita em vez de mandar outro. Repetir
+ * `/ticket` ou `/form` nao deve encher o canal de paineis duplicados.
+ */
+async function publishPanelIdempotent(
+  guild: Guild,
+  kind: PublishedPanel["kind"],
+  panel: { flags?: unknown; components?: unknown },
+  target: Sendable,
+  log: Logger,
+): Promise<"publicado" | "atualizado"> {
+  const rows = await readBotCollection<PublishedPanel>("panel-messages");
+  const existing = rows.find((row) => row.guildId === guild.id && row.kind === kind);
+  if (existing && existing.channelId === target.id && target.messages) {
+    try {
+      const message = await target.messages.fetch(existing.messageId);
+      await message.edit({ flags: panel.flags, components: panel.components } as Record<string, unknown>);
+      return "atualizado";
+    } catch {
+      log.warn("painel anterior não encontrado; publicando um novo", {
+        guildId: guild.id,
+        kind,
+        messageId: existing.messageId,
+      });
+    }
+  }
+
+  const message = await target.send({ flags: panel.flags, components: panel.components } as Record<string, unknown>);
+  await updateBotCollection<PublishedPanel>("panel-messages", (current) => [
+    ...current.filter((row) => !(row.guildId === guild.id && row.kind === kind)),
+    {
+      guildId: guild.id,
+      kind,
+      channelId: message.channelId ?? target.id,
+      messageId: message.id,
+      updatedAt: Date.now(),
+    },
+  ]);
+  return "publicado";
+}
+
 /** Despacha um comando de barra. Devolve `true` quando tratou. */
 export async function handleCommand(
   interaction: ChatInputCommandInteraction,
@@ -616,8 +668,8 @@ export async function handleCommand(
         await interaction.editReply("Não consegui publicar o painel neste canal. Escolha um canal de texto e tente novamente.");
         return true;
       }
-      await target.send(panel as never);
-      await interaction.editReply("Painel de atendimento publicado.");
+      const result = await publishPanelIdempotent(guild, "tickets", panel, target, log);
+      await interaction.editReply(`Painel de atendimento ${result}.`);
       return true;
     }
 
@@ -630,8 +682,8 @@ export async function handleCommand(
         await interaction.editReply("Não consegui publicar o painel neste canal. Escolha um canal de texto e tente novamente.");
         return true;
       }
-      await target.send(panel as never);
-      await interaction.editReply("Painel de candidaturas publicado.");
+      const result = await publishPanelIdempotent(guild, "forms", panel, target, log);
+      await interaction.editReply(`Painel de candidaturas ${result}.`);
       return true;
     }
 

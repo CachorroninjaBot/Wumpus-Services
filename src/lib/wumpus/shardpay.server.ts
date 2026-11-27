@@ -1,17 +1,20 @@
 import {
   CYCLE_DISCOUNTS,
   planIdFromName,
+  planIdFromProductId,
   plans as fallbackPlans,
   SHARD_STORE,
   checkoutUrl,
   type CatalogPlan,
   type PlanId,
 } from "./catalog";
+import { isDatabaseConfigured, readPersistentState, writePersistentState } from "./database.server";
 
 export type BillingSubscription = {
   id: string;
   status: string;
   productName: string;
+  productId: string | null;
   planId: PlanId | null;
   discordUsername: string | null;
   discordUserId: string | null;
@@ -34,6 +37,11 @@ export type BillingSnapshot = {
 };
 
 const ENDPOINT = "https://shardpay.app/api/mcp";
+const CACHE_TTL_MS = 60_000;
+const LAST_GOOD_KEY = "billing-snapshot";
+
+let cache: { snapshot: BillingSnapshot; at: number } | null = null;
+let inFlight: Promise<BillingSnapshot> | null = null;
 
 async function apiKey() {
   return process.env.SHARDPAY_API_KEY?.trim() ?? "";
@@ -101,13 +109,112 @@ function offline(): BillingSnapshot {
   };
 }
 
+function sanitizeSubscription(value: unknown): BillingSubscription | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Partial<BillingSubscription>;
+  if (typeof row.id !== "string" || typeof row.status !== "string") return null;
+  const productName = typeof row.productName === "string" ? row.productName : "Plano";
+  const productId = typeof row.productId === "string" ? row.productId : null;
+  const planId: PlanId | null =
+    row.planId === "gratuito" || row.planId === "pro" || row.planId === "vitalicio"
+      ? row.planId
+      : planIdFromName(productName) ?? planIdFromProductId(productId);
+  return {
+    id: row.id,
+    status: row.status,
+    productName,
+    productId,
+    planId,
+    discordUsername: typeof row.discordUsername === "string" ? row.discordUsername : null,
+    discordUserId: typeof row.discordUserId === "string" ? row.discordUserId : null,
+    billingCycle: typeof row.billingCycle === "string" ? row.billingCycle : "",
+    nextBillingDate: typeof row.nextBillingDate === "string" ? row.nextBillingDate : "",
+    ...(typeof row.startedAt === "string" ? { startedAt: row.startedAt } : {}),
+    ...(typeof row.periodEndsAt === "string" ? { periodEndsAt: row.periodEndsAt } : {}),
+    ...(typeof row.canceledAt === "string" ? { canceledAt: row.canceledAt } : {}),
+    priceCents: typeof row.priceCents === "number" ? row.priceCents : 0,
+  };
+}
+
+function sanitizeSnapshot(value: unknown): BillingSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Partial<BillingSnapshot>;
+  if (!Array.isArray(row.plans) || !Array.isArray(row.subscriptions)) return null;
+  const plans = row.plans.filter(
+    (plan): plan is CatalogPlan =>
+      Boolean(plan) && typeof plan === "object" && typeof (plan as CatalogPlan).id === "string",
+  );
+  if (!plans.length) return null;
+  return {
+    ok: true,
+    storeName: SHARD_STORE.name,
+    storeUrl: SHARD_STORE.url,
+    plans,
+    subscriptions: row.subscriptions.flatMap((sub) => {
+      const sanitized = sanitizeSubscription(sub);
+      return sanitized ? [sanitized] : [];
+    }),
+    discounts: CYCLE_DISCOUNTS.map((cycle) => {
+      const found = Array.isArray(row.discounts)
+        ? row.discounts.find((item) => item && item.label === cycle.label && typeof item.discount === "number")
+        : undefined;
+      return { label: cycle.label, discount: found?.discount ?? cycle.discount };
+    }),
+  };
+}
+
+/**
+ * Ultimo retrato bom da ShardPay, gravado quando a API respondeu.
+ * Serve para nao rebaixar assinantes pagos a Gratuito durante uma queda.
+ */
+async function readLastGood(): Promise<BillingSnapshot | null> {
+  if (!isDatabaseConfigured()) return null;
+  try {
+    return sanitizeSnapshot(await readPersistentState<unknown>(LAST_GOOD_KEY));
+  } catch {
+    return null;
+  }
+}
+
+async function persistLastGood(snapshot: BillingSnapshot): Promise<void> {
+  if (!isDatabaseConfigured()) return;
+  try {
+    await writePersistentState(LAST_GOOD_KEY, snapshot);
+  } catch {
+    // Melhor esforco: o fallback e uma rede de seguranca, nao um requisito.
+  }
+}
+
 /**
  * Le assinaturas e planos da ShardPay. Funcao plana para que o handler de
  * sessao possa chamar sem aninhar `createServerFn`.
  */
-export async function loadBilling(): Promise<BillingSnapshot> {
+export async function loadBilling(force = false): Promise<BillingSnapshot> {
+  if (!force && cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.snapshot;
+  if (!force && inFlight) return inFlight;
+
+  const pending = fetchBilling()
+    .then((snapshot) => {
+      // Falhas tambem entram no cache curto: com a ShardPay fora do ar,
+      // cada checagem de acesso nao pode esperar o timeout de 12 s de novo.
+      cache = { snapshot, at: Date.now() };
+      if (snapshot.ok) void persistLastGood(snapshot);
+      return snapshot;
+    })
+    .finally(() => {
+      if (inFlight === pending) inFlight = null;
+    });
+  if (!force) inFlight = pending;
+  return pending;
+}
+
+async function fetchBilling(): Promise<BillingSnapshot> {
   const key = await apiKey();
-  if (!key) return { ...offline(), error: "Chave da ShardPay não configurada neste ambiente." };
+  if (!key) {
+    const error = "Chave da ShardPay não configurada neste ambiente.";
+    const lastGood = await readLastGood();
+    return lastGood ? { ...lastGood, ok: false, error } : { ...offline(), error };
+  }
   try {
     let { session } = await mcpCall(key, null, {
       jsonrpc: "2.0",
@@ -142,8 +249,9 @@ export async function loadBilling(): Promise<BillingSnapshot> {
     const live = new Map<PlanId, CatalogPlan>();
     for (const product of products) {
       const name = typeof product.name === "string" ? product.name : "";
-      const id = planIdFromName(name);
-      if (!id || typeof product.id !== "string") continue;
+      if (typeof product.id !== "string") continue;
+      const id = planIdFromName(name) ?? planIdFromProductId(product.id);
+      if (!id) continue;
       const cents = typeof product.price_cents === "number" ? product.price_cents : 0;
       const base = fallbackPlans.find((p) => p.id === id);
       const recurring = Boolean(product.recurring_plan_id) || id !== "vitalicio";
@@ -171,13 +279,19 @@ export async function loadBilling(): Promise<BillingSnapshot> {
 
     const list = (subsRaw as { subscriptions?: Array<Record<string, unknown>> } | null)?.subscriptions ?? [];
     const subscriptions: BillingSubscription[] = list.map((sub) => {
-      const product = (sub.product ?? {}) as { name?: string };
+      const product = (sub.product ?? {}) as { name?: string; id?: string };
       const productName = product.name ?? "Plano";
+      const productId =
+        typeof product.id === "string" ? product.id
+          : typeof sub.product_id === "string" ? sub.product_id
+            : typeof sub.productId === "string" ? sub.productId
+              : null;
       return {
         id: String(sub.id ?? ""),
         status: String(sub.status ?? ""),
         productName,
-        planId: planIdFromName(productName),
+        productId,
+        planId: planIdFromName(productName) ?? planIdFromProductId(productId),
         discordUsername: typeof sub.discord_username === "string" ? sub.discord_username : null,
         discordUserId: typeof sub.discord_user_id === "string" ? sub.discord_user_id : typeof sub.discordUserId === "string" ? sub.discordUserId : null,
         billingCycle: String(sub.billing_cycle ?? ""),
@@ -198,7 +312,16 @@ export async function loadBilling(): Promise<BillingSnapshot> {
       discounts,
     };
   } catch (error) {
-    return { ...offline(), error: error instanceof Error ? error.message : "Falha ao falar com a ShardPay." };
+    const message = error instanceof Error ? error.message : "Falha ao falar com a ShardPay.";
+    const lastGood = await readLastGood();
+    if (lastGood) {
+      return {
+        ...lastGood,
+        ok: false,
+        error: `${message} Usando o último estado conhecido das assinaturas.`,
+      };
+    }
+    return { ...offline(), error: message };
   }
 }
 

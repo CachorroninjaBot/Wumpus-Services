@@ -13,7 +13,8 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { enqueueOutbox, mutateRuntime, readBotCollection, readRuntime, updateBotCollection, type BotFormRecord, type BotStaffRosterSnapshot, type BotTicketMessage, type BotTicketRecord, type KnowledgeFaqSuggestion, type OutboxJob, type SecurityAuditRecord } from "./runtime.server";
+import { mutateRuntime, readBotCollection, readRuntime, updateBotCollection, type BotFormRecord, type BotStaffRosterSnapshot, type BotTicketMessage, type BotTicketRecord, type KnowledgeFaqSuggestion, type OutboxJob, type SecurityAuditRecord } from "./runtime.server";
+import { enqueueOutboxJob, findOutboxJob, listGuildOutbox } from "./outbox-store.server";
 import { requireGuildAccess } from "./session-access.server";
 import { publishInputSchema } from "./runtime-validation";
 import { SESSION_TOKEN_MAX_LENGTH } from "./session-token";
@@ -331,7 +332,7 @@ export const requestPanelPublish = createServerFn({ method: "POST" })
       status: "queued"
     };
 
-    await enqueueOutbox(job);
+    await enqueueOutboxJob(job);
     return { ok: true as const, jobId: job.id };
   });
 
@@ -341,7 +342,7 @@ export const requestSecurityRestore = createServerFn({ method: "POST" })
     const session = await requireGuildAccess(data.token, data.guildId);
     enforceRequestLimit("security-action", 10, 60_000, session.userId);
     const job: OutboxJob = { id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, guildId: data.guildId, kind: "ticket_action", target: "security-verification", channelRef: "", action: "security_restore", createdAt: Date.now(), status: "queued" };
-    await enqueueOutbox(job);
+    await enqueueOutboxJob(job);
     return { ok: true as const, jobId: job.id };
   });
 
@@ -351,7 +352,7 @@ export const requestSecurityLockdown = createServerFn({ method: "POST" })
     const session = await requireGuildAccess(data.token, data.guildId);
     enforceRequestLimit("security-action", 10, 60_000, session.userId);
     const job: OutboxJob = { id: `out_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, guildId: data.guildId, kind: "ticket_action", target: "security", channelRef: "", action: data.enabled ? "security_lockdown_on" : "security_lockdown_off", createdAt: Date.now(), status: "queued" };
-    await enqueueOutbox(job);
+    await enqueueOutboxJob(job);
     return { ok: true as const, jobId: job.id };
   });
 
@@ -363,7 +364,8 @@ export const getGuildSecurityActionStatus = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
-    const job = (await readRuntime()).outbox?.find((entry) => entry.id === data.jobId && entry.guildId === data.guildId && (entry.target === "security" || entry.target === "security-verification"));
+    const entry = await findOutboxJob(data.jobId, data.guildId);
+    const job = entry && (entry.target === "security" || entry.target === "security-verification") ? entry : null;
     return job ? { status: job.status, detail: job.detail ?? null, at: job.at ?? null } : { status: "missing" as const, detail: null, at: null };
   });
 
@@ -395,7 +397,7 @@ export const requestSecurityAudit = createServerFn({ method: "POST" })
       createdAt: Date.now(),
       status: "queued",
     };
-    await enqueueOutbox(job);
+    await enqueueOutboxJob(job);
     return { ok: true as const, jobId: job.id };
   });
 
@@ -446,7 +448,7 @@ export const requestSecurityFix = createServerFn({ method: "POST" })
       createdAt: Date.now(),
       status: "queued",
     };
-    await enqueueOutbox(job);
+    await enqueueOutboxJob(job);
     return { ok: true as const, jobId: job.id };
   });
 
@@ -479,11 +481,10 @@ export const getPublishStatus = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }): Promise<PublishStatus[]> => {
     await requireGuildAccess(data.token, data.guildId);
-    const current = await readRuntime();
 
-    return (current.outbox ?? [])
-      .filter((job) => job.guildId === data.guildId && job.kind === "panel")
-      .slice(-20)
+    return (await listGuildOutbox(data.guildId, 100))
+      .filter((job) => job.kind === "panel")
+      .slice(0, 20)
       .map((job) => ({
         id: job.id,
         target: job.target,
@@ -604,7 +605,7 @@ export const getGuildStaffMonitoring = createServerFn({ method: "POST" })
     let rosterDetail: string | null = null;
 
     if (configuredRoleRefs.length && !rosterFresh) {
-      const rosterJobs = (runtime.outbox ?? []).filter((job) => job.guildId === data.guildId && job.kind === "staff_roster");
+      const rosterJobs = (await listGuildOutbox(data.guildId, 50)).filter((job) => job.kind === "staff_roster");
       const pendingJob = rosterJobs.some((job) => job.status === "queued");
       const recentFailure = [...rosterJobs]
         .filter((job) => job.status === "failed" && job.at && now - job.at < 60_000)
@@ -624,7 +625,7 @@ export const getGuildStaffMonitoring = createServerFn({ method: "POST" })
           createdAt: now,
           status: "queued",
         };
-        await enqueueOutbox(job);
+        await enqueueOutboxJob(job);
       }
     }
 
@@ -755,7 +756,7 @@ export const requestFormReview = createServerFn({ method: "POST" })
       createdAt: Date.now(),
       status: "queued",
     };
-    await enqueueOutbox(job);
+    await enqueueOutboxJob(job);
     return { jobId: job.id };
   });
 
@@ -767,8 +768,8 @@ export const getFormReviewStatus = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
-    const job = (await readRuntime()).outbox?.find((entry) =>
-      entry.id === data.jobId && entry.guildId === data.guildId && entry.kind === "form_action");
+    const entry = await findOutboxJob(data.jobId, data.guildId);
+    const job = entry?.kind === "form_action" ? entry : null;
     return job ? { status: job.status, detail: job.detail ?? null } : { status: "missing" as const, detail: null };
   });
 
@@ -809,7 +810,7 @@ export const requestTicketAction = createServerFn({ method: "POST" })
       createdAt: Date.now(),
       status: "queued",
     };
-    await enqueueOutbox(job);
+    await enqueueOutboxJob(job);
     return { jobId: job.id };
   });
 
@@ -821,8 +822,8 @@ export const getTicketActionStatus = createServerFn({ method: "POST" })
   }).strict().parse(input))
   .handler(async ({ data }) => {
     await requireGuildAccess(data.token, data.guildId);
-    const job = (await readRuntime()).outbox?.find((entry) =>
-      entry.id === data.jobId && entry.guildId === data.guildId && entry.kind === "ticket_action");
+    const entry = await findOutboxJob(data.jobId, data.guildId);
+    const job = entry?.kind === "ticket_action" ? entry : null;
     return job ? { status: job.status, detail: job.detail ?? null } : { status: "missing" as const, detail: null };
   });
 

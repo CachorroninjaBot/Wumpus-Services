@@ -49,6 +49,11 @@ export async function loadRuntime(force = false): Promise<Runtime> {
   }
 }
 
+/** Descarta o cache curto depois que o proprio bot regrava as licencas. */
+export function invalidateLicenseCache(): void {
+  licenseCache = null;
+}
+
 async function loadLicenses(force = false): Promise<Record<string, GuildLicense>> {
   if (!force && licenseCache && Date.now() - licenseCache.at < TTL_MS) return licenseCache.byGuild;
   if (!force && licensesPending) return licensesPending;
@@ -98,13 +103,6 @@ export async function guildEntitlement(guildId: string): Promise<GuildLicense | 
 export async function guildEntitlementStatus(guildId: string): Promise<"active" | "inactive" | null> {
   const entitlement = (await loadLicenses())[guildId];
   return entitlement && (entitlement.status === "active" || entitlement.status === "inactive") ? entitlement.status : null;
-}
-
-/** `true` quando o painel ja publicou alguma coisa para esse servidor. */
-export async function hasPublishedConfig(guildId: string): Promise<boolean> {
-  const runtime = await loadRuntime();
-  const guild = runtime.guilds?.[guildId];
-  return Boolean((await guildEntitlement(guildId)) && guild && Object.keys(guild).length > 0);
 }
 
 export function str(config: ModuleConfig | null, key: string, fallback = ""): string {

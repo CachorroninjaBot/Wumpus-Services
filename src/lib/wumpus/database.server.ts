@@ -18,6 +18,15 @@ function getPool(): Pool {
   return pool;
 }
 
+/** Consulta direta para tabelas próprias (fora do chave-valor `wumpus_state`). */
+export async function queryDatabase<T = Record<string, unknown>>(
+  text: string,
+  values: unknown[] = [],
+): Promise<T[]> {
+  const result = await getPool().query(text, values);
+  return result.rows as T[];
+}
+
 export async function readPersistentState<T>(key: string): Promise<T | null> {
   const result = await getPool().query<{ value: T }>(
     "SELECT value FROM wumpus_state WHERE key = $1",

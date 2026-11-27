@@ -129,6 +129,12 @@ export type Sendable = {
   /** Aceita texto simples ou um objeto de mensagem (com components/flags). */
   send: (options: string | Record<string, unknown>) => Promise<SendableMessage>;
   sendTyping?: () => Promise<void>;
+  /** Presente em canais de texto; usado para editar painéis já publicados. */
+  messages?: {
+    fetch: (messageId: string) => Promise<{
+      edit: (options: Record<string, unknown>) => Promise<unknown>;
+    }>;
+  };
 };
 
 export function asSendable(channel: unknown): Sendable | null {

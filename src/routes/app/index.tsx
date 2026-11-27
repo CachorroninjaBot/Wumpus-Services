@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowRight, AlertTriangle, CheckCircle2, Clock3, ClipboardCheck, Ticket, Shield } from "lucide-react";
+import { ArrowRight, AlertTriangle, CheckCircle2, Clock3, ClipboardCheck, Ticket, Shield } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";

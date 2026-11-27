@@ -4,7 +4,7 @@ import { BrandMark } from "@/components/brand";
 import { DiscordPanel } from "@/components/discord-panel";
 import { Button } from "@/components/ui/button";
 import { brand, plans as fallbackPlans } from "@/lib/wumpus/brand";
-import { SHARD_STORE } from "@/lib/wumpus/catalog";
+import { CYCLE_DISCOUNTS, SHARD_STORE } from "@/lib/wumpus/catalog";
 import { useBilling } from "@/lib/wumpus/use-billing";
 import { getPublicBotHealth, type PublicBotHealth } from "@/lib/wumpus/health";
 import { useEffect, useState } from "react";
@@ -48,11 +48,10 @@ function Home() {
   const [health, setHealth] = useState<PublicBotHealth | null>(null);
   const [healthError, setHealthError] = useState(false);
   const plans = billing.data?.plans?.length ? billing.data.plans : fallbackPlans;
-  const discounts = billing.data?.discounts ?? [
-    { label: "trimestral", discount: 5 },
-    { label: "semestral", discount: 10 },
-    { label: "anual", discount: 18 },
-  ];
+  const discounts = billing.data?.discounts ?? CYCLE_DISCOUNTS.map((cycle) => ({
+    label: cycle.label,
+    discount: cycle.discount,
+  }));
 
   useEffect(() => {
     let active = true;

@@ -17,7 +17,14 @@ import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { NumberField } from "@/components/protect/helpers";
 
-export const Route = createFileRoute("/app/tickets")({ component: TicketsPage });
+export const Route = createFileRoute("/app/tickets")({
+  validateSearch: (search: Record<string, unknown>): { ticket?: number } => {
+    const raw = search.ticket;
+    const parsed = typeof raw === "string" ? Number(raw) : typeof raw === "number" ? raw : Number.NaN;
+    return Number.isInteger(parsed) && parsed > 0 ? { ticket: parsed } : {};
+  },
+  component: TicketsPage,
+});
 
 const discordButtonStyles = [
   { value: 1, label: "Azul", preview: "primary" as const },
@@ -90,6 +97,7 @@ const ticketTemplates: Record<string, { label: string; description: string; conf
 };
 
 function TicketsPage() {
+  const { ticket } = Route.useSearch();
   const gid = useWumpus((s) => s.activeGuildId);
   const { busy: pubBusy, publish: publishPanel } = usePublishPanel(gid);
   const guild = useActiveGuild();
@@ -148,7 +156,7 @@ function TicketsPage() {
   const [templateNotice, setTemplateNotice] = useState("");
   const [previewMode, setPreviewMode] = useState<"panel" | "modal">("panel");
   const [dirty, setDirty] = useState(false);
-  const [activeView, setActiveView] = useState<"panel" | "archive">("panel");
+  const [activeView, setActiveView] = useState<"panel" | "archive">(ticket ? "archive" : "panel");
   const [pubNotice, setPubNotice] = useState<string | null>(null);
   const [pubTone, setPubTone] = useState<"ok" | "error" | "neutral">("neutral");
 
@@ -202,7 +210,7 @@ function TicketsPage() {
       </div>
 
       {activeView === "archive" ? (
-        <TicketConsole guildId={gid} />
+        <TicketConsole guildId={gid} initialTicket={ticket} />
       ) : (
         <div className="space-y-8">
           <div className="flex flex-wrap items-start justify-between gap-3">
