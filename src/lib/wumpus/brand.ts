@@ -9,11 +9,12 @@ export const brand = {
   version: "2.0.0",
 } as const;
 
-export type ModuleGroupId = "attend" | "protect" | "team" | "intel";
+export type ModuleGroupId = "attend" | "configure" | "protect" | "team" | "intel";
 
 export type NavId =
   | "overview"
   | "tickets"
+  | "config"
   | "forms"
   | "staff"
   | "moderation"
@@ -31,8 +32,9 @@ export const navItems: ReadonlyArray<{
   path: string;
 }> = [
   { id: "overview", label: "Visão geral", group: "home", hint: "Saúde, fila e o que precisa de você agora.", path: "/app" },
-  { id: "tickets", label: "Atendimento", group: "attend", hint: "Tickets, SLA, transcrição e feedback.", path: "/app/tickets" },
+  { id: "tickets", label: "Atendimento", group: "attend", hint: "Fila, conversa e contexto de cada ticket.", path: "/app/tickets" },
   { id: "forms", label: "Formulários", group: "attend", hint: "Crie formulários e revise cada resposta.", path: "/app/forms" },
+  { id: "config", label: "Configurações", group: "configure", hint: "Tudo o que o bot faz no seu servidor, num só lugar.", path: "/app/config" },
   { id: "staff", label: "Equipe", group: "team", hint: "Plantão, carga e tempo de resposta.", path: "/app/staff" },
   { id: "moderation", label: "Moderação", group: "protect", hint: "Advertir, silenciar, expulsar, banir.", path: "/app/moderation" },
   { id: "protect", label: "Proteção", group: "protect", hint: "AutoMod, anti-raid e presets.", path: "/app/protect" },
@@ -44,6 +46,7 @@ export const navItems: ReadonlyArray<{
 
 export const groupLabels: Record<ModuleGroupId, string> = {
   attend: "Atender",
+  configure: "Configurar",
   protect: "Proteger",
   team: "Gerenciar",
   intel: "Analisar",

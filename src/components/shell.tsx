@@ -14,6 +14,7 @@ import {
   Settings,
   Shield,
   ShieldAlert,
+  SlidersHorizontal,
   Sun,
   Ticket,
   Users,
@@ -37,6 +38,7 @@ const isActivityClient = createClientOnlyFn(isDiscordActivityContext);
 const iconByNav: Record<NavId, typeof LayoutDashboard> = {
   overview: LayoutDashboard,
   tickets: Ticket,
+  config: SlidersHorizontal,
   forms: ClipboardCheck,
   staff: Users,
   moderation: ShieldAlert,
@@ -50,6 +52,7 @@ const iconByNav: Record<NavId, typeof LayoutDashboard> = {
 function useActiveNav(): NavId {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   if (pathname.startsWith("/app/tickets")) return "tickets";
+  if (pathname.startsWith("/app/config")) return "config";
   if (pathname.startsWith("/app/forms")) return "forms";
   if (pathname.startsWith("/app/staff")) return "staff";
   if (pathname.startsWith("/app/moderation")) return "moderation";
@@ -211,7 +214,7 @@ function ServerRail() {
 
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const active = useActiveNav();
-  const groups: Array<ModuleGroupId | "home"> = ["home", "attend", "protect", "team", "intel"];
+  const groups: Array<ModuleGroupId | "home"> = ["home", "attend", "configure", "protect", "team", "intel"];
   return (
     <nav aria-label="Navegação principal" className="flex flex-col gap-5 pb-4">
       {groups.map((group) => {
